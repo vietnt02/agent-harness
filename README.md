@@ -1,4 +1,4 @@
-# claude-agy-harness
+# agent-harness
 
 Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`), hỗ trợ thiết lập môi trường phát triển nhất quán giữa các thành viên.
 
@@ -15,8 +15,8 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
 
 1. Clone repo:
    ```bash
-   git clone <repo-url> claude-agy-harness
-   cd claude-agy-harness
+   git clone <repo-url> agent-harness
+   cd agent-harness
    ```
 2. Chạy thử trước để xem các thay đổi dự kiến (không tác động hệ thống):
    ```bash

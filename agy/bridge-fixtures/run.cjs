@@ -16,7 +16,10 @@ const os = require('os');
 const path = require('path');
 
 const BRIDGE = path.join(__dirname, '..', 'claude-hook-bridge.cjs');
-const STAMP = path.join(__dirname, 'tested-versions.json');
+// Per-machine files live beside the installed copy (~/.gemini/config/bridge-fixtures), not in the
+// repo this file may be symlinked from: Node resolves a symlinked script to its real path.
+const LOCAL_DIR = path.join(os.homedir(), '.gemini', 'config', 'bridge-fixtures');
+const STAMP = path.join(LOCAL_DIR, 'tested-versions.json');
 const RUNTIMES = path.join(os.homedir(), 'Library', 'Application Support', 'orca', 'agent-runtimes', 'antigravity');
 
 // The agy versions whose payloads reach the bridge: the CLI on PATH and Orca's chat runtimes.
@@ -108,8 +111,8 @@ for (const [name, mode, toolCall, want, extra] of cases) {
 // above the temp dir. Reading a sub-repo's AGENTS.md from a session whose workspace is outside the
 // umbrella (view_file has no Cwd) must count, so a later command in that sub-repo passes.
 // Path of an umbrella's nap-context-repo-con.cjs, per machine: local.json `{"napHook": "<abs path>"}`
-// (git-ignored). Without one, the two umbrella cases are skipped.
-const NAP = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'local.json'), 'utf8')).napHook || ''; } catch (_) { return ''; } })();
+// (machine-local). Without one, the two umbrella cases are skipped.
+const NAP = (() => { try { return JSON.parse(fs.readFileSync(path.join(LOCAL_DIR, 'local.json'), 'utf8')).napHook || ''; } catch (_) { return ''; } })();
 if (NAP && fs.existsSync(NAP)) {
   const umbrella = path.join(root, 'umbrella');
   const repo = path.join(umbrella, 'repos', 'systems', 'demo');
