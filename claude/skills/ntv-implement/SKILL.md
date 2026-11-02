@@ -7,12 +7,19 @@ description: "How Claude does execution work itself: before Claude itself edits 
 
 ## Who works
 
-- Execution (any change to a repo, a live system such as a job run, n8n, Lark or Power BI, or a
-  document) goes to Orca workers (`CLAUDE.md` § Delegation). Claude does it only: in `~/.claude`
+- Execution with a merge gate still ahead of production (a change to a repo or a document) goes
+  to Orca workers (`CLAUDE.md` § Delegation). A change with no gate after it (a write to Lark, n8n
+  or a DB, a real job run, a send, a hand publish such as Power BI) is Claude's: a worker only
+  scouts, builds the command and runs it `--dry-run`; Claude reads that output, runs it for real
+  and reads the result back. `hooks/dispatch-split-guard.cjs` blocks a worker spec or message
+  holding a Lark or n8n write; it does not see SQL, curl or a job trigger. Claude does a gated change itself only: in `~/.claude`
   (rules, skills, hooks: only an agent on this harness judges them); the specs, plans and
   knowledge docs a coordinator writes (`plans/`, `knowledge/` in a repo); a change to an existing
   value or parameter with no new logic; work Viet names Claude for; a step needing a tool only
   this session holds (an MCP connector, a login).
+- Before a production write, `git grep` the field or table across every repo that reads it: the
+  ask names each reader (workflow, its schedule, the source it compares) with one consequence line;
+  a reader comparing against a mirror that syncs later is paused, or both sides are written together.
 - Before the first edit in a repo, the session note's `## Đang có hiệu lực` holds one line per
   repo: `Người làm: Claude — <repo folder> — "<Viet's sentence naming Claude>"` or `— <file>:
   <key> <old>→<new>`. `hooks/worker-default-guard.cjs` blocks Edit/Write into a git repo outside
@@ -72,5 +79,6 @@ description: "How Claude does execution work itself: before Claude itself edits 
 
 ## Ship
 
-Push the branch, open the PR and report its link (tier A). A branch that already had a PR:
+Push the branch, open the PR and report its link (tier A). Before merging a PR that deploys, read
+the whole diff from your last read to the SHA being merged and run the repo's checks on that SHA. A branch that already had a PR:
 `CLAUDE.md` § Irreversible actions.
