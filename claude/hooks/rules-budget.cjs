@@ -14,6 +14,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { expandHome, samePath } = require('./lib/platform.cjs');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const MINE_DIR = path.join(CLAUDE_DIR, 'rules', 'mine');
@@ -72,9 +73,9 @@ function longFreshNotes(sessionId, now = Date.now()) {
 }
 
 const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
-const isMine = (f) => path.dirname(f) === MINE_DIR && f.endsWith('.md');
+const isMine = (f) => samePath(path.dirname(f), MINE_DIR) && f.endsWith('.md');
 // The note itself (session-notes/<slug>/<name>.md), not a file kept in a note's `<name>-files/` folder.
-const isNote = (f) => path.dirname(path.dirname(f)) === NOTES_DIR && f.endsWith('.md');
+const isNote = (f) => samePath(path.dirname(path.dirname(f)), NOTES_DIR) && f.endsWith('.md');
 
 function ruleFiles() {
   const mine = fs.existsSync(MINE_DIR) ? fs.readdirSync(MINE_DIR).filter((f) => f.endsWith('.md')) : [];
@@ -107,18 +108,21 @@ function problem(file, current, after) {
         '"## Resume" and folds its other sections into the first three.'
       : null;
   }
-  if (file !== CLAUDE_MD && !isMine(file)) return null;
-  const budget = CHAR_BUDGETS[file] ?? NEW_MINE_FILE_CHARS;
+  if (!samePath(file, CLAUDE_MD) && !isMine(file)) return null;
+  const budget = (Object.entries(CHAR_BUDGETS).find(([k]) => samePath(k, file))?.[1]) ?? NEW_MINE_FILE_CHARS;
   if (after.length > budget && after.length > current.length) {
     return `${name} would grow to ${after.length} chars (budget ${budget}, now ${current.length}).`;
   }
-  const others = ruleFiles().filter((f) => f !== file).reduce((n, f) => n + read(f).length, 0);
+  const others = ruleFiles().filter((f) => !samePath(f, file)).reduce((n, f) => n + read(f).length, 0);
   const [totalBefore, totalAfter] = [others + current.length, others + after.length];
   if (totalAfter > TOTAL_CHARS && totalAfter > totalBefore) {
     return `CLAUDE.md + rules/mine would grow to ${totalAfter} chars (budget ${TOTAL_CHARS}, now ${totalBefore}).`;
   }
   return null;
 }
+
+module.exports = { problem, isMine, isNote, ruleFiles, CHAR_BUDGETS, TOTAL_CHARS };
+if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
@@ -145,7 +149,7 @@ process.stdin.on('end', () => {
       process.exit(0);
     }
     if (!['Edit', 'Write', 'MultiEdit'].includes(tool) || !input.file_path) process.exit(0);
-    const file = path.resolve(input.file_path.replace(/^~(?=\/)/, os.homedir()));
+    const file = path.resolve(expandHome(input.file_path));
     const current = read(file);
     const why = problem(file, current, contentAfter(current, tool, input));
     if (why) {

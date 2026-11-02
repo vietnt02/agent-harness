@@ -92,6 +92,9 @@ function readNote(file) {
   return { text, head };
 }
 
+module.exports = { overCapView, readNote, cutLines };
+if (require.main !== module) return;
+
 try {
   const data = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
   const id = data.session_id || '';

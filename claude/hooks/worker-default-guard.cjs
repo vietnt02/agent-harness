@@ -18,6 +18,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { expandHome, toSlash, samePath } = require('./lib/platform.cjs');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const NOTES_DIR = path.join(CLAUDE_DIR, 'session-notes');
@@ -36,7 +37,14 @@ function realPath(file) {
   return path.join(fs.realpathSync(dir), path.relative(dir, file));
 }
 
-const inside = (file, dir) => file === dir || file.startsWith(dir + path.sep);
+function inside(file, dir) {
+  if (process.platform === 'win32') {
+    const f = path.resolve(file).toLowerCase();
+    const d = path.resolve(dir).toLowerCase();
+    return f === d || f.startsWith(d + path.sep) || f.startsWith(d + '/');
+  }
+  return file === dir || file.startsWith(dir + path.sep);
+}
 const clean = (s) => s.normalize('NFC').replace(/\r\n?/g, '\n');
 
 // { root, names } for the repo holding `file`: names are its folder and, for a linked worktree,
@@ -129,7 +137,7 @@ function claimed(lines, repo, transcript) {
     const m = line.match(ROLE_RE);
     if (!m) continue;
     const [name, ...rest] = m[1].split(/\s+[—–-]\s+/);
-    if (!repo.names.has(name.trim().replace(/^`|`$/g, '').replace(/\/$/, '').split('/').pop())) continue;
+    if (!repo.names.has(toSlash(name.trim().replace(/^`|`$/g, '')).replace(/\/$/, '').split('/').pop())) continue;
     const evidence = rest.join(' — ');
     const q = evidence.match(QUOTE_RE);
     if (q) {
@@ -148,11 +156,11 @@ function problem(data, notesDir = NOTES_DIR) {
   const input = data.tool_input || {};
   const target = input.file_path || input.notebook_path;
   if (!target || !data.session_id) return '';
-  const file = path.resolve(data.cwd || process.cwd(), target.replace(/^~(?=\/|$)/, os.homedir()));
+  const file = path.resolve(data.cwd || process.cwd(), expandHome(target));
   if (inside(file, CLAUDE_DIR)) return '';
   const repo = repoOf(file);
   if (!repo) return '';
-  const rel = path.relative(fs.realpathSync(repo.root), realPath(file));
+  const rel = toSlash(path.relative(fs.realpathSync(repo.root), realPath(file)));
   if (/^(plans|knowledge)\//.test(rel) && rel.endsWith('.md')) return '';
   if (claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
   if (isWorker(data.transcript_path)) return '';
@@ -166,19 +174,18 @@ function problem(data, notesDir = NOTES_DIR) {
   );
 }
 
-if (require.main === module) {
-  let raw = '';
-  process.stdin.on('data', (c) => (raw += c));
-  process.stdin.on('end', () => {
-    try {
-      const why = problem(JSON.parse(raw));
-      if (why) {
-        process.stderr.write(`worker-default-guard: ${why}\n`);
-        process.exit(2);
-      }
-    } catch (_) { /* fail-open */ }
-    process.exit(0);
-  });
-}
+module.exports = { problem, inside, realPath, repoOf, claimed, isWorker, liveLines, userTexts };
+if (require.main !== module) return;
 
-module.exports = { problem, isWorker, liveLines, userTexts };
+let raw = '';
+process.stdin.on('data', (c) => (raw += c));
+process.stdin.on('end', () => {
+  try {
+    const why = problem(JSON.parse(raw));
+    if (why) {
+      process.stderr.write(`worker-default-guard: ${why}\n`);
+      process.exit(2);
+    }
+  } catch (_) { /* fail-open */ }
+  process.exit(0);
+});
