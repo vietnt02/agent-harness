@@ -1,0 +1,258 @@
+#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+function parseArgs() {
+  const args = process.argv.slice(2);
+  let homeDir = process.env.HOME || '';
+  let nodePath = process.execPath;
+  let dryRun = false;
+  let backupDir = '';
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--home') {
+      homeDir = args[++i];
+    } else if (arg.startsWith('--home=')) {
+      homeDir = arg.slice(7);
+    } else if (arg === '--node') {
+      nodePath = args[++i];
+    } else if (arg.startsWith('--node=')) {
+      nodePath = arg.slice(7);
+    } else if (arg === '--dry-run') {
+      dryRun = true;
+    } else if (arg === '--backup-dir') {
+      backupDir = args[++i];
+    } else if (arg.startsWith('--backup-dir=')) {
+      backupDir = arg.slice(13);
+    } else if (arg === '-h' || arg === '--help') {
+      console.log('Usage: node merge-hooks.cjs [--home <dir>] [--node <path>] [--dry-run] [--backup-dir <dir>]');
+      process.exit(0);
+    }
+  }
+
+  if (!homeDir) {
+    console.error('Lỗi: Cần chỉ định --home hoặc biến môi trường HOME.');
+    process.exit(1);
+  }
+
+  homeDir = path.resolve(homeDir);
+  nodePath = path.resolve(nodePath);
+
+  if (!backupDir) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date();
+    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    backupDir = path.join(homeDir, '.claude', 'backups', `harness-install-${ts}`);
+  } else {
+    backupDir = path.resolve(backupDir);
+  }
+
+  return { homeDir, nodePath, dryRun, backupDir };
+}
+
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a === null || typeof a !== 'object' || b === null || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+function replacePlaceholders(content, homeDir, nodePath) {
+  return content.split('{HOME}').join(homeDir).split('{NODE}').join(nodePath);
+}
+
+function main() {
+  const { homeDir, nodePath, dryRun, backupDir } = parseArgs();
+  const repoDir = path.resolve(__dirname, '..');
+
+  const claudeSharedPath = path.join(repoDir, 'settings', 'claude-settings.shared.json');
+  const agySharedPath = path.join(repoDir, 'settings', 'agy-hooks.shared.json');
+
+  if (!fs.existsSync(claudeSharedPath)) {
+    console.error(`Lỗi: Không tìm thấy file shared: ${claudeSharedPath}`);
+    process.exit(1);
+  }
+  if (!fs.existsSync(agySharedPath)) {
+    console.error(`Lỗi: Không tìm thấy file shared: ${agySharedPath}`);
+    process.exit(1);
+  }
+
+  const rawClaudeShared = fs.readFileSync(claudeSharedPath, 'utf8');
+  const rawAgyShared = fs.readFileSync(agySharedPath, 'utf8');
+
+  const replacedClaudeShared = replacePlaceholders(rawClaudeShared, homeDir, nodePath);
+  const replacedAgyShared = replacePlaceholders(rawAgyShared, homeDir, nodePath);
+
+  let sharedClaudeObj;
+  let sharedAgyObj;
+  try {
+    sharedClaudeObj = JSON.parse(replacedClaudeShared);
+  } catch (err) {
+    console.error(`Lỗi: Parse JSON thất bại cho ${claudeSharedPath}: ${err.message}`);
+    process.exit(1);
+  }
+  try {
+    sharedAgyObj = JSON.parse(replacedAgyShared);
+  } catch (err) {
+    console.error(`Lỗi: Parse JSON thất bại cho ${agySharedPath}: ${err.message}`);
+    process.exit(1);
+  }
+
+  // --- 1. Claude Settings Merge ---
+  const claudeSettingsPath = path.join(homeDir, '.claude', 'settings.json');
+  let currentClaudeSettings = {};
+  let claudeFileExisted = false;
+
+  if (fs.existsSync(claudeSettingsPath)) {
+    claudeFileExisted = true;
+    try {
+      const raw = fs.readFileSync(claudeSettingsPath, 'utf8');
+      currentClaudeSettings = JSON.parse(raw);
+    } catch (err) {
+      console.error(`Lỗi: Không thể parse JSON từ ${claudeSettingsPath}: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  if (!currentClaudeSettings || typeof currentClaudeSettings !== 'object' || Array.isArray(currentClaudeSettings)) {
+    currentClaudeSettings = {};
+  }
+
+  const sharedHooks = sharedClaudeObj.hooks || {};
+  let claudeCommandsAdded = 0;
+
+  if (!currentClaudeSettings.hooks || typeof currentClaudeSettings.hooks !== 'object' || Array.isArray(currentClaudeSettings.hooks)) {
+    currentClaudeSettings.hooks = {};
+  }
+
+  for (const event of Object.keys(sharedHooks)) {
+    const sharedGroups = Array.isArray(sharedHooks[event]) ? sharedHooks[event] : [];
+    if (!Array.isArray(currentClaudeSettings.hooks[event])) {
+      currentClaudeSettings.hooks[event] = [];
+    }
+    const currentGroups = currentClaudeSettings.hooks[event];
+
+    const existingCommands = new Set();
+    for (const g of currentGroups) {
+      if (g && Array.isArray(g.hooks)) {
+        for (const h of g.hooks) {
+          if (h && typeof h.command === 'string') {
+            existingCommands.add(h.command);
+          }
+        }
+      }
+    }
+
+    for (const sGroup of sharedGroups) {
+      const sHooks = (sGroup && Array.isArray(sGroup.hooks)) ? sGroup.hooks : [];
+      const newHooks = [];
+
+      for (const h of sHooks) {
+        if (h && typeof h.command === 'string') {
+          if (!existingCommands.has(h.command)) {
+            newHooks.push(JSON.parse(JSON.stringify(h)));
+            existingCommands.add(h.command);
+          }
+        }
+      }
+
+      if (newHooks.length > 0) {
+        const newGroup = {};
+        if (sGroup.matcher !== undefined) {
+          newGroup.matcher = sGroup.matcher;
+        }
+        newGroup.hooks = newHooks;
+        for (const k of Object.keys(sGroup)) {
+          if (k !== 'matcher' && k !== 'hooks') {
+            newGroup[k] = sGroup[k];
+          }
+        }
+        currentGroups.push(newGroup);
+        claudeCommandsAdded += newHooks.length;
+      }
+    }
+  }
+
+  if (claudeCommandsAdded > 0) {
+    if (!dryRun) {
+      if (claudeFileExisted) {
+        const backupTarget = path.join(backupDir, '.claude', 'settings.json');
+        fs.mkdirSync(path.dirname(backupTarget), { recursive: true });
+        fs.copyFileSync(claudeSettingsPath, backupTarget);
+      }
+      fs.mkdirSync(path.dirname(claudeSettingsPath), { recursive: true });
+      fs.writeFileSync(claudeSettingsPath, JSON.stringify(currentClaudeSettings, null, 2) + '\n', 'utf8');
+    }
+  }
+
+  // --- 2. Antigravity (agy) Merge ---
+  const agyDir = path.join(homeDir, '.gemini', 'config');
+  let agyStatus = '';
+
+  if (!fs.existsSync(agyDir) || !fs.statSync(agyDir).isDirectory()) {
+    agyStatus = 'bỏ qua (thư mục .gemini/config không tồn tại)';
+  } else {
+    const agyHooksPath = path.join(agyDir, 'hooks.json');
+    let currentAgyHooks = {};
+    let agyFileExisted = false;
+
+    if (fs.existsSync(agyHooksPath)) {
+      agyFileExisted = true;
+      try {
+        const raw = fs.readFileSync(agyHooksPath, 'utf8');
+        currentAgyHooks = JSON.parse(raw);
+      } catch (err) {
+        console.error(`Lỗi: Không thể parse JSON từ ${agyHooksPath}: ${err.message}`);
+        process.exit(1);
+      }
+    }
+
+    if (!currentAgyHooks || typeof currentAgyHooks !== 'object' || Array.isArray(currentAgyHooks)) {
+      currentAgyHooks = {};
+    }
+
+    const sharedBridge = sharedAgyObj['claude-bridge'];
+
+    if (!('claude-bridge' in currentAgyHooks)) {
+      currentAgyHooks['claude-bridge'] = sharedBridge;
+      agyStatus = 'đã thêm claude-bridge';
+      if (!dryRun) {
+        if (agyFileExisted) {
+          const agyBackupTarget = path.join(backupDir, '.gemini', 'config', 'hooks.json');
+          fs.mkdirSync(path.dirname(agyBackupTarget), { recursive: true });
+          fs.copyFileSync(agyHooksPath, agyBackupTarget);
+        }
+        fs.mkdirSync(path.dirname(agyHooksPath), { recursive: true });
+        fs.writeFileSync(agyHooksPath, JSON.stringify(currentAgyHooks, null, 2) + '\n', 'utf8');
+      }
+    } else {
+      if (deepEqual(currentAgyHooks['claude-bridge'], sharedBridge)) {
+        agyStatus = 'đã có và giống hệt (bỏ qua)';
+      } else {
+        console.log(`Thông báo: khoá claude-bridge trong ${agyHooksPath} khác cấu hình shared, giữ nguyên cấu hình hiện tại.`);
+        agyStatus = 'khác biệt (giữ nguyên, không ghi đè)';
+      }
+    }
+  }
+
+  // --- 3. Summary ---
+  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh.`);
+  console.log(`Agy hooks: ${agyStatus}.`);
+}
+
+main();
