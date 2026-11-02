@@ -21,6 +21,13 @@
  * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
  * (Rule 18), and the manifest's model column is written before that rule is in view.
  * `worker-start --help` is not a dispatch.
+ * A spec or message for a worker (`worker-start`, `task-create`, `send`) that holds a production write
+ * (a `lark-cli` shortcut ending in a write verb such as `+record-batch-update`, `lark-cli api POST`,
+ * an `n8n_create_*`/`n8n_update_*`/`n8n_delete_*` tool) on a line without `--dry-run` or a negation is
+ * blocked: a worker only scouts, builds the command and dry-runs it; the coordinator runs it
+ * (ntv-implement § Who works). The spec is read from the command, `--spec-file` and `$(cat <file>)`.
+ * A `# Prod-write: "<câu của user>"` line passes it when that sentence is in one of the user's last
+ * 10 prompts. Limit: a DB write (SQL) or a spec built another way is not seen.
  * Text written right before a tool call is stored as a paraphrased `narration` thinking block, so the
  * line is reliable only inside the call itself; the transcript is read too, for text ending a turn.
  * Subagents are skipped. Fails open.
@@ -36,6 +43,17 @@ const WAIT_MS = 1500;
 const POLL_MS = 100;
 
 const DISPATCH = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
+// A command handing a worker text to act on: a spec (worker-start, task-create) or a message (send).
+const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send)\b/;
+// A production write: a lark-cli shortcut named `+<object>-<write verb>`, a raw write through
+// `lark-cli api`, or an n8n MCP tool that changes a workflow.
+const PROD_WRITE = new RegExp([
+  /(?:^|[\s`'"(])\+[a-z][\w-]*-(?:create|update|delete|upsert|move|copy|rename|bind|unbind|enable|disable|send|reply|forward|upload|import|arrange|patch|replace|set|add|remove|publish|transfer|cells)\b/.source,
+  /\blark-cli\s+api\s+(?:POST|PUT|PATCH|DELETE)\b/.source,
+  /\bn8n_(?:create|update|delete)_\w+/.source,
+].join('|'), 'i');
+// A line that only dry-runs the write, or forbids it.
+const NOT_A_WRITE = /--dry-run|(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)(?=$|[^\p{L}])/iu;
 
 const BARE_CLAUDE = /^(opus|sonnet|fable|haiku)$/;
 // Files that never link two tasks into one track: a shared test suite, doc, plan or fixture is not
@@ -107,6 +125,41 @@ function unpinnedClaudeModel(command, { segs }) {
 function claudeWithoutReason(command, { segs }) {
   if (/^\s*#\s*Model:\s*\S/m.test(command)) return false;
   return segs.some((seg) => /--agent[ =]['"]?claude\b/.test(seg) && !/--retry-of\b/.test(seg));
+}
+
+// Text a worker will receive from this command: the command itself (comment lines of this hook's
+// own markers dropped), plus every `--spec-file <path>` and `$(cat <path>)` / `$(< <path>)` it reads.
+function workerText(command, cwd) {
+  const parts = [command.split('\n').filter((l) => !/^\s*#\s*(Gate|Track|Model|Prod-write):/.test(l)).join('\n')];
+  const files = [...command.matchAll(/--spec-file[ =]['"]?([^\s'"]+)/g), ...command.matchAll(/\$\(\s*(?:cat\s+|<\s*)['"]?([^\s'")]+)/g)]
+    .map((m) => m[1]).filter((f) => f !== '-' && !f.startsWith('$'));
+  for (const f of files) {
+    const abs = path.resolve(cwd || process.cwd(), expandHome(f));
+    try { parts.push(fs.readFileSync(abs, 'utf8')); } catch (_) { /* unreadable: nothing to judge */ }
+  }
+  return parts.join('\n');
+}
+
+// Lines of the worker's text that run a production write for real.
+function prodWrites(text) {
+  return text.split('\n').map((l) => l.trim()).filter((l) => PROD_WRITE.test(l) && !NOT_A_WRITE.test(l));
+}
+
+// The user's quoted sentence on a `# Prod-write: "…"` line, when one of their last prompts holds it.
+function prodWriteAllowed(command, lines) {
+  const m = command.match(/^\s*#\s*Prod-write:\s*["“]([^"”]{8,})["”]/m);
+  if (!m) return false;
+  const quote = m[1].normalize('NFC').trim().toLowerCase();
+  let seen = 0;
+  for (let i = lines.length - 1; i >= 0 && seen < RECENT_PROMPTS; i--) {
+    if (!lines[i].includes('"type":"user"')) continue;
+    let rec; try { rec = JSON.parse(lines[i]); } catch (_) { continue; }
+    const t = promptText(rec);
+    if (t === null) continue;
+    seen++;
+    if (t.normalize('NFC').toLowerCase().includes(quote)) return true;
+  }
+  return false;
 }
 
 function tailLines(file) {
@@ -220,7 +273,7 @@ function verdict(lines, input, ctx) {
   return null;
 }
 
-module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts };
+module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed };
 if (require.main !== module) return;
 
 let raw = '';
@@ -229,9 +282,18 @@ const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 
 
 process.stdin.on('end', () => {
   try {
-    const { transcript_path: transcript, agent_id: agentId, tool_input: input } = JSON.parse(raw);
+    const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd } = JSON.parse(raw);
     const command = String(input?.command || '');
-    if (!transcript || agentId || !DISPATCH.test(command)) process.exit(0);
+    if (!transcript || agentId || !TO_WORKER.test(command)) process.exit(0);
+    const writes = prodWrites(workerText(command, cwd));
+    if (writes.length && !prodWriteAllowed(command, tailLines(transcript))) {
+      process.stderr.write(`dispatch-split-guard: this hands a worker a production write (\`${writes[0].slice(0, 160)}\`). ` +
+        'A worker only scouts, builds the command and runs it with `--dry-run`, then reports the output; the coordinator ' +
+        'runs it for real and reads it back (ntv-implement § Who works). Mark each such line `--dry-run`, or say the ' +
+        'worker must not run it. The user asked for this worker to write: add a `# Prod-write: "<their sentence>"` line.\n');
+      process.exit(2);
+    }
+    if (!DISPATCH.test(command)) process.exit(0);
     const starts = workerStarts(command);
     if (onlyHelp(starts.segs)) process.exit(0);
     const model = unpinnedClaudeModel(command, starts);

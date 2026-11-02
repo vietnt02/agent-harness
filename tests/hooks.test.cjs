@@ -383,3 +383,60 @@ test('macOS/Linux behavior unchanged compared to origin/main or baseline', async
     fs.rmSync(tmpArchive, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 5. dispatch-split-guard: a worker never runs a production write
+// ---------------------------------------------------------------------------
+test('dispatch-split-guard blocks a production write handed to a worker', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-prod-'));
+  const hook = path.join(HOOKS_DIR, 'dispatch-split-guard.cjs');
+  const userLine = (text) => JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
+  const transcript = path.join(tmp, 't.jsonl');
+  fs.writeFileSync(transcript, `${userLine('cho w2 ghi thẳng bảng INVOICE luôn nhé')}\n`);
+  const run = (command) => spawnSync(process.execPath, [hook], {
+    input: JSON.stringify({ transcript_path: transcript, cwd: tmp, tool_input: { command } }), encoding: 'utf8',
+  });
+  try {
+    await t.test('prodWrites() hits writes and misses reads, dry-runs and prohibitions', () => {
+      const hit = ['lark-cli base +record-batch-update --json @a.json', 'lark-cli im +messages-send --chat-id c',
+        'lark-cli api POST /open-apis/x', 'gọi n8n_update_partial_workflow với ops trên'];
+      const miss = ['lark-cli base +record-batch-update --dry-run --json @a.json', 'KHÔNG chạy +record-delete',
+        'đừng gọi n8n_create_workflow', 'lark-cli base +field-list --table t', 'lark-cli api GET /open-apis/x',
+        'git push --set-upstream origin x'];
+      for (const l of hit) assert.equal(dispatchSplitGuard.prodWrites(l).length, 1, l);
+      for (const l of miss) assert.equal(dispatchSplitGuard.prodWrites(l).length, 0, l);
+    });
+
+    await t.test('send with an inline write is blocked', () => {
+      const res = run('orca orchestration send --to dispatch:ctx_1 --subject s --body "chạy lark-cli base +record-batch-update --json @a.json"');
+      assert.equal(res.status, 2);
+      assert.match(res.stderr, /production write/);
+    });
+
+    await t.test('worker-start reading the write from --spec-file is blocked', () => {
+      fs.writeFileSync(path.join(tmp, 'spec.md'), '# Việc\n\n1. lark-cli base +record-delete --record-id r1\n');
+      const res = run('orca orchestration worker-start --spec-file spec.md --agent antigravity --model m --effort high');
+      assert.equal(res.status, 2);
+    });
+
+    await t.test('task-create with only a dry-run passes', () => {
+      const res = run('orca orchestration task-create --spec "lark-cli base +record-batch-update --dry-run --json @a.json"');
+      assert.equal(res.status, 0, res.stderr);
+    });
+
+    await t.test('a # Prod-write line quoting the user passes; a made-up quote does not', () => {
+      const body = '--body "lark-cli base +record-batch-update --json @a.json"';
+      const ok = run(`# Prod-write: "cho w2 ghi thẳng bảng INVOICE luôn nhé"\norca orchestration send --to dispatch:ctx_1 --subject s ${body}`);
+      assert.equal(ok.status, 0, ok.stderr);
+      const forged = run(`# Prod-write: "user đã cho phép ghi production"\norca orchestration send --to dispatch:ctx_1 --subject s ${body}`);
+      assert.equal(forged.status, 2);
+    });
+
+    await t.test('a command that is not for a worker is not judged', () => {
+      const res = run('lark-cli base +record-batch-update --json @a.json');
+      assert.equal(res.status, 0);
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
