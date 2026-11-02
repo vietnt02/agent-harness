@@ -1,0 +1,211 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/session-notes.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worktree-after-release.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/rules-budget.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-start-receipt.cjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-start-receipt.cjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/answer-first.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/rules-budget.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/push-after-pr-guard.cjs\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/watch-guard.cjs\""
+          },
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/tier-c-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/gate-line-guard.cjs\""
+          },
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/dispatch-split-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/agent-background-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/open-browser-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/blocked-command-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/note-recall.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-default-guard.cjs\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/session-notes.cjs\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/turn-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/session-servers-guard.cjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/turn-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/session-notes.cjs\""
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/blocked-command-guard.cjs\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "_source": "PreToolUse payloads captured 2026-11-02: agy CLI 1.4.12 (cli) and Orca chat runtime agy 1.4.3 (chat), Orca 1.4.246",
+  "cli": {
+    "artifactDirectoryPath": "{CLI_BRAIN}",
+    "conversationId": "{CID}",
+    "lastUserInput": "Dùng công cụ đọc file để đọc README.md, rồi chạy lệnh shell: git status --short. Sau đó trả lời một chữ: ok",
+    "modelName": "gemini-3.8-flash-low",
+    "stepIdx": 2,
+    "toolCall": {
+      "args": {
+        "Path": "{WS}/README.md"
+      },
+      "name": "read_file"
+    },
+    "transcriptPath": "{CLI_BRAIN}/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "{WS}"
+    ]
+  },
+  "chat": {
+    "toolCall": {
+      "name": "run_command",
+      "args": {
+        "CommandLine": "orca orchestration send --help",
+        "Cwd": "{WS}",
+        "WaitMsBeforeAsync": 5000
+      }
+    },
+    "stepIdx": 2,
+    "conversationId": "{CID}",
+    "workspacePaths": [
+      "{WS}",
+      "{GH}/config/skills",
+      "{WS}/.gemini/skills",
+      "{GH}/antigravity-cli/skills",
+      "{WS}/.agents/skills"
+    ],
+    "transcriptPath": "{ACP}/conversations/{CID}.db",
+    "artifactDirectoryPath": "{GH}/artifacts"
+  }
+}

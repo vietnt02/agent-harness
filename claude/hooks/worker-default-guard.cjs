@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+/**
+ * worker-default-guard.cjs - PreToolUse(Write|Edit|MultiEdit|NotebookEdit): execution goes to Orca
+ * workers (CLAUDE.md § Delegation); Claude edits a repo itself only in the cases ntv-implement
+ * § Who works lists, and says which first. An edit to a file inside a git repo outside ~/.claude
+ * is blocked until this session's note (rules/mine/session-notes.md) holds, under
+ * `## Đang có hiệu lực`, a line `Người làm: Claude — <repo folder> — <evidence>` naming that repo
+ * (its folder, or its main checkout's folder for a linked worktree), where the evidence is a
+ * quoted sentence found in one of the user's messages, or a value change written with `→`.
+ * Passes: an Orca worker session (its first prompt opens with Orca's dispatch brief), a file
+ * outside any git repo (scratchpad, Desktop), ~/.claude itself, a `.md` under the repo's `plans/`
+ * or `knowledge/` (specs and docs a coordinator writes). A subagent is checked like its parent.
+ * Limit: a shell write (sed -i, heredoc) is not seen.
+ * Fails open when git or stdin fails (no repo known: nothing to guard); fails closed when the note
+ * or transcript cannot be read (no evidence: the block message says how to add it).
+ */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+const NOTES_DIR = path.join(CLAUDE_DIR, 'session-notes');
+// Orca's dispatch brief opens with this line (Orca.app: ORCA_DISPATCH_PROMPT_LEAD_LINE).
+const DISPATCH_LEAD = 'Please carry out this task from my Orca coordinator';
+const HEAD_BYTES = 1024 * 1024;
+const LIVE_HEADING = /^##\s+Đang có hiệu lực\b/u;
+const ROLE_RE = /^\s*(?:[-*+]\s+)?Người làm:\s*Claude\s+[—–-]\s+(.+)$/u;
+const QUOTE_RE = /"([^"]{8,})"|“([^”]{8,})”/u;
+const VALUE_RE = /\S\s*→\s*\S/u;
+
+// `file` with symlinks resolved; it may not exist yet, so resolve its nearest existing parent.
+function realPath(file) {
+  let dir = path.dirname(file);
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  return path.join(fs.realpathSync(dir), path.relative(dir, file));
+}
+
+const inside = (file, dir) => file === dir || file.startsWith(dir + path.sep);
+const clean = (s) => s.normalize('NFC').replace(/\r\n?/g, '\n');
+
+// { root, names } for the repo holding `file`: names are its folder and, for a linked worktree,
+// the main checkout's folder. null when none. The file may not exist yet: start at the nearest
+// existing parent.
+function repoOf(file) {
+  let dir = path.dirname(file);
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  let out;
+  try {
+    out = execFileSync('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'], {
+      encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim().split('\n');
+  } catch {
+    return null;
+  }
+  const [root, common] = out;
+  if (!root) return null;
+  const names = new Set([path.basename(root)]);
+  if (common && path.basename(common) === '.git') names.add(path.basename(path.dirname(common)));
+  return { root, names };
+}
+
+// The texts of the transcript's user prompts (not tool results, not meta lines), in order.
+function userTexts(transcript, maxBytes = Infinity) {
+  let raw = '';
+  try {
+    if (maxBytes === Infinity) raw = fs.readFileSync(transcript, 'utf8');
+    else {
+      const fd = fs.openSync(transcript, 'r');
+      const buf = Buffer.alloc(maxBytes);
+      raw = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, maxBytes, 0));
+      fs.closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if (d.type !== 'user' || d.isMeta || !d.message) continue;
+    const c = d.message.content;
+    const text = typeof c === 'string' ? c
+      : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text || '').join('\n') : '';
+    const t = text.trim();
+    if (!t || /^<(command-|local-command|system-reminder)/.test(t)) continue;
+    out.push(clean(t));
+  }
+  return out;
+}
+
+// True when the session's first user prompt opens with Orca's dispatch brief.
+function isWorker(transcript) {
+  if (!transcript) return false;
+  const [first] = userTexts(transcript, HEAD_BYTES);
+  return Boolean(first) && first.startsWith(DISPATCH_LEAD);
+}
+
+// The lines of the `## Đang có hiệu lực` section of every note whose `session:` line holds this id.
+function liveLines(sessionId, notesDir = NOTES_DIR) {
+  const out = [];
+  let dirs = [];
+  try { dirs = fs.readdirSync(notesDir); } catch { return out; }
+  for (const d of dirs) {
+    let files = [];
+    try { files = fs.readdirSync(path.join(notesDir, d)).filter((f) => f.endsWith('.md')); } catch { continue; }
+    for (const f of files) {
+      let text = '';
+      try { text = clean(fs.readFileSync(path.join(notesDir, d, f), 'utf8')); } catch { continue; }
+      const head = (text.match(/^---\n[\s\S]*?\n---/) || [''])[0];
+      const ids = ((head.match(/^session:(.*)$/m) || [])[1] || '').split(/[\s,[\]"']+/);
+      if (!ids.includes(sessionId)) continue;
+      let live = false;
+      let fence = false;
+      for (const line of text.slice(head.length).split('\n')) {
+        if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+        if (!fence && /^## /.test(line)) { live = LIVE_HEADING.test(line); continue; }
+        if (live) out.push(line.replace(/\*\*/g, ''));
+      }
+    }
+  }
+  return out;
+}
+
+// True when one role line names this repo with evidence that holds.
+function claimed(lines, repo, transcript) {
+  let texts = null;
+  for (const line of lines) {
+    const m = line.match(ROLE_RE);
+    if (!m) continue;
+    const [name, ...rest] = m[1].split(/\s+[—–-]\s+/);
+    if (!repo.names.has(name.trim().replace(/^`|`$/g, '').replace(/\/$/, '').split('/').pop())) continue;
+    const evidence = rest.join(' — ');
+    const q = evidence.match(QUOTE_RE);
+    if (q) {
+      if (texts === null) texts = transcript ? userTexts(transcript) : [];
+      const quote = (q[1] || q[2]).trim();
+      if (texts.some((t) => t.includes(quote))) return true;
+      continue;
+    }
+    if (VALUE_RE.test(evidence)) return true;
+  }
+  return false;
+}
+
+// Why this edit is blocked, or '' when it passes.
+function problem(data, notesDir = NOTES_DIR) {
+  const input = data.tool_input || {};
+  const target = input.file_path || input.notebook_path;
+  if (!target || !data.session_id) return '';
+  const file = path.resolve(data.cwd || process.cwd(), target.replace(/^~(?=\/|$)/, os.homedir()));
+  if (inside(file, CLAUDE_DIR)) return '';
+  const repo = repoOf(file);
+  if (!repo) return '';
+  const rel = path.relative(fs.realpathSync(repo.root), realPath(file));
+  if (/^(plans|knowledge)\//.test(rel) && rel.endsWith('.md')) return '';
+  if (claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
+  if (isWorker(data.transcript_path)) return '';
+  const name = [...repo.names].pop();
+  return (
+    `editing ${file} in ${repo.root}: execution goes to Orca workers (CLAUDE.md § Delegation; ntv-orca). ` +
+    'Claude edits a repo itself only for a change to an existing value with no new logic, or work the user ' +
+    'named Claude for (ntv-implement § Who works). If one holds, first add under `## Đang có hiệu lực` of ' +
+    `this session's note: \`- Người làm: Claude — ${name} — "<the user's exact sentence naming Claude>"\` or ` +
+    `\`- Người làm: Claude — ${name} — <file>: <key> <old>→<new>\`. Otherwise dispatch a worker.`
+  );
+}
+
+if (require.main === module) {
+  let raw = '';
+  process.stdin.on('data', (c) => (raw += c));
+  process.stdin.on('end', () => {
+    try {
+      const why = problem(JSON.parse(raw));
+      if (why) {
+        process.stderr.write(`worker-default-guard: ${why}\n`);
+        process.exit(2);
+      }
+    } catch (_) { /* fail-open */ }
+    process.exit(0);
+  });
+}
+
+module.exports = { problem, isWorker, liveLines, userTexts };
