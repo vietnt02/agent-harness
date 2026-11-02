@@ -54,6 +54,13 @@ description: "How Claude does execution work itself: before Claude itself edits 
 - Reviewing code: report everything you find, no severity filter unless Viet asks. After fixing
   review findings, one last review round on the diff only, then stop. Orca review rounds follow the
   stop rule Viet set: the bullet **Tiêu chí dừng** in `ntv-orca/references/coordinator-rules.md`.
+- Reviewing someone's bug fix (its author's own check is this section's first bullet): reproduce the bug first
+  with a free read on the runtime the PR/MR blames (a log, a run's output, whether a setting is set
+  there, never a secret's value); the diagnosis is right only then, else report it as `chẩn đoán
+  CHƯA kiểm`, whatever the fix's own tests say.
+- A production bug fix whose root cause is proven ships, in the same PR/MR, a machine check that
+  fails if that cause returns (a build guard, a test on that path); without it, it does not merge. A root cause not
+  yet proven is reported `CHƯA kiểm`, and the change never merges described as the fix.
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
   Orca worker `agy gemini-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
   subagent only when Viet names one. A change to Claude Code itself (`~/.claude` rules, skills,
@@ -80,5 +87,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
 ## Ship
 
 Push the branch, open the PR and report its link (tier A). Before merging a PR that deploys, read
-the whole diff from your last read to the SHA being merged and run the repo's checks on that SHA. A branch that already had a PR:
+the whole diff from your last read to the SHA being merged and run the repo's checks on that SHA.
+Once its deploy is green, read what now runs on production (the deployed code, workflow or config)
+before reporting done. A branch that already had a PR:
 `CLAUDE.md` § Irreversible actions.
