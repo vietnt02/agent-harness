@@ -141,7 +141,7 @@ function trackLines(lines) {
   return found;
 }
 
-// Top-level root of a task file (".") for a file at the repo root); an absolute or `~/` path is
+// Top-level root of a task file ("." for a file at the repo root); an absolute or `~/` path is
 // taken relative to its git toplevel. null when that root cannot be found.
 function rootOf(file) {
   let p = toSlash(file).replace(/^\.\//, '');
