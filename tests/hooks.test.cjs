@@ -1,6 +1,6 @@
 /**
  * tests/hooks.test.cjs - Test suite for Claude hooks and Antigravity bridge helpers.
- * Runs with `node --test tests/`.
+ * Runs with `node --test "tests/*.test.cjs"`.
  */
 'use strict';
 
