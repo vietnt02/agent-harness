@@ -62,14 +62,14 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
 
 Repo này chủ động loại trừ các thành phần mang tính nội bộ hoặc phụ thuộc riêng:
 - Bộ công cụ AgentKit (`ak-*` và các hook liên quan của nó).
-- Các skill riêng của Orca và skill `ntv-orca`.
+- Các skill riêng của Orca (`orchestration`, `orca-cli`; Orca tự cài).
 - File `AGENTS.md` toàn cục của Antigravity (người dùng tự tạo riêng tại `~/.gemini/config/AGENTS.md`).
 - Cấu hình thanh trạng thái (statusline).
 
 ## Giới hạn đã biết
 
 - **Bridge Antigravity:** Bridge dùng 3 thư viện của AgentKit (`privacy-checker.cjs`, `scout-checker.cjs`, `secret-keywords.cjs`) cho các guard bảo vệ privacy, scout và secret. Nếu thiếu các file này trong `~/.claude/hooks/lib/`, các guard tương ứng sẽ không chạy.
-- **Tài liệu tham chiếu:** `CLAUDE.md` và một số skill có nhắc tới `ntv-orca` và thư mục `knowledge/` mà repo hiện không đính kèm.
+- **Tài liệu tham chiếu:** `CLAUDE.md` và một số skill có nhắc tới thư mục `~/.claude/knowledge/` (vd `knowledge/orca.md`: RAM, cap worker, Settings Orca, cấu hình agy của máy) mà repo không đính kèm; mỗi máy tự viết.
 - **Kiểm thử bridge fixtures:** Chạy fixture bridge bằng lệnh:
   ```bash
   node ~/.gemini/config/bridge-fixtures/run.cjs

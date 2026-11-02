@@ -34,14 +34,14 @@ const ANTIGRAVITY = /--agent[\s=]+["']?antigravity(?![\w-])/;
 const run = (cmd, args) =>
   execFileSync(cmd, args, { encoding: 'utf8', timeout: 6000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 
-// Guide lines mentioning the error, table rows first, history log (events.md) left out. The error is
+// Guide lines mentioning the error, table rows first. The error is
 // cut at its ids (the guide writes them `term_…`): each piece of 12+ characters is tried, then the
 // first 20 characters of the whole error.
 function guideLines(error) {
   const pieces = error.split(ID).filter((p, i) => i % 2 === 0).map((p) => p.trim().replace(/[\s([{:,;.]+$/, '')).filter((p) => p.length >= 12);
   for (const key of [...pieces.map((p) => p.slice(0, 40)), error.slice(0, 20)]) {
     let out = '';
-    try { out = run('grep', ['-rnF', '--include=*.md', '--exclude=events.md', '-e', key, GUIDE]); } catch (_) { continue; }
+    try { out = run('grep', ['-rnF', '--include=*.md', '-e', key, GUIDE]); } catch (_) { continue; }
     const lines = out.split('\n').filter(Boolean).map((l) => l.replace(GUIDE + '/', 'ntv-orca/').replace(GUIDE + '\\', 'ntv-orca/'));
     const row = (l) => /^[^:]+:\d+:\|/.test(l);
     if (lines.length) return [...lines.filter(row), ...lines.filter((l) => !row(l))].slice(0, 3).map((l) => l.slice(0, 260));
