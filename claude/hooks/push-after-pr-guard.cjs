@@ -7,12 +7,13 @@
 const { execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
+const { expandHome } = require('./lib/platform.cjs');
 
 const run = (cmd, args, cwd) =>
   execFileSync(cmd, args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 
 const unquote = (t) => t.replace(/^(['"])(.*)\1$/, '$2');
-const expand = (dir, cwd) => path.resolve(cwd, unquote(dir).replace(/^~(?=$|\/)/, os.homedir()));
+const expand = (dir, cwd) => path.resolve(cwd, expandHome(unquote(dir)));
 
 // Each `git push` in the command, with the directory it runs in.
 function findPushes(command, startCwd) {
@@ -58,6 +59,9 @@ function reviewsFor(dir, remote, branch) {
   const prs = JSON.parse(run('gh', ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'number,state'], dir));
   return prs.map((p) => ({ id: `#${p.number}`, state: p.state }));
 }
+
+module.exports = { findPushes, expand, branchesOf };
+if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));

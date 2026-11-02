@@ -18,6 +18,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { orcaDataDir, samePath, toSlash } = require('./lib/platform.cjs');
 
 const GUIDE = path.join(os.homedir(), '.claude', 'skills', 'ntv-orca');
 const DISPATCH = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
@@ -41,7 +42,7 @@ function guideLines(error) {
   for (const key of [...pieces.map((p) => p.slice(0, 40)), error.slice(0, 20)]) {
     let out = '';
     try { out = run('grep', ['-rnF', '--include=*.md', '--exclude=events.md', '-e', key, GUIDE]); } catch (_) { continue; }
-    const lines = out.split('\n').filter(Boolean).map((l) => l.replace(GUIDE + '/', 'ntv-orca/'));
+    const lines = out.split('\n').filter(Boolean).map((l) => l.replace(GUIDE + '/', 'ntv-orca/').replace(GUIDE + '\\', 'ntv-orca/'));
     const row = (l) => /^[^:]+:\d+:\|/.test(l);
     if (lines.length) return [...lines.filter(row), ...lines.filter((l) => !row(l))].slice(0, 3).map((l) => l.slice(0, 260));
   }
@@ -67,7 +68,11 @@ function describe(dispatch) {
 
 // GEMINI_HOME of each running Orca agy chat server (`ps -E` prints its env after the argv; the value
 // may hold spaces, so it runs to the next ` name=`, `_` and lower case included).
+// On win32, skip reading env and directly check <orcaData>/antigravity-chat.
 function acpHomes() {
+  if (process.platform === 'win32') {
+    return [path.join(orcaDataDir(), 'antigravity-chat')];
+  }
   let pids = [];
   try { pids = run('pgrep', ['-f', 'agy_acp_server']).split('\n').filter(Boolean); } catch (_) { return []; }
   const homes = pids.map((pid) => {
@@ -80,7 +85,14 @@ function acpHomes() {
 function agyConfigLines(homes = acpHomes(), target = AGY_CONFIG) {
   let want;
   try { want = fs.realpathSync(target); } catch (_) { return []; }
-  return homes.filter((h) => { try { return fs.realpathSync(path.join(h, 'config')) !== want; } catch (_) { return true; } })
+  return homes.filter((h) => {
+    try {
+      const configPath = path.join(h, 'config');
+      return !samePath(fs.realpathSync(configPath), want);
+    } catch (_) {
+      return true;
+    }
+  })
     .map((h) => `agy chat chạy với GEMINI_HOME="${h}" mà "${h}/config" không trỏ về ${target}: worker và phiên chat ` +
       `agy chạy thiếu AGENTS.md toàn cục và skills. "${h}/config" là thư mục thật thì chuyển nó đi trước; rồi ` +
       `\`ln -sfn ${target} '${h}/config'\` (gỡ: \`rm '${h}/config'\`).`);
@@ -89,7 +101,7 @@ function agyConfigLines(homes = acpHomes(), target = AGY_CONFIG) {
 // One line when the agy versions installed now (CLI on PATH, Orca's chat runtimes) differ from the ones
 // ~/.gemini/config/bridge-fixtures last passed on: a new version can change the hook payload.
 function agyVersionLines(stampFile = path.join(os.homedir(), '.gemini', 'config', 'bridge-fixtures', 'tested-versions.json'),
-  runtimesDir = path.join(os.homedir(), 'Library', 'Application Support', 'orca', 'agent-runtimes', 'antigravity'),
+  runtimesDir = path.join(orcaDataDir(), 'agent-runtimes', 'antigravity'),
   cli = (() => { try { return run('agy', ['--version']); } catch (_) { return ''; } })()) {
   let tested;
   try { tested = JSON.parse(fs.readFileSync(stampFile, 'utf8')); } catch (_) { tested = null; }
@@ -125,7 +137,7 @@ function receipts(output, max = MAX_IDS) {
   return { ids: [...new Set(ids)].slice(0, max), errors: [...new Set(errors)] };
 }
 
-module.exports = { DISPATCH, HELP, receipts, agyConfigLines, agyVersionLines };
+module.exports = { DISPATCH, HELP, receipts, agyConfigLines, agyVersionLines, acpHomes };
 if (require.main !== module) return;
 
 let raw = '';

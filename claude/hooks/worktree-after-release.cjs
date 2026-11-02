@@ -8,6 +8,7 @@
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { samePath } = require('./lib/platform.cjs');
 
 const run = (cmd, args, cwd) =>
   execFileSync(cmd, args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -19,7 +20,7 @@ function linkedWorktree(dispatch) {
   const dir = (worker.worktreeId || '').split('::').pop();
   if (!dir || !fs.existsSync(dir)) return null;
   const [gitDir, commonDir] = run('git', ['rev-parse', '--absolute-git-dir', '--git-common-dir'], dir).split('\n');
-  return path.resolve(dir, commonDir) === gitDir ? null : dir;
+  return samePath(path.resolve(dir, commonDir), gitDir) ? null : dir;
 }
 
 function openReviews(dir) {
@@ -51,6 +52,9 @@ function describe(dispatch) {
     ? `${dispatch}: worktree ${dir} còn ${keep.join('; ')}. Xử lý xong (file cần giữ chép ra scratchpad) rồi gỡ: ${rm}`
     : `${dispatch}: gỡ worktree ${dir}: ${rm}`;
 }
+
+module.exports = { linkedWorktree, describe, openReviews };
+if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));

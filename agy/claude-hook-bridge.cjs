@@ -46,6 +46,21 @@ const CLAUDE_DIR = path.join(HOME, '.claude');
 const HOOKS_DIR = path.join(CLAUDE_DIR, 'hooks');
 const AGY_AGENTS_MD = path.join(HOME, '.gemini', 'config', 'AGENTS.md');
 
+let platformLib = null;
+try {
+  platformLib = require(path.join(HOOKS_DIR, 'lib', 'platform.cjs'));
+} catch (_) {
+  try {
+    platformLib = require(path.join(__dirname, '..', 'claude', 'hooks', 'lib', 'platform.cjs'));
+  } catch (_) {
+    platformLib = null;
+  }
+}
+
+const expandHome = (p) => (platformLib ? platformLib.expandHome(p, HOME) : String(p || '').replace(/^~(?=[/\\]|$)/, HOME));
+const samePath = (a, b) => (platformLib ? platformLib.samePath(a, b) : a === b);
+const toSlash = (p) => (platformLib ? platformLib.toSlash(p) : (typeof p === 'string' ? p.replace(/\\/g, '/') : ''));
+
 const EVENT = process.argv[2] || process.env.ORCA_ANTIGRAVITY_EVENT || '';
 
 const TOOL_MAP = {
@@ -88,7 +103,7 @@ const WORKER_START_HELP = /\bworker-start\b[^;&|\n]*\s(?:--help|-h)\b/;
 const stripHeredocs = (s) =>
   String(s || '').replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC');
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
-const resolveDir = (p, base) => path.resolve(base, unquote(p).replace(/^~(?=\/|$)/, HOME));
+const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
 
 function isMainCheckout(dir) {
   try {
@@ -183,17 +198,22 @@ function hasWorkerPreamble(text) {
 
 function ancestorHasWorkerPreamble() {
   try {
-    const res = spawnSync('/bin/ps', ['-axww', '-o', 'pid=,ppid=,args='], { encoding: 'utf8', timeout: 3000 });
-    const procs = new Map();
-    for (const line of (res.stdout || '').split('\n')) {
-      const m = line.match(/^\s*(\d+)\s+(\d+)\s(.*)$/);
-      if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), args: m[3] });
+    let procs;
+    if (platformLib && typeof platformLib.listProcesses === 'function') {
+      procs = platformLib.listProcesses();
+    } else {
+      const res = spawnSync('/bin/ps', ['-axww', '-o', 'pid=,ppid=,args='], { encoding: 'utf8', timeout: 3000 });
+      procs = new Map();
+      for (const line of (res.stdout || '').split('\n')) {
+        const m = line.match(/^\s*(\d+)\s+(\d+)\s(.*)$/);
+        if (m) procs.set(Number(m[1]), { ppid: Number(m[2]), args: m[3] });
+      }
     }
     let pid = process.ppid;
     for (let depth = 0; depth < 8 && pid > 1; depth++) {
       const p = procs.get(pid);
       if (!p) break;
-      if (/(^|\/)agy(\s|$)/.test(p.args)) return hasWorkerPreamble(p.args);
+      if (/(?:^|[/\\])agy(?:\.exe)?(?:\s|$)/i.test(p.args)) return hasWorkerPreamble(p.args);
       pid = p.ppid;
     }
   } catch (_) {}
@@ -632,11 +652,11 @@ function handlePreToolUse(payload) {
 
   // 11. Rules budget guard
   if ((claudeTool === 'Write' || claudeTool === 'Edit') && filePath) {
-    const resolved = path.resolve(filePath.replace(/^~(?=\/)/, HOME));
+    const resolved = path.resolve(expandHome(filePath));
     const newContent = String(args.Content ?? args.CodeContent ?? '');
     const targetText = String(args.Target ?? args.TargetContent ?? '');
     const replacementText = String(args.Replacement ?? args.ReplacementContent ?? '');
-    if (resolved === AGY_AGENTS_MD) {
+    if (samePath(resolved, AGY_AGENTS_MD)) {
       const nextContent =
         claudeTool === 'Write'
           ? newContent

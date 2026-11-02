@@ -29,6 +29,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { toSlash, expandHome } = require('./lib/platform.cjs');
 
 const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
@@ -65,6 +66,7 @@ function userAskedSerial(lines) {
 }
 function memoryPressure() {
   if (process.env.DSG_PRESSURE) return Number(process.env.DSG_PRESSURE);
+  if (process.platform !== 'darwin') return 1;
   try { return Number(execFileSync('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], { encoding: 'utf8', timeout: 2000 }).trim()) || 1; } catch (_) { return 1; }
 }
 // `(serial: …)` on the line, backed by the user's request or by memory pressure.
@@ -139,17 +141,17 @@ function trackLines(lines) {
   return found;
 }
 
-// Top-level root of a task file ("." for a file at the repo root); an absolute or `~/` path is
+// Top-level root of a task file (".") for a file at the repo root); an absolute or `~/` path is
 // taken relative to its git toplevel. null when that root cannot be found.
 function rootOf(file) {
-  let p = file.replace(/^\.\//, '');
-  if (p.startsWith('~/')) p = path.join(os.homedir(), p.slice(2));
+  let p = toSlash(file).replace(/^\.\//, '');
+  if (p.startsWith('~/')) p = toSlash(path.join(os.homedir(), p.slice(2)));
   if (path.isAbsolute(p)) {
     let dir = path.dirname(p);
     while (!fs.existsSync(dir) && dir !== path.dirname(dir)) dir = path.dirname(dir);
     try {
-      p = path.relative(execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'],
-        { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(), p);
+      p = toSlash(path.relative(execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'],
+        { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(), p));
     } catch (_) { return null; }
   }
   return p.includes('/') ? `${p.split('/')[0]}/` : '.';
@@ -172,7 +174,7 @@ function unrelatedTasks(line, ctx) {
   if (serialOk(line, ctx)) return [];
   const tasks = [...line.matchAll(/([^|←\[\]]*)\[([^\]]*)\]/g)].map((m) => ({
     name: m[1].trim(),
-    files: new Set(m[2].split(',').map((f) => f.trim()).filter((f) => f && !NOT_A_LINK.test(f))),
+    files: new Set(m[2].split(',').map((f) => toSlash(f.trim())).filter((f) => f && !NOT_A_LINK.test(f))),
   }));
   if (tasks.length < 2) return [];
   const linked = new Set([0]);
@@ -217,6 +219,9 @@ function verdict(lines, input, ctx) {
   }
   return null;
 }
+
+module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts };
+if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));

@@ -10,7 +10,10 @@
  * Stop hook's send-back (`stop_hook_active`) does not hide a new one.
  * Sees TCP listeners only: a watcher with no port is not caught. Background subagents share the
  * session id, so a server one of them still needs is listed too. Fails open on any error.
+ * Giới hạn: trên win32 không đọc được env của process khác nên hook thoát 0 ngay.
  */
+if (process.platform === 'win32') process.exit(0);
+
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');

@@ -14,6 +14,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { commands, program } = require('./lib/shell-words.cjs');
+const { toSlash } = require('./lib/platform.cjs');
 
 const NOTES_DIR = path.join(os.homedir(), '.claude', 'session-notes');
 const STATE_DIR = path.join(os.tmpdir(), 'claude-note-recall');
@@ -40,7 +41,7 @@ function tokens(command) {
   const values = new Set();
   for (const [name, ...args] of commands(command).map(program)) {
     if (!name) continue;
-    const n = clean(name.replace(/^.*\//, ''));
+    const n = clean(toSlash(name).replace(/^.*\//, ''));
     if (keep(n)) names.add(n);
     if (PROSE_PROGRAM.test(name)) continue;
     let subs = 0;
