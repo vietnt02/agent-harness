@@ -110,6 +110,9 @@ out=$(mktemp) err=$(mktemp)
 pid=
 trap '[ -n "$pid" ] && kill -TERM -- -$pid 2>/dev/null; rm -f "$out" "$err"' EXIT
 
+# Probe GNU stat (-c %Y) before BSD (-f %m): GNU accepts -f for filesystem info without error, so testing -f first would misidentify GNU as BSD.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+
 in_list() { case ",$2," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # One check. Sets verdict (done|wait|unexpected|error) and detail.
@@ -179,7 +182,7 @@ if [ $once -eq 1 ]; then
   esac
 fi
 
-[ -f "$mark" ] && [ $(( $(date +%s) - $(stat -f %m "$mark") )) -le $ONCE_TTL ] \
+[ -f "$mark" ] && [ $(( $(date +%s) - $(mtime "$mark") )) -le $ONCE_TTL ] \
   || die "run the same command with --once in the foreground first (within $(( ONCE_TTL / 60 )) min)"
 
 errors=0 strange=0 slow_flagged=0 backoff=0
