@@ -58,8 +58,8 @@ description: "How Claude does execution work itself: before Claude itself edits 
   with a free read on the runtime the PR/MR blames (a log, a run's output, whether a setting is set
   there, never a secret's value); the diagnosis is right only then, else report it as `chẩn đoán
   CHƯA kiểm`, whatever the fix's own tests say.
-- A production bug fix ships, in the same PR/MR, a machine check that fails if its root cause
-  returns (a build guard, a test on that path); without it, it does not merge. A root cause not
+- A production bug fix whose root cause is proven ships, in the same PR/MR, a machine check that
+  fails if that cause returns (a build guard, a test on that path); without it, it does not merge. A root cause not
   yet proven is reported `CHƯA kiểm`, and the change never merges described as the fix.
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
   Orca worker `agy gemini-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
