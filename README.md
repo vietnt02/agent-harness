@@ -6,7 +6,7 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
 
 - **Bắt buộc:**
   - Claude Code
-  - Node.js (phiên bản hiện đại có hỗ trợ ES module / CommonJS)
+  - Node.js (>= 18)
 - **Tuỳ chọn:**
   - Antigravity (`agy`)
   - Orca multi-agent IDE
@@ -18,6 +18,8 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
    git clone <repo-url> agent-harness
    cd agent-harness
    ```
+
+### Trên macOS / Linux
 2. Chạy thử trước để xem các thay đổi dự kiến (không tác động hệ thống):
    ```bash
    ./install.sh --dry-run
@@ -28,16 +30,26 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
    ```
    *(Hỗ trợ tuỳ chọn `--home <dir>` nếu muốn cài đặt vào thư mục tuỳ chỉnh thay vì `$HOME`)*
 
+### Trên Windows
+- **Yêu cầu:** Node.js >= 18, Git for Windows (khuyến nghị), bật Developer Mode (Settings → System → For developers) để tạo symlink không cần quyền Administrator.
+- **Lệnh cài đặt:**
+   ```cmd
+   node install.cjs --dry-run
+   node install.cjs
+   ```
+   *(Hỗ trợ tuỳ chọn `--home <dir>` nếu muốn cài đặt vào thư mục tuỳ chỉnh thay vì `%USERPROFILE%`)*
+- Trên Windows settings ghi hook dạng exec (command + args) nên không phụ thuộc Git Bash.
+
 ## Cập nhật
 
 - Khi repo có thay đổi nội dung file: chỉ cần chạy `git pull`. Do các file được liên kết bằng symlink nên các thay đổi sẽ có hiệu lực ngay lập tức.
-- Khi repo có thêm file mới hoặc thư mục skill mới: chạy lại `./install.sh` để tạo symlink cho các item mới.
+- Khi repo có thêm file mới hoặc thư mục skill mới: chạy lại `./install.sh` (trên Windows: `node install.cjs`) để tạo symlink cho các item mới.
 
 ## Gỡ bỏ / Khôi phục
 
-- Trước khi ghi đè hoặc thay thế bất kỳ file/thư mục nào đã tồn tại, `install.sh` và `merge-hooks.cjs` sẽ tự động chuyển bản cũ vào thư mục sao lưu:
-  `~/.claude/backups/harness-install-<YYYYmmdd-HHMMSS>/`
-- Để khôi phục lại trạng thái trước khi cài đặt, chuyển các file tương ứng từ thư mục sao lưu về vị trí ban đầu trong `~/.claude/` hoặc `~/.gemini/config/`.
+- Trước khi ghi đè hoặc thay thế bất kỳ file/thư mục nào đã tồn tại, bộ cài sẽ tự động chuyển bản cũ vào thư mục sao lưu:
+  `~/.claude/backups/harness-install-<YYYYmmdd-HHMMSS>/` (trên Windows: `%USERPROFILE%\.claude\backups\harness-install-<YYYYmmdd-HHMMSS>\`)
+- Để khôi phục lại trạng thái trước khi cài đặt, chuyển các file tương ứng từ thư mục sao lưu về vị trí ban đầu trong `~/.claude/` hoặc `~/.gemini/config/` (hoặc `%USERPROFILE%\.claude\` và `%USERPROFILE%\.gemini\config\`).
 
 ## Các bước sau khi cài đặt
 
