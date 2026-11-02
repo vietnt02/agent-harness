@@ -1,0 +1,385 @@
+/**
+ * tests/hooks.test.cjs - Test suite for Claude hooks and Antigravity bridge helpers.
+ * Runs with `node --test "tests/*.test.cjs"`.
+ */
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync, execFileSync } = require('child_process');
+
+const REPO_ROOT = path.resolve(__dirname, '..');
+const HOOKS_DIR = path.join(REPO_ROOT, 'claude', 'hooks');
+const SETTINGS_FILE = path.join(REPO_ROOT, 'settings', 'claude-settings.shared.json');
+
+const platform = require('../claude/hooks/lib/platform.cjs');
+const gateLineGuard = require('../claude/hooks/gate-line-guard.cjs');
+const rulesBudget = require('../claude/hooks/rules-budget.cjs');
+const watchGuard = require('../claude/hooks/watch-guard.cjs');
+const pushAfterPrGuard = require('../claude/hooks/push-after-pr-guard.cjs');
+const workerDefaultGuard = require('../claude/hooks/worker-default-guard.cjs');
+const dispatchSplitGuard = require('../claude/hooks/dispatch-split-guard.cjs');
+const noteRecall = require('../claude/hooks/note-recall.cjs');
+const worktreeAfterRelease = require('../claude/hooks/worktree-after-release.cjs');
+
+// ---------------------------------------------------------------------------
+// 1. All hooks in settings/claude-settings.shared.json
+// ---------------------------------------------------------------------------
+test('All hooks in settings/claude-settings.shared.json run cleanly without stack traces', async (t) => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-home-'));
+  const emptyTranscript = path.join(tmpHome, 'transcript.jsonl');
+  fs.writeFileSync(emptyTranscript, '');
+  const tmpFile = path.join(tmpHome, 'test.txt');
+  fs.writeFileSync(tmpFile, 'hello');
+
+  try {
+    const sharedSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+
+    for (const [eventName, groups] of Object.entries(sharedSettings.hooks)) {
+      for (const group of groups) {
+        for (const hook of group.hooks) {
+          const scriptName = hook.command.split('/').pop().replace(/"$/, '');
+          const scriptPath = path.join(HOOKS_DIR, scriptName);
+
+          await t.test(`${eventName} -> ${scriptName} (matcher: ${group.matcher || '*'})`, () => {
+            assert.ok(fs.existsSync(scriptPath), `Script should exist: ${scriptPath}`);
+
+            let payload = {
+              session_id: 'test-session',
+              cwd: tmpHome,
+              transcript_path: emptyTranscript,
+              hook_event_name: eventName,
+            };
+
+            if (eventName === 'UserPromptSubmit') {
+              payload.prompt = 'hello world';
+            } else if (eventName === 'SessionStart') {
+              payload.source = 'startup';
+            } else if (eventName === 'Stop') {
+              // minimal
+            } else if (eventName === 'PermissionDenied') {
+              payload.tool_name = 'Bash';
+              payload.tool_input = { command: 'ls' };
+            } else if (eventName === 'PostToolUseFailure') {
+              payload.tool_name = 'Bash';
+              payload.tool_input = { command: 'ls' };
+              payload.error = 'failed command';
+            } else if (eventName === 'PostToolUse') {
+              payload.tool_name = 'Bash';
+              payload.tool_input = { command: 'ls' };
+              payload.tool_response = { stdout: '', stderr: '' };
+            } else if (eventName === 'PreToolUse') {
+              if (group.matcher && (group.matcher.includes('Edit') || group.matcher.includes('Write'))) {
+                payload.tool_name = 'Write';
+                payload.tool_input = { file_path: tmpFile, content: 'test content' };
+              } else if (group.matcher && (group.matcher.includes('Agent') || group.matcher.includes('Task'))) {
+                payload.tool_name = 'Agent';
+                payload.tool_input = { prompt: 'subagent task', run_in_background: true };
+              } else {
+                payload.tool_name = 'Bash';
+                payload.tool_input = { command: 'ls' };
+              }
+            }
+
+            const res = spawnSync(process.execPath, [scriptPath], {
+              input: JSON.stringify(payload),
+              encoding: 'utf8',
+              timeout: 10000,
+              env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
+            });
+
+            assert.ok(
+              res.status === 0 || res.status === 2,
+              `Hook ${scriptName} exited with unexpected status ${res.status}. Stderr: ${res.stderr}`
+            );
+            assert.ok(
+              !res.stderr.includes('    at '),
+              `Hook ${scriptName} produced stack trace in stderr: ${res.stderr}`
+            );
+          });
+        }
+      }
+    }
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 2. Unit tests for lib/platform.cjs
+// ---------------------------------------------------------------------------
+test('platform.cjs helpers', async (t) => {
+  await t.test('orcaDataDir returns platform-specific directory', () => {
+    // darwin
+    assert.equal(
+      platform.orcaDataDir('darwin', { HOME: '/Users/alice' }),
+      '/Users/alice/Library/Application Support/orca'
+    );
+    // win32 with APPDATA
+    assert.equal(
+      platform.orcaDataDir('win32', { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming' }),
+      'C:\\Users\\alice\\AppData\\Roaming\\orca'
+    );
+    // win32 fallback to USERPROFILE
+    assert.equal(
+      platform.orcaDataDir('win32', { USERPROFILE: 'C:\\Users\\alice' }),
+      'C:\\Users\\alice\\AppData\\Roaming\\orca'
+    );
+    // linux with XDG_CONFIG_HOME
+    assert.equal(
+      platform.orcaDataDir('linux', { XDG_CONFIG_HOME: '/home/alice/.config' }),
+      '/home/alice/.config/orca'
+    );
+    // linux fallback to HOME
+    assert.equal(
+      platform.orcaDataDir('linux', { HOME: '/home/alice' }),
+      '/home/alice/.config/orca'
+    );
+  });
+
+  await t.test('toSlash normalizes backslashes to forward slashes', () => {
+    assert.equal(platform.toSlash('C:\\foo\\bar\\baz'), 'C:/foo/bar/baz');
+    assert.equal(platform.toSlash('foo/bar/baz'), 'foo/bar/baz');
+    assert.equal(platform.toSlash(''), '');
+    assert.equal(platform.toSlash(null), '');
+    assert.equal(platform.toSlash(undefined), '');
+  });
+
+  await t.test('expandHome expands ~ followed by / or \\ or at end', () => {
+    assert.equal(platform.expandHome('~/docs', '/home/me'), '/home/me/docs');
+    assert.equal(platform.expandHome('~\\docs', 'C:\\Users\\me'), 'C:\\Users\\me\\docs');
+    assert.equal(platform.expandHome('~', '/home/me'), '/home/me');
+    assert.equal(platform.expandHome('~user/docs', '/home/me'), '~user/docs');
+    assert.equal(platform.expandHome('relative/path', '/home/me'), 'relative/path');
+  });
+
+  await t.test('samePath compares paths accurately across platforms', () => {
+    // POSIX
+    assert.ok(platform.samePath('/Users/foo/bar', '/Users/foo/bar', 'darwin'));
+    assert.ok(platform.samePath('/Users/foo/bar/', '/Users/foo/bar', 'darwin'));
+    assert.ok(!platform.samePath('/Users/foo/bar', '/Users/foo/baz', 'darwin'));
+
+    // Win32 case insensitivity and slash normalization
+    assert.ok(platform.samePath('C:\\Users\\Foo\\Bar', 'c:/users/foo/bar', 'win32'));
+    assert.ok(platform.samePath('C:\\Users\\Foo\\Bar\\', 'C:\\users\\foo\\bar', 'win32'));
+    assert.ok(!platform.samePath('C:\\Users\\Foo\\Bar', 'C:\\Users\\Foo\\Baz', 'win32'));
+  });
+
+  await t.test('listProcesses returns a Map of process entries', () => {
+    const procs = platform.listProcesses();
+    assert.ok(procs instanceof Map);
+    // On current machine (macOS), listProcesses should find processes
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      assert.ok(procs.size > 0);
+      const first = [...procs.values()][0];
+      assert.ok(typeof first.ppid === 'number');
+      assert.ok(typeof first.args === 'string');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Unit tests for modified hook path helpers on POSIX and Windows formats
+// ---------------------------------------------------------------------------
+test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
+  await t.test('gate-line-guard: resolveDir handles ~ with / and \\', () => {
+    const posixBase = '/Users/test/workspace';
+    const winBase = 'C:\\Users\\test\\workspace';
+
+    const p1 = gateLineGuard.resolveDir('sub/dir', posixBase);
+    assert.ok(p1.includes('sub'));
+
+    const p2 = gateLineGuard.resolveDir('~', posixBase);
+    assert.equal(p2, path.resolve(os.homedir()));
+
+    const p3 = gateLineGuard.resolveDir('~/sub', posixBase);
+    assert.equal(p3, path.resolve(os.homedir(), 'sub'));
+
+    const p4 = gateLineGuard.resolveDir('~\\sub', winBase);
+    assert.ok(platform.samePath(p4, path.resolve(os.homedir(), 'sub')));
+  });
+
+  await t.test('rules-budget: isMine and isNote handle Windows and POSIX paths', () => {
+    const home = os.homedir();
+    const mineFile = path.join(home, '.claude', 'rules', 'mine', 'custom.md');
+    assert.ok(rulesBudget.isMine(mineFile));
+
+    const noteFile = path.join(home, '.claude', 'session-notes', 'slug', 'note.md');
+    assert.ok(rulesBudget.isNote(noteFile));
+
+    assert.ok(!rulesBudget.isMine(path.join(home, '.claude', 'CLAUDE.md')));
+    assert.ok(!rulesBudget.isNote(path.join(home, '.claude', 'rules', 'mine', 'note.md')));
+  });
+
+  await t.test('worker-default-guard: inside() handles path casing on win32', () => {
+    const claudeDir = path.join(os.homedir(), '.claude');
+    const childFile = path.join(claudeDir, 'rules', 'mine', 'test.md');
+    assert.ok(workerDefaultGuard.inside(childFile, claudeDir));
+    assert.ok(!workerDefaultGuard.inside('/other/repo/file.txt', claudeDir));
+  });
+
+  await t.test('dispatch-split-guard: rootOf() handles POSIX and Windows separators', () => {
+    assert.equal(dispatchSplitGuard.rootOf('src/index.js'), 'src/');
+    assert.equal(dispatchSplitGuard.rootOf('src\\index.js'), 'src/');
+    assert.equal(dispatchSplitGuard.rootOf('nested/deep/file.py'), 'nested/');
+    assert.equal(dispatchSplitGuard.rootOf('nested\\deep\\file.py'), 'nested/');
+    assert.equal(dispatchSplitGuard.rootOf('package.json'), '.');
+    assert.equal(dispatchSplitGuard.rootOf('./src/main.rs'), 'src/');
+    assert.equal(dispatchSplitGuard.rootOf('.\\src\\main.rs'), 'src/');
+  });
+
+  await t.test('dispatch-split-guard: unrelatedTasks() treats Windows backslash paths correctly', () => {
+    const ctx = { serial: () => false, pressure: () => 1 };
+    // Task with unrelated source files
+    const lineUnrelated = 'Track: w1 <- taskA [src\\a.py] | taskB [lib\\b.py]';
+    const split = dispatchSplitGuard.unrelatedTasks(lineUnrelated, ctx);
+    assert.deepEqual(split, ['taskB']);
+
+    // Task sharing a source file with backslashes
+    const lineRelated = 'Track: w1 <- taskA [src\\shared.py, src\\a.py] | taskB [src\\shared.py, lib\\b.py]';
+    const splitRelated = dispatchSplitGuard.unrelatedTasks(lineRelated, ctx);
+    assert.deepEqual(splitRelated, []);
+  });
+
+  await t.test('note-recall: tokens() extracts program names across slash formats', () => {
+    const t1 = noteRecall.tokens('/usr/local/bin/my-command --flag');
+    assert.ok(t1.names.includes('my-command'));
+
+    const t2 = noteRecall.tokens("'C:\\tools\\my-tool.exe' --flag");
+    assert.ok(t2.names.includes('my-tool.exe'));
+
+    const t3 = noteRecall.tokens("'.\\scripts\\runner.sh' start");
+    assert.ok(t3.names.includes('runner.sh'));
+  });
+
+  await t.test('push-after-pr-guard: expand() handles ~ with / and \\', () => {
+    const base = '/some/dir';
+    const e1 = pushAfterPrGuard.expand('~/code', base);
+    assert.equal(e1, path.resolve(os.homedir(), 'code'));
+
+    const e2 = pushAfterPrGuard.expand('~\\code', base);
+    assert.ok(platform.samePath(e2, path.resolve(os.homedir(), 'code')));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. macOS/Linux behavior unchanged test
+// ---------------------------------------------------------------------------
+test('macOS/Linux behavior unchanged compared to origin/main or baseline', async (t) => {
+  let mainHooksDir = null;
+  const tmpArchive = fs.mkdtempSync(path.join(os.tmpdir(), 'origin-main-hooks-'));
+
+  try {
+    const tar = execFileSync('git', ['archive', 'origin/main', 'claude'], {
+      cwd: REPO_ROOT,
+      encoding: 'buffer',
+      timeout: 5000,
+    });
+    execFileSync('tar', ['-x', '-C', tmpArchive], { input: tar, timeout: 5000 });
+    mainHooksDir = path.join(tmpArchive, 'claude', 'hooks');
+  } catch (_) {
+    mainHooksDir = null;
+  }
+
+  const tmpTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compat-test-'));
+  const emptyTranscript = path.join(tmpTestDir, 'transcript.jsonl');
+  fs.writeFileSync(emptyTranscript, '');
+
+  try {
+    // Case A: gate-line-guard with git mutation on main checkout without Gate:
+    await t.test('gate-line-guard POSIX payload behavior', () => {
+      const payload = {
+        tool_name: 'Bash',
+        tool_input: { command: 'git checkout main' },
+        cwd: tmpTestDir,
+        session_id: 'compat-test-session',
+        transcript_path: emptyTranscript,
+      };
+
+      const newHook = path.join(HOOKS_DIR, 'gate-line-guard.cjs');
+      const newRes = spawnSync(process.execPath, [newHook], {
+        input: JSON.stringify(payload),
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+
+      if (mainHooksDir && fs.existsSync(path.join(mainHooksDir, 'gate-line-guard.cjs'))) {
+        const oldHook = path.join(mainHooksDir, 'gate-line-guard.cjs');
+        const oldRes = spawnSync(process.execPath, [oldHook], {
+          input: JSON.stringify(payload),
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        assert.equal(newRes.status, oldRes.status);
+      } else {
+        assert.equal(newRes.status, 0); // fails open or passes since tmpTestDir is not a main git checkout
+      }
+    });
+
+    // Case B: worker-default-guard with file inside .claude (exempt)
+    await t.test('worker-default-guard POSIX payload behavior', () => {
+      const claudeFile = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+      const payload = {
+        tool_name: 'Write',
+        tool_input: { file_path: claudeFile, content: 'test' },
+        cwd: tmpTestDir,
+        session_id: 'compat-test-session',
+        transcript_path: emptyTranscript,
+      };
+
+      const newHook = path.join(HOOKS_DIR, 'worker-default-guard.cjs');
+      const newRes = spawnSync(process.execPath, [newHook], {
+        input: JSON.stringify(payload),
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+
+      if (mainHooksDir && fs.existsSync(path.join(mainHooksDir, 'worker-default-guard.cjs'))) {
+        const oldHook = path.join(mainHooksDir, 'worker-default-guard.cjs');
+        const oldRes = spawnSync(process.execPath, [oldHook], {
+          input: JSON.stringify(payload),
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        assert.equal(newRes.status, oldRes.status);
+      }
+      assert.equal(newRes.status, 0);
+    });
+
+    // Case C: rules-budget with small edit to a mine rule file under budget
+    await t.test('rules-budget POSIX payload behavior', () => {
+      const mineFile = path.join(os.homedir(), '.claude', 'rules', 'mine', 'communication-style.md');
+      const payload = {
+        tool_name: 'Edit',
+        tool_input: { file_path: mineFile, old_string: '', new_string: '' },
+        cwd: tmpTestDir,
+        session_id: 'compat-test-session',
+        hook_event_name: 'PreToolUse',
+      };
+
+      const newHook = path.join(HOOKS_DIR, 'rules-budget.cjs');
+      const newRes = spawnSync(process.execPath, [newHook], {
+        input: JSON.stringify(payload),
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+
+      if (mainHooksDir && fs.existsSync(path.join(mainHooksDir, 'rules-budget.cjs'))) {
+        const oldHook = path.join(mainHooksDir, 'rules-budget.cjs');
+        const oldRes = spawnSync(process.execPath, [oldHook], {
+          input: JSON.stringify(payload),
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        assert.equal(newRes.status, oldRes.status);
+      }
+      assert.equal(newRes.status, 0);
+    });
+  } finally {
+    fs.rmSync(tmpTestDir, { recursive: true, force: true });
+    fs.rmSync(tmpArchive, { recursive: true, force: true });
+  }
+});

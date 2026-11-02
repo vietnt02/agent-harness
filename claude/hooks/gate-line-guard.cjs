@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { promptText } = require('./lib/user-intent.cjs');
+const { expandHome } = require('./lib/platform.cjs');
 
 const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
@@ -41,7 +42,7 @@ const GIT_LOCAL_WRITE = new RegExp(
 );
 const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
-const resolveDir = (p, base) => path.resolve(base, unquote(p).replace(/^~(?=\/|$)/, process.env.HOME));
+const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
 
 // True when the directory is a repo's main checkout, not a linked worktree.
 function isMainCheckout(dir) {
@@ -100,6 +101,9 @@ function gatePrinted(lines) {
   }
   return false;
 }
+
+module.exports = { resolveDir, isMainCheckout, writesMainCheckout, gatePrinted };
+if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));

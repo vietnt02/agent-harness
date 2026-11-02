@@ -13,6 +13,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { expandHome, samePath } = require('./lib/platform.cjs');
 
 const LOOP = /\b(while|until)\b[\s\S]*\bdo\b|\bsleep\b/;
 // Foreground: only an unbounded poll. `while read` (no sleep) and `for i in $(seq 1 N)` pass.
@@ -26,7 +27,7 @@ const WATCH_PATH = path.join(os.homedir(), '.claude', 'scripts', 'watch.sh');
 // A script path in command position, or after runners (`bash -x`, `source`, `.`, `timeout 600`,
 // `env`); a path handed to a reader (`sed -n 1,9p w.sh`, `grep x w.sh`) is not run, so not scanned.
 const RUNS = /(?:^|[;&|(\n]|\bthen|\bdo)\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|zsh|source|exec|nohup|command|env|timeout(?:\s+-\S+)*\s+\S+|\.)(?:\s+-\S+)*\s+)*$/;
-const expandHome = (p) => p.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/)/, os.homedir());
+const expand = (p) => expandHome(p.replace(/^(?:\$HOME|\$\{HOME\})(?=[/\\])/, os.homedir()));
 // `bash -n x.sh` only checks syntax.
 const isRun = (before) => RUNS.test(before) && !/\b(?:ba|z)?sh(?:\s+-\S+)*\s+-\w*n\w*\s+$/.test(before);
 // A heredoc body is data for another program (`python3 - <<'EOF'`), not shell to run.
@@ -38,7 +39,7 @@ function watchRuns(text, cwd) {
   const command = dropHeredocs(text);
   const runs = [];
   for (const m of command.matchAll(/(["']?)([^\s'";|&()]*watch\.sh)\1(?=[\s;|&)]|$)/g)) {
-    if (path.resolve(cwd, expandHome(m[2])) !== WATCH_PATH || !isRun(command.slice(0, m.index))) continue;
+    if (!samePath(path.resolve(cwd, expand(m[2])), WATCH_PATH) || !isRun(command.slice(0, m.index))) continue;
     const rest = command.slice(m.index + m[0].length).replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
     const end = rest.search(/[;&|\n]/);
     runs.push(end === -1 ? rest : rest.slice(0, end));
@@ -51,11 +52,14 @@ function scriptsIn(text, cwd) {
   const command = dropHeredocs(text);
   return [...command.matchAll(/[^\s'";|&()]+\.(?:sh|bash|zsh)\b/g)]
     .filter((m) => isRun(command.slice(0, m.index)))
-    .map((m) => path.resolve(cwd, expandHome(m[0])))
-    .filter((p) => p !== WATCH_PATH)
+    .map((m) => path.resolve(cwd, expand(m[0])))
+    .filter((p) => !samePath(p, WATCH_PATH))
     .filter((p) => { try { return fs.statSync(p).size < 200000; } catch (_) { return false; } })
     .map((p) => fs.readFileSync(p, 'utf8'));
 }
+
+module.exports = { watchRuns, scriptsIn, expand };
+if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));

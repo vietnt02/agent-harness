@@ -20,7 +20,21 @@ const BRIDGE = path.join(__dirname, '..', 'claude-hook-bridge.cjs');
 // repo this file may be symlinked from: Node resolves a symlinked script to its real path.
 const LOCAL_DIR = path.join(os.homedir(), '.gemini', 'config', 'bridge-fixtures');
 const STAMP = path.join(LOCAL_DIR, 'tested-versions.json');
-const RUNTIMES = path.join(os.homedir(), 'Library', 'Application Support', 'orca', 'agent-runtimes', 'antigravity');
+
+let orcaDataDir = () => path.join(os.homedir(), 'Library', 'Application Support', 'orca');
+try {
+  const platPath = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'platform.cjs');
+  const plat = require(platPath);
+  if (typeof plat.orcaDataDir === 'function') orcaDataDir = plat.orcaDataDir;
+} catch (_) {
+  try {
+    const localPlat = require(path.join(__dirname, '..', '..', 'claude', 'hooks', 'lib', 'platform.cjs'));
+    if (typeof localPlat.orcaDataDir === 'function') orcaDataDir = localPlat.orcaDataDir;
+  } catch (_) {
+    // thiếu file thì về đường dẫn macOS như cũ
+  }
+}
+const RUNTIMES = path.join(orcaDataDir(), 'agent-runtimes', 'antigravity');
 
 // The agy versions whose payloads reach the bridge: the CLI on PATH and Orca's chat runtimes.
 function versions() {
@@ -84,24 +98,30 @@ function storedMode(mode, convo, tmp) {
   return null;
 }
 
+const hasAgentKitLib = (lib) => fs.existsSync(path.join(os.homedir(), '.claude', 'hooks', 'lib', lib));
+
 const env = path.join(ws, '.env');
 const readme = path.join(ws, 'README.md');
 const cases = [
-  ['cli read_file Path .env', 'cli', { name: 'read_file', args: { Path: env } }, 'deny'],
-  ['cli read_file Path README', 'cli', { name: 'read_file', args: { Path: readme } }, 'allow'],
+  ['cli read_file Path .env', 'cli', { name: 'read_file', args: { Path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
+  ['cli read_file Path README', 'cli', { name: 'read_file', args: { Path: readme } }, 'allow', undefined, 'privacy-checker.cjs'],
   ['cli run_command git status', 'cli', { name: 'run_command', args: { CommandLine: 'git status --short' } }, 'allow'],
-  ['chat view_file AbsolutePath .env', 'chat', { name: 'view_file', args: { AbsolutePath: env } }, 'deny'],
-  ['chat view_file absolute_path .env', 'chat', { name: 'view_file', args: { absolute_path: env } }, 'deny'],
-  ['chat view_file absolute_path README', 'chat', { name: 'view_file', args: { absolute_path: readme } }, 'allow'],
+  ['chat view_file AbsolutePath .env', 'chat', { name: 'view_file', args: { AbsolutePath: env } }, 'deny', undefined, 'privacy-checker.cjs'],
+  ['chat view_file absolute_path .env', 'chat', { name: 'view_file', args: { absolute_path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
+  ['chat view_file absolute_path README', 'chat', { name: 'view_file', args: { absolute_path: readme } }, 'allow', undefined, 'privacy-checker.cjs'],
   ['chat run_command ls', 'chat', { name: 'run_command', args: { CommandLine: 'ls', Cwd: ws } }, 'allow'],
-  ['malformed: empty arg key', 'chat', { name: 'view_file', args: { '': 1, absolute_path: env } }, 'deny'],
-  ['malformed: transcriptPath number', 'chat', { name: 'view_file', args: { AbsolutePath: env } }, 'deny', { transcriptPath: 5 }],
+  ['malformed: empty arg key', 'chat', { name: 'view_file', args: { '': 1, absolute_path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
+  ['malformed: transcriptPath number', 'chat', { name: 'view_file', args: { AbsolutePath: env } }, 'deny', { transcriptPath: 5 }, 'privacy-checker.cjs'],
 ];
 
 let failed = 0;
 const report = (ok, name, detail) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`); };
 
-for (const [name, mode, toolCall, want, extra] of cases) {
+for (const [name, mode, toolCall, want, extra, requiredLib] of cases) {
+  if (requiredLib && !hasAgentKitLib(requiredLib)) {
+    console.log(`SKIP  ${name} (thiếu ${requiredLib})`);
+    continue;
+  }
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
   const got = bridge(payload(mode, conversation(mode, false), toolCall, extra), tmp);
   report(got === want, name, got === want ? '' : `got ${got}, want ${want}`);
