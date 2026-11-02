@@ -2,9 +2,58 @@
 const fs = require('fs');
 const path = require('path');
 
+function splitShellTokens(cmd) {
+  const tokens = [];
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = regex.exec(cmd)) !== null) {
+    if (match[1] !== undefined) {
+      tokens.push(match[1]);
+    } else if (match[2] !== undefined) {
+      tokens.push(match[2]);
+    } else if (match[3] !== undefined) {
+      tokens.push(match[3]);
+    }
+  }
+  return tokens;
+}
+
+function getHookKey(h, isWin) {
+  if (!h || typeof h !== 'object') return null;
+  let tokens = [];
+  if (Array.isArray(h.args)) {
+    tokens = [h.command, ...h.args];
+  } else if (typeof h.command === 'string') {
+    tokens = splitShellTokens(h.command);
+  } else {
+    return null;
+  }
+
+  const cjsIndex = tokens.findIndex(t => typeof t === 'string' && /\.cjs$/i.test(t.replace(/^["']|["']$/g, '')));
+  if (cjsIndex !== -1) {
+    let scriptPath = tokens[cjsIndex].replace(/^["']|["']$/g, '').replace(/\\/g, '/');
+    let restArgs = tokens.slice(cjsIndex + 1).map(a => String(a).replace(/^["']|["']$/g, '').replace(/\\/g, '/'));
+    if (isWin) {
+      scriptPath = scriptPath.toLowerCase();
+      restArgs = restArgs.map(a => a.toLowerCase());
+    }
+    return `cjs:${scriptPath}${restArgs.length ? ' ' + restArgs.join(' ') : ''}`;
+  }
+
+  let cmdStr = typeof h.command === 'string' ? h.command : '';
+  if (Array.isArray(h.args)) {
+    cmdStr += ' ' + h.args.join(' ');
+  }
+  cmdStr = cmdStr.replace(/\\/g, '/');
+  if (isWin) {
+    cmdStr = cmdStr.toLowerCase();
+  }
+  return `raw:${cmdStr.trim()}`;
+}
+
 function parseArgs() {
   const args = process.argv.slice(2);
-  let homeDir = process.env.HOME || '';
+  let homeDir = process.env.HOME || process.env.USERPROFILE || '';
   let nodePath = process.execPath;
   let dryRun = false;
   let backupDir = '';
@@ -72,13 +121,16 @@ function deepEqual(a, b) {
   return true;
 }
 
-function replacePlaceholders(content, homeDir, nodePath) {
-  return content.split('{HOME}').join(homeDir).split('{NODE}').join(nodePath);
+function replacePlaceholders(content, homeDir, nodePath, isWin) {
+  const normHome = isWin ? homeDir.replace(/\\/g, '/') : homeDir;
+  const normNode = isWin ? nodePath.replace(/\\/g, '/') : nodePath;
+  return content.split('{HOME}').join(normHome).split('{NODE}').join(normNode);
 }
 
 function main() {
   const { homeDir, nodePath, dryRun, backupDir } = parseArgs();
   const repoDir = path.resolve(__dirname, '..');
+  const isWin = (process.env.HARNESS_PLATFORM || process.platform) === 'win32';
 
   const claudeSharedPath = path.join(repoDir, 'settings', 'claude-settings.shared.json');
   const agySharedPath = path.join(repoDir, 'settings', 'agy-hooks.shared.json');
@@ -95,8 +147,8 @@ function main() {
   const rawClaudeShared = fs.readFileSync(claudeSharedPath, 'utf8');
   const rawAgyShared = fs.readFileSync(agySharedPath, 'utf8');
 
-  const replacedClaudeShared = replacePlaceholders(rawClaudeShared, homeDir, nodePath);
-  const replacedAgyShared = replacePlaceholders(rawAgyShared, homeDir, nodePath);
+  const replacedClaudeShared = replacePlaceholders(rawClaudeShared, homeDir, nodePath, isWin);
+  const replacedAgyShared = replacePlaceholders(rawAgyShared, homeDir, nodePath, isWin);
 
   let sharedClaudeObj;
   let sharedAgyObj;
@@ -147,13 +199,12 @@ function main() {
     }
     const currentGroups = currentClaudeSettings.hooks[event];
 
-    const existingCommands = new Set();
+    const existingHookKeys = new Set();
     for (const g of currentGroups) {
       if (g && Array.isArray(g.hooks)) {
         for (const h of g.hooks) {
-          if (h && typeof h.command === 'string') {
-            existingCommands.add(h.command);
-          }
+          const k = getHookKey(h, isWin);
+          if (k) existingHookKeys.add(k);
         }
       }
     }
@@ -163,11 +214,26 @@ function main() {
       const newHooks = [];
 
       for (const h of sHooks) {
-        if (h && typeof h.command === 'string') {
-          if (!existingCommands.has(h.command)) {
-            newHooks.push(JSON.parse(JSON.stringify(h)));
-            existingCommands.add(h.command);
+        const k = getHookKey(h, isWin);
+        if (k && !existingHookKeys.has(k)) {
+          let hookToAdd;
+          if (isWin) {
+            const tokens = splitShellTokens(h.command);
+            hookToAdd = {
+              type: 'command',
+              command: tokens[0].replace(/\\/g, '/'),
+              args: tokens.slice(1).map(t => t.replace(/\\/g, '/')),
+            };
+            for (const prop of Object.keys(h)) {
+              if (prop !== 'type' && prop !== 'command' && prop !== 'args') {
+                hookToAdd[prop] = h[prop];
+              }
+            }
+          } else {
+            hookToAdd = JSON.parse(JSON.stringify(h));
           }
+          newHooks.push(hookToAdd);
+          existingHookKeys.add(k);
         }
       }
 
@@ -177,9 +243,9 @@ function main() {
           newGroup.matcher = sGroup.matcher;
         }
         newGroup.hooks = newHooks;
-        for (const k of Object.keys(sGroup)) {
-          if (k !== 'matcher' && k !== 'hooks') {
-            newGroup[k] = sGroup[k];
+        for (const prop of Object.keys(sGroup)) {
+          if (prop !== 'matcher' && prop !== 'hooks') {
+            newGroup[prop] = sGroup[prop];
           }
         }
         currentGroups.push(newGroup);
@@ -255,4 +321,8 @@ function main() {
   console.log(`Agy hooks: ${agyStatus}.`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { main, getHookKey, splitShellTokens, replacePlaceholders, deepEqual };
