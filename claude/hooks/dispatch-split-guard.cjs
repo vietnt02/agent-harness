@@ -21,13 +21,19 @@
  * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
  * (Rule 18), and the manifest's model column is written before that rule is in view.
  * `worker-start --help` is not a dispatch.
- * A spec or message for a worker (`worker-start`, `task-create`, `send`) that holds a production write
- * (a `lark-cli` shortcut ending in a write verb such as `+record-batch-update`, `lark-cli api POST`,
- * an `n8n_create_*`/`n8n_update_*`/`n8n_delete_*` tool) on a line without `--dry-run` or a negation is
- * blocked: a worker only scouts, builds the command and dry-runs it; the coordinator runs it
- * (ntv-implement § Who works). The spec is read from the command, `--spec-file` and `$(cat <file>)`.
- * A `# Prod-write: "<câu của user>"` line passes it when that sentence is in one of the user's last
- * 10 prompts. Limit: a DB write (SQL) or a spec built another way is not seen.
+ * A spec or message the coordinator hands a worker (`worker-start`, `task-create`, `send`, `reply`,
+ * `dispatch`) that holds a Lark or n8n production write is blocked: a worker only scouts, builds the
+ * command and dry-runs it; the coordinator runs it (ntv-implement § Who works). A write is a
+ * `lark-cli <domain> +<shortcut>` whose name holds no read verb (get, list, search…), a bare
+ * `+<object>-<write verb>`, `lark-cli api POST|PUT|PATCH|DELETE`, or an n8n tool that changes or
+ * runs a workflow (`n8n_create_*`, `n8n_update_*`, `n8n_delete_*`, `n8n_test_*`, `n8n_autofix_*`).
+ * A line passes when it holds `--dry-run`, or a negated run verb ("không chạy", "đừng gọi", "do not
+ * run") before the write. The text is the command plus `--spec-file` and `$(cat <file>)`, resolved
+ * after a leading `cd <dir> &&`. A `# Prod-write: "<câu của user>"` line passes it when that sentence
+ * (a write or permission word in it) is in one of the user's last 10 prompts. An Orca worker session
+ * is not judged (its reports carry commands for the coordinator). The write found, a transcript that
+ * cannot be read blocks. Limit: a DB write (SQL), curl, a job trigger or a spec built another way is
+ * not seen.
  * Text written right before a tool call is stored as a paraphrased `narration` thinking block, so the
  * line is reliable only inside the call itself; the transcript is read too, for text ending a turn.
  * Subagents are skipped. Fails open.
@@ -43,17 +49,24 @@ const WAIT_MS = 1500;
 const POLL_MS = 100;
 
 const DISPATCH = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
-// A command handing a worker text to act on: a spec (worker-start, task-create) or a message (send).
-const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send)\b/;
-// A production write: a lark-cli shortcut named `+<object>-<write verb>`, a raw write through
-// `lark-cli api`, or an n8n MCP tool that changes a workflow.
+// A command handing a worker text to act on: a spec, a message, an answer to its `ask`.
+const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
+// Orca's dispatch brief opens a worker session with this line (as in worker-default-guard.cjs).
+const DISPATCH_LEAD = 'Please carry out this task from my Orca coordinator';
+// A lark-cli shortcut is a read when one segment of its name is a read verb.
+const LARK_READ = new Set(['get', 'list', 'search', 'fetch', 'download', 'preview', 'query', 'read', 'show',
+  'detail', 'status', 'diff', 'agenda', 'export', 'info', 'view', 'watch', 'consume', 'subscribe', 'options']);
+const LARK_SHORTCUT = /\blark-cli\s+[a-z][\w-]*\s+(?:[^\n]*?\s)?\+([a-z][\w-]*)/gi;
+// Writes that need no lark-cli prefix: a bare `+<object>-<write verb>`, a raw `lark-cli api` write,
+// an n8n tool that changes or runs a workflow (also under its `mcp__…__` name).
 const PROD_WRITE = new RegExp([
-  /(?:^|[\s`'"(])\+[a-z][\w-]*-(?:create|update|delete|upsert|move|copy|rename|bind|unbind|enable|disable|send|reply|forward|upload|import|arrange|patch|replace|set|add|remove|publish|transfer|cells)\b/.source,
+  // Not at a line start: a diff line opens with `+`.
+  /[\s`'"(]\+[a-z][\w]*(?:-[\w]+)*-(?:create|update|delete|upsert|move|copy|rename|bind|unbind|enable|disable|send|reply|forward|upload|import|arrange|patch|replace|set|add|remove|publish|transfer|clear|merge|submit|edit|revert|put|insert|complete|assign|sync|push)\b/.source,
   /\blark-cli\s+api\s+(?:POST|PUT|PATCH|DELETE)\b/.source,
-  /\bn8n_(?:create|update|delete)_\w+/.source,
+  /(?:^|[^a-z0-9])n8n_(?:create|update|delete|test|autofix)_?\w*/.source,
 ].join('|'), 'i');
-// A line that only dry-runs the write, or forbids it.
-const NOT_A_WRITE = /--dry-run|(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)(?=$|[^\p{L}])/iu;
+// A run verb negated, with no sentence break before the write: "không chạy", "đừng gọi", "do not run".
+const NEGATED_RUN = /(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)\s+(?:được\s+)?(?:tự\s+)?(?:chạy|gọi|ghi|thực thi|dùng|run|call|execute|use|invoke)(?=$|[^\p{L}])[^.;!?\n]*$/iu;
 
 const BARE_CLAUDE = /^(opus|sonnet|fable|haiku)$/;
 // Files that never link two tasks into one track: a shared test suite, doc, plan or fixture is not
@@ -131,10 +144,18 @@ function claudeWithoutReason(command, { segs }) {
 // own markers dropped), plus every `--spec-file <path>` and `$(cat <path>)` / `$(< <path>)` it reads.
 function workerText(command, cwd) {
   const parts = [command.split('\n').filter((l) => !/^\s*#\s*(Gate|Track|Model|Prod-write):/.test(l)).join('\n')];
-  const files = [...command.matchAll(/--spec-file[ =]['"]?([^\s'"]+)/g), ...command.matchAll(/\$\(\s*(?:cat\s+|<\s*)['"]?([^\s'")]+)/g)]
-    .map((m) => m[1]).filter((f) => f !== '-' && !f.startsWith('$'));
+  const PATH = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s'")]+))`;
+  const pick = (m) => m[1] ?? m[2] ?? m[3];
+  // A leading `cd <dir> &&` moves where relative paths resolve.
+  let base = cwd || process.cwd();
+  for (const m of command.matchAll(new RegExp(String.raw`(?:^|[;&|\n]\s*)cd\s+${PATH}\s*(?:&&|;)`, 'g'))) {
+    base = path.resolve(base, expandHome(pick(m)));
+  }
+  const files = [...command.matchAll(new RegExp(String.raw`--spec-file[ =]${PATH}`, 'g')),
+    ...command.matchAll(new RegExp(String.raw`\$\(\s*(?:cat\s+|<\s*)${PATH}`, 'g'))]
+    .map(pick).filter((f) => f && f !== '-' && !f.startsWith('$'));
   for (const f of files) {
-    const abs = path.resolve(cwd || process.cwd(), expandHome(f));
+    const abs = path.resolve(base, expandHome(f));
     try { parts.push(fs.readFileSync(abs, 'utf8')); } catch (_) { /* unreadable: nothing to judge */ }
   }
   return parts.join('\n');
@@ -142,14 +163,36 @@ function workerText(command, cwd) {
 
 // Lines of the worker's text that run a production write for real.
 function prodWrites(text) {
-  return text.split('\n').map((l) => l.trim()).filter((l) => PROD_WRITE.test(l) && !NOT_A_WRITE.test(l));
+  return text.split('\n').map((l) => l.trim()).filter((l) => {
+    if (/--dry-run\b/.test(l)) return false;
+    let at = -1;
+    for (const m of l.matchAll(LARK_SHORTCUT)) {
+      if (!m[1].toLowerCase().split('-').some((seg) => LARK_READ.has(seg))) { at = m.index; break; }
+    }
+    const w = l.match(PROD_WRITE);
+    if (w && (at < 0 || w.index < at)) at = w.index;
+    return at >= 0 && !NEGATED_RUN.test(l.slice(0, at));
+  });
+}
+
+// Is this transcript an Orca worker's session? Its first prompt opens with the dispatch brief.
+function workerSession(lines) {
+  for (const line of lines) {
+    if (!line.includes('"type":"user"')) continue;
+    let rec; try { rec = JSON.parse(line); } catch (_) { continue; }
+    const t = promptText(rec);
+    if (t !== null) return t.trimStart().startsWith(DISPATCH_LEAD);
+  }
+  return false;
 }
 
 // The user's quoted sentence on a `# Prod-write: "…"` line, when one of their last prompts holds it.
 function prodWriteAllowed(command, lines) {
-  const m = command.match(/^\s*#\s*Prod-write:\s*["“]([^"”]{8,})["”]/m);
+  const m = command.match(/^\s*#\s*Prod-write:\s*["“]([^"”]{12,})["”]/m);
   if (!m) return false;
   const quote = m[1].normalize('NFC').trim().toLowerCase();
+  // The sentence must grant something: a write or permission word.
+  if (!/(?:^|[^\p{L}])(ghi|chạy|sửa|xoá|xóa|gửi|cho phép|được phép|write|run|update|delete|send|allow)(?=$|[^\p{L}])/iu.test(quote)) return false;
   let seen = 0;
   for (let i = lines.length - 1; i >= 0 && seen < RECENT_PROMPTS; i--) {
     if (!lines[i].includes('"type":"user"')) continue;
@@ -157,7 +200,9 @@ function prodWriteAllowed(command, lines) {
     const t = promptText(rec);
     if (t === null) continue;
     seen++;
-    if (t.normalize('NFC').toLowerCase().includes(quote)) return true;
+    // Pasted text is someone else's words, not the user's permission.
+    const own = t.replace(/<pasted_content[^>]*>[\s\S]*?<\/pasted_content[^>]*>/g, ' ').normalize('NFC').toLowerCase();
+    if (own.includes(quote)) return true;
   }
   return false;
 }
@@ -273,7 +318,7 @@ function verdict(lines, input, ctx) {
   return null;
 }
 
-module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed };
+module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
 if (require.main !== module) return;
 
 let raw = '';
@@ -286,7 +331,11 @@ process.stdin.on('end', () => {
     const command = String(input?.command || '');
     if (!transcript || agentId || !TO_WORKER.test(command)) process.exit(0);
     const writes = prodWrites(workerText(command, cwd));
-    if (writes.length && !prodWriteAllowed(command, tailLines(transcript))) {
+    let lines = null;
+    if (writes.length) { try { lines = tailLines(transcript); } catch (_) { lines = []; } }
+    let head = [];
+    if (writes.length) { try { head = fs.readFileSync(transcript, 'utf8').slice(0, 1024 * 1024).split('\n'); } catch (_) { head = []; } }
+    if (writes.length && !workerSession(head) && !prodWriteAllowed(command, lines)) {
       process.stderr.write(`dispatch-split-guard: this hands a worker a production write (\`${writes[0].slice(0, 160)}\`). ` +
         'A worker only scouts, builds the command and runs it with `--dry-run`, then reports the output; the coordinator ' +
         'runs it for real and reads it back (ntv-implement § Who works). Mark each such line `--dry-run`, or say the ' +
