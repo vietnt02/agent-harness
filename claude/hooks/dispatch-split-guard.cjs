@@ -56,17 +56,18 @@ const DISPATCH_LEAD = 'Please carry out this task from my Orca coordinator';
 // A lark-cli shortcut is a read when one segment of its name is a read verb.
 const LARK_READ = new Set(['get', 'list', 'search', 'fetch', 'download', 'preview', 'query', 'read', 'show',
   'detail', 'status', 'diff', 'agenda', 'export', 'info', 'view', 'watch', 'consume', 'subscribe', 'options']);
-const LARK_SHORTCUT = /\blark-cli\s+[a-z][\w-]*\s+(?:[^\n]*?\s)?\+([a-z][\w-]*)/gi;
+const LARK_SHORTCUT = /\blark-cli\s+[a-z][\w-]*\s+(?:[^\n]{0,400}?\s)?\+([a-z][\w-]*)/gi;
 // Writes that need no lark-cli prefix: a bare `+<object>-<write verb>`, a raw `lark-cli api` write,
 // an n8n tool that changes or runs a workflow (also under its `mcp__…__` name).
 const PROD_WRITE = new RegExp([
   // Not at a line start: a diff line opens with `+`.
   /[\s`'"(]\+[a-z][\w]*(?:-[\w]+)*-(?:create|update|delete|upsert|move|copy|rename|bind|unbind|enable|disable|send|reply|forward|upload|import|arrange|patch|replace|set|add|remove|publish|transfer|clear|merge|submit|edit|revert|put|insert|complete|assign|sync|push)\b/.source,
-  /\blark-cli\s+api\s+(?:POST|PUT|PATCH|DELETE)\b/.source,
-  /(?:^|[^a-z0-9])n8n_(?:create|update|delete|test|autofix)_?\w*/.source,
+  /\blark-cli\s+api\s+(?:--?\S+(?:\s+[^-\s]\S*)?\s+){0,8}(?:POST|PUT|PATCH|DELETE)\b/.source,
+  /(?:^|[^a-z0-9])n8n_(?:create|update|delete|test|autofix|deploy|trigger|manage)_?\w*/.source,
+  /(?:^|[^a-z0-9])n8n_(?:workflow_versions|executions)\b[^\n]{0,200}?\b(?:rollback|delete|prune)\b/.source,
 ].join('|'), 'i');
 // A run verb negated, with no sentence break before the write: "không chạy", "đừng gọi", "do not run".
-const NEGATED_RUN = /(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)\s+(?:được\s+)?(?:tự\s+)?(?:chạy|gọi|ghi|thực thi|dùng|run|call|execute|use|invoke)(?=$|[^\p{L}])[^.;!?\n]*$/iu;
+const NEGATED_RUN = /(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)\s+(?:được\s+)?(?:tự\s+)?(?:chạy|gọi|ghi|thực thi|dùng|run|call|execute|use|invoke)(?=$|[^\p{L}])[^.,:;!?\n]*$/iu;
 
 const BARE_CLAUDE = /^(opus|sonnet|fable|haiku)$/;
 // Files that never link two tasks into one track: a shared test suite, doc, plan or fixture is not
@@ -164,14 +165,14 @@ function workerText(command, cwd) {
 // Lines of the worker's text that run a production write for real.
 function prodWrites(text) {
   return text.split('\n').map((l) => l.trim()).filter((l) => {
-    if (/--dry-run\b/.test(l)) return false;
     let at = -1;
     for (const m of l.matchAll(LARK_SHORTCUT)) {
       if (!m[1].toLowerCase().split('-').some((seg) => LARK_READ.has(seg))) { at = m.index; break; }
     }
     const w = l.match(PROD_WRITE);
     if (w && (at < 0 || w.index < at)) at = w.index;
-    return at >= 0 && !NEGATED_RUN.test(l.slice(0, at));
+    // `--dry-run` counts only on the write itself, after it on the line, not as a word before it.
+    return at >= 0 && !NEGATED_RUN.test(l.slice(0, at)) && !/--dry-run\b/.test(l.slice(at));
   });
 }
 
@@ -192,7 +193,10 @@ function prodWriteAllowed(command, lines) {
   if (!m) return false;
   const quote = m[1].normalize('NFC').trim().toLowerCase();
   // The sentence must grant something: a write or permission word.
-  if (!/(?:^|[^\p{L}])(ghi|chạy|sửa|xoá|xóa|gửi|cho phép|được phép|write|run|update|delete|send|allow)(?=$|[^\p{L}])/iu.test(quote)) return false;
+  const GRANT = /(?:^|[^\p{L}])(ghi|chạy|sửa|xoá|xóa|gửi|cho phép|được phép|write|run|update|delete|send|allow)(?=$|[^\p{L}])/iu;
+  if (!GRANT.test(quote)) return false;
+  // A negated grant ("đừng ghi …", "không cho phép …") is a prohibition, not a permission.
+  if (/(?:^|[^\p{L}])(?:không|đừng|cấm|chưa|never|do not|don't|must not)\s+(?:\S+\s+){0,2}?(?:ghi|chạy|sửa|xoá|xóa|gửi|cho phép|được phép|write|run|update|delete|send|allow)(?=$|[^\p{L}])/iu.test(quote)) return false;
   let seen = 0;
   for (let i = lines.length - 1; i >= 0 && seen < RECENT_PROMPTS; i--) {
     if (!lines[i].includes('"type":"user"')) continue;
@@ -202,7 +206,9 @@ function prodWriteAllowed(command, lines) {
     seen++;
     // Pasted text is someone else's words, not the user's permission.
     const own = t.replace(/<pasted_content[^>]*>[\s\S]*?<\/pasted_content[^>]*>/g, ' ').normalize('NFC').toLowerCase();
-    if (own.includes(quote)) return true;
+    // The quote is a whole clause of the prompt, not a cut from one.
+    const clauses = own.split(/[.,;!?\n]+/).map((c) => c.trim()).filter(Boolean);
+    if (clauses.includes(quote.replace(/[.,;!?]+$/, '').trim())) return true;
   }
   return false;
 }
