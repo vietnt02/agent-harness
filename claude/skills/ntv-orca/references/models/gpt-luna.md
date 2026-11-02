@@ -5,7 +5,7 @@ effort: max
 ui: tệ                   # tốt | được | tệ | chưa rõ
 backend: được            # tốt | được | tệ | chưa rõ
 speed: nhanh             # nhanh | vừa | chậm | chưa rõ
-source: 2 phiên (phễu quiz — 13 commit, không lần nào respawn; hệ thống hoá đơn — 3 worker, 3 PR) + kinh nghiệm user (codex làm UI tệ; luna làm backend được, nhanh, giá ~1/25 Opus nhưng không bằng flagship)
+source: 2 phiên (13 commit, không lần nào respawn; 3 worker, 3 PR) + kinh nghiệm user (codex làm UI tệ; luna làm backend được, nhanh, giá ~1/25 Opus nhưng không bằng flagship)
 ---
 
 # gpt-luna
@@ -115,11 +115,11 @@ Luna nhanh và rẻ nhưng năng lực không bằng flagship (user chốt).
 
 - Đọc diff, không đọc báo cáo: báo cáo đủ nhưng không nói chỗ chưa kiểm.
 - **Hai đường phải cư xử giống nhau:** khi cùng một hậu quả đi được bằng hai đường
-  (nút Lark và ký trên portal), đặt hai đường cạnh nhau trên từng nhánh. Ví dụ: fallback
-  `tongMoi || soCu` khiến tổng mới = 0 thì đường Lark gửi thư báo chênh còn đường
-  portal im lặng — self-review của Luna không bắt được. (1 phiên)
+  (hai nút khác nhau dẫn tới cùng một thư), đặt hai đường cạnh nhau trên từng nhánh. Ví dụ:
+  fallback `moi || cu` khiến giá trị mới = 0 thì đường này gửi thư báo chênh còn đường kia
+  im lặng — self-review của Luna không bắt được. (1 phiên)
 - **Mode chỉ-đọc không được có side effect:** một lượt chỉ-đọc vẫn chuyển tiếp
-  event phía sau — đọc Lark 5 lần, có thể sinh job PDF. (1 phiên)
+  event phía sau — gọi API nhiều lần, có thể sinh job phía sau. (1 phiên)
 - Tìm lỗi DRY sinh ra từ chính bản vá — khai báo nhân đôi, nguồn sự thật thứ hai.
 - DDL/SQL: không tin số test. Dựng `probe_*`, chạy thật trên DB, đối chiếu, `DROP`
   trong cùng lượt. Soát riêng `CREATE TABLE IF NOT EXISTS` trên bảng đã tồn tại.

@@ -21,6 +21,8 @@ Mỗi phiên chat là `agy_acp_server` do Orca mang theo, bản có thể khác 
   toàn cục.
 - **Model thật:** lấy ở `launch.effective` của receipt và DB hội thoại của chat. Log `cli-*.log` mở
   cùng lúc spawn là của một process `agy` CLI khác, không đọc model hay hook của worker chat từ đó.
+- **Đổi bản `agy` CLI hay runtime chat** (nâng Orca, nâng agy): phát lại fixture của bridge hook
+  trước khi giao worker agy, vì shape payload có thể đổi.
 - **Lệnh foreground bị cắt ở 600 s**; bước dài hơn thì chạy nền và ghi log.
 - **Skill `orchestration` cho agy** phải nằm trong `~/.gemini/config/skills/`; worker chat gọi `ask`,
   `worker_done` nhờ preamble của Orca.
@@ -96,7 +98,7 @@ thì sửa cờ, đừng đổi model:
 | `plan model not specified` dù cờ đúng; Orca báo `outcome_unknown` / `turn_start_unobserved` | spec tới trước khi `agy` đăng nhập xong: màn hình đã khớp `composer_ready` nên Orca gửi spec sớm vài giây. Nhận: trong `cli-*.log`, dòng `plan model` sớm hơn dòng `Propagating selected model override`. Gỡ (bằng chứng là dòng log đó): `worker-abandon`, rồi `worker-start --task <cũ> --terminal <cùng terminal> --retry-of <dispatch cũ>`, không cần worktree mới |
 | `--effort is not supported for model` | bản `agy` cũ: cờ bị bỏ qua, effort theo alias (đoạn Argon ở trên) |
 | `agent_readiness` timeout lặp lại | 4 dòng cuối màn hình không khớp `composer_ready` (§ Orca nhận diện sẵn sàng) |
-| `lastError: The native Antigravity account changed. Select the account again in Accounts…` | Orca so tài khoản trong vault của nó với đăng nhập `agy` trên máy, lệch thì chặn mọi lần Orca tự khởi động `agy` (`--agent antigravity` và cả `terminal create --command agy`); mỗi `agy` mới tự đăng nhập lại nên vault lại lệch. Không nhờ user bấm Select: khởi động qua shell trống (§ Spawn Worker) |
+| `lastError: The native Antigravity account changed. Select the account again in Accounts…` | Orca so tài khoản trong vault của nó với đăng nhập `agy` trên máy, lệch thì chặn mọi lần Orca tự khởi động `agy` (`--agent antigravity` và cả `terminal create --command agy`); mỗi `agy` mới tự đăng nhập lại nên vault lại lệch. Không nhờ user bấm Select: khởi động qua shell trống (§ Spawn Worker, đoạn Fallback: khởi động qua shell trống) |
 
 ## Kiểm và vận hành
 

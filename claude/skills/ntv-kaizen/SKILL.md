@@ -32,6 +32,7 @@ description: "Record a mistake as one file on the Desktop for Viet's next kaizen
   "do" sentence or an automatic check: rules made only of restraints teach stopping early.
 - A fix lands where it holds: a repo's convention in that repo (its PR), a fact about this machine
   or Viet's setup in `~/.claude/knowledge/`, a skill only what holds on any machine;
-  `tests/skills-generic.test.cjs` fails a skill holding a home path, a dispatch ID or a dated event.
+  `tests/skills-generic.test.cjs` fails on the common marks (a home or app-data path, an Orca ID, a
+  dated event, a numbered issue link, a name from the local denylist in `~/.claude/knowledge/`).
 - Check each fix at its own layer (a hook: fixtures that hit and miss), then delete that kaizen
   file. No log of past mistakes is kept.

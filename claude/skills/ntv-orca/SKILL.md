@@ -39,8 +39,9 @@ chat từ chối (`terminal_unsupported_for_agent_session`). Receipt ghi loại 
 (`structured` | `terminal`). Permission của worker chat lấy từ Settings → Chat → Permissions for new
 chats, phải là `Approve for me` (cấu hình máy đang dùng: `~/.claude/knowledge/orca.md`). Mẹo riêng của worker TUI: `references/antigravity.md` § Worker TUI.
 Ép một worker Claude/Codex chạy TUI chỉ khi cần thứ chat không có (ESC ngắt lượt): `agent launch
---agent <a> --surface terminal --model <m> --effort <e>` rồi `worker-start --task <id> --terminal
-<handle> --worktree <nơi nó chạy>` (help 1.4.246 chỉ sang `agent launch` thay cho `terminal create
+--agent <a> --worktree <selector> --surface terminal --model <m> --effort <e>` (thiếu `--worktree` là
+mở ở cwd của coordinator, trái Rule 2) rồi `worker-start --task <id> --terminal <handle> --worktree
+<cùng selector>` (help 1.4.246 chỉ sang `agent launch` thay cho `terminal create
 --command`); model ghi lúc launch vì `--model` không đi cùng
 `--terminal`, và `worker-release` để lại terminal đó
 `retained` nên coordinator tự `terminal close` nó.
@@ -82,7 +83,7 @@ protocol, model escalation) · `rules/process-management.md` (tiến trình mồ
 | | 18 | Model id phải tra catalog của provider, đừng gõ tên gọi; chọn model theo loại việc → `references/models/<dòng>.md` |
 | | 19 | Worktree mới đụng port, agent hỏi duyệt từng bước |
 | **B — Dispatch** | 5 | Parallel hay serial — một dòng trong manifest |
-| | 6 | Cap 4 worker đồng thời, RAM/PID |
+| | 6 | Cap worker theo RAM máy, PID |
 | | 7 | Đừng đặt phase status vào file dùng chung |
 | **C — Runtime** | 8 | Giữ worker khi có việc kế tiếp trong TTL cache; không thì release ngay |
 | | 9 | Hook của repo chặn theo substring trong lệnh |
@@ -249,7 +250,8 @@ path, không symlink).
 - Chọn worktree đích:
   - **Read-only** (debug/query, worker không edit) → target worktree main của
     child repo OK (selector `path:<child-repo-abs-path>` hoặc
-    `id:<childRepoId>::<mainPath>`). **Rule 2 KHÔNG áp** ở đây. Nếu
+    `id:<childRepoId>::<mainPath>`). **Rule 2 (không ngoại lệ read-only) không áp** ở đây: main
+    worktree của repo con không phải cwd của coordinator. Nếu
     contract user explicit read-only ("debug trước", "xác định root cause
     trước", "chỉ scout") → main worktree. Chọn phái sinh worktree = tạo branch
     mới = git mutation → là một dòng trong manifest ask (dưới), không tự chốt

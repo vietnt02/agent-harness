@@ -54,12 +54,13 @@ description: "How Claude does execution work itself: before Claude itself edits 
 - Reviewing code: report everything you find, no severity filter unless Viet asks. After fixing
   review findings, one last review round on the diff only, then stop. Orca review rounds follow the
   stop rule Viet set: the bullet **Tiêu chí dừng** in `ntv-orca/references/coordinator-rules.md`.
-- Reviewing a bug fix: reproduce the bug first with a free read on the runtime the PR/MR blames (a
-  log, a run's output, an env value read inside the container); the diagnosis is right only then,
-  else report it as `chẩn đoán CHƯA kiểm`, whatever the fix's own tests say.
-- A fix for a production bug whose root cause is known ships, in the same PR/MR, a machine check
-  that fails if the cause returns (a build guard, a test on that path); a review comment asking for
-  that check blocks the merge.
+- Reviewing someone's bug fix (its author's own check is this section's first bullet): reproduce the bug first
+  with a free read on the runtime the PR/MR blames (a log, a run's output, whether a setting is set
+  there, never a secret's value); the diagnosis is right only then, else report it as `chẩn đoán
+  CHƯA kiểm`, whatever the fix's own tests say.
+- A production bug fix ships, in the same PR/MR, a machine check that fails if its root cause
+  returns (a build guard, a test on that path); without it, it does not merge. A root cause not
+  yet proven is reported `CHƯA kiểm`, and the change never merges described as the fix.
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
   Orca worker `agy gemini-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
   subagent only when Viet names one. A change to Claude Code itself (`~/.claude` rules, skills,

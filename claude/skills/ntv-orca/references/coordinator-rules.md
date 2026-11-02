@@ -350,9 +350,10 @@ làm; chỉ sinh worker khi ≥2 item chạy song song (Rule 1). Hợp đồng p
   wave xem ai giữ gì bằng `lsof -nP -iTCP -sTCP:LISTEN`, rồi ghi
   `npm run dev:ui -- --port <n> --strictPort` vào spec. Nhớ `wrangler pages dev`
   (8788) là không gian đụng độ **tách biệt** với vite (5173) — hai worker "khác
-  script" vẫn đụng nhau. Cùng chỗ này, spec phải bảo worker `cp <repo>/.env .`:
-  worktree mới không có `.env` (gitignored), app crash trước khi mount và worker
-  chỉ phát hiện sau khi đã làm xong việc.
+  script" vẫn đụng nhau. Cùng chỗ này: worktree chạy
+  `--setup skip`, repo chưa gắn Setup Script, hay worktree giao bằng `path:` (Rule 19) thì không
+  có `.env` (gitignored): spec bảo worker `cp <repo>/.env .`, không thì app crash trước khi mount và
+  worker chỉ phát hiện sau khi đã làm xong việc.
 
 ## Trạng thái Orca báo là claim, không phải fact
 

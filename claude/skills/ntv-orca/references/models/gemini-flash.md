@@ -34,12 +34,11 @@ Không giao task dài: `SKILL.md` Rule 18 § Chọn model theo loại việc.
 
 ## Giao gì
 
-- Backend, data pipeline cỡ vừa có khuôn sẵn trong repo để bám: ingest Lark → Postgres +
-  `dbt_pg`; port workflow n8n sang automation khi có bản live để đối chiếu. Mỗi task 10–25
+- Backend, data pipeline cỡ vừa có khuôn sẵn trong repo để bám: ingest từ một API vào Postgres
+  rồi model dbt; port workflow n8n sang automation khi có bản live để đối chiếu. Mỗi task 10–25
   phút. Cùng phiên, worker `gpt-6-luna max` làm task cỡ tương đương chưa xong sau 30 phút.
   (1 phiên)
-- Dùng lại helper và macro có sẵn thay vì tự viết (`lark_field`, `safe_bigint`,
-  `lark_base_snapshot`); tự giữ đúng ngữ nghĩa giờ của legacy dù spec chỉ dặn một câu.
+- Dùng lại helper và macro có sẵn của repo thay vì tự viết; tự giữ đúng ngữ nghĩa giờ của legacy dù spec chỉ dặn một câu.
   (1 phiên)
 - Dừng hỏi đúng chỗ: chạm file ngoài scope thì hỏi một lần, kèm phương án. (1 phiên)
 
