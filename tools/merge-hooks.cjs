@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function splitShellTokens(cmd) {
@@ -53,7 +54,7 @@ function getHookKey(h, isWin) {
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  let homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  let homeDir = '';
   let nodePath = process.execPath;
   let dryRun = false;
   let backupDir = '';
@@ -61,16 +62,28 @@ function parseArgs() {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--home') {
+      if (i + 1 >= args.length) {
+        console.error('Lỗi: --home cần một tham số đường dẫn.');
+        process.exit(1);
+      }
       homeDir = args[++i];
     } else if (arg.startsWith('--home=')) {
       homeDir = arg.slice(7);
     } else if (arg === '--node') {
+      if (i + 1 >= args.length) {
+        console.error('Lỗi: --node cần một tham số đường dẫn.');
+        process.exit(1);
+      }
       nodePath = args[++i];
     } else if (arg.startsWith('--node=')) {
       nodePath = arg.slice(7);
     } else if (arg === '--dry-run') {
       dryRun = true;
     } else if (arg === '--backup-dir') {
+      if (i + 1 >= args.length) {
+        console.error('Lỗi: --backup-dir cần một tham số đường dẫn.');
+        process.exit(1);
+      }
       backupDir = args[++i];
     } else if (arg.startsWith('--backup-dir=')) {
       backupDir = arg.slice(13);
@@ -81,12 +94,20 @@ function parseArgs() {
   }
 
   if (!homeDir) {
+    homeDir = os.homedir();
+  }
+
+  if (!homeDir) {
     console.error('Lỗi: Cần chỉ định --home hoặc biến môi trường HOME.');
     process.exit(1);
   }
 
-  homeDir = path.resolve(homeDir);
-  nodePath = path.resolve(nodePath);
+  if (!/^[a-zA-Z]:[\\/]/.test(homeDir)) {
+    homeDir = path.resolve(homeDir);
+  }
+  if (!/^[a-zA-Z]:[\\/]/.test(nodePath)) {
+    nodePath = path.resolve(nodePath);
+  }
 
   if (!backupDir) {
     const pad = (n) => String(n).padStart(2, '0');
@@ -127,6 +148,18 @@ function replacePlaceholders(content, homeDir, nodePath, isWin) {
   return content.split('{HOME}').join(normHome).split('{NODE}').join(normNode);
 }
 
+function replaceAgyPlaceholders(content, homeDir, nodePath, isWin) {
+  const normHome = isWin ? homeDir.replace(/\\/g, '/') : homeDir;
+  const normNode = isWin ? nodePath.replace(/\\/g, '/') : nodePath;
+  if (isWin) {
+    return content.replace(/\{NODE\}\s+(\{HOME\}[^\s\\"]+)/g, (_m, script) => {
+      const resolvedScript = script.split('{HOME}').join(normHome);
+      return `\\"${normNode}\\" \\"${resolvedScript}\\"`;
+    });
+  }
+  return content.split('{HOME}').join(normHome).split('{NODE}').join(normNode);
+}
+
 function main() {
   const { homeDir, nodePath, dryRun, backupDir } = parseArgs();
   const repoDir = path.resolve(__dirname, '..');
@@ -148,7 +181,7 @@ function main() {
   const rawAgyShared = fs.readFileSync(agySharedPath, 'utf8');
 
   const replacedClaudeShared = replacePlaceholders(rawClaudeShared, homeDir, nodePath, isWin);
-  const replacedAgyShared = replacePlaceholders(rawAgyShared, homeDir, nodePath, isWin);
+  const replacedAgyShared = replaceAgyPlaceholders(rawAgyShared, homeDir, nodePath, isWin);
 
   let sharedClaudeObj;
   let sharedAgyObj;
@@ -325,4 +358,11 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, getHookKey, splitShellTokens, replacePlaceholders, deepEqual };
+module.exports = {
+  main,
+  getHookKey,
+  splitShellTokens,
+  replacePlaceholders,
+  replaceAgyPlaceholders,
+  deepEqual,
+};

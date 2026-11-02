@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const child_process = require('child_process');
 
@@ -11,24 +12,24 @@ function usage() {
 }
 
 function getNodeBin() {
+  if (process.platform === 'win32') {
+    return process.execPath;
+  }
   const dirs = (process.env.PATH || '').split(path.delimiter);
-  const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
   for (const dir of dirs) {
-    for (const ext of exts) {
-      const candidate = path.join(dir, 'node' + ext);
-      try {
-        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-          return candidate;
-        }
-      } catch (_) {}
-    }
+    const candidate = path.join(dir, 'node');
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate;
+      }
+    } catch (_) {}
   }
   return process.execPath;
 }
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  let homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  let homeDir = '';
   let nodeBin = getNodeBin();
   let dryRun = false;
 
@@ -44,8 +45,10 @@ function parseArgs() {
       homeDir = arg.slice(7);
     } else if (arg === '--node') {
       if (i + 1 >= args.length) {
-        nodeBin = args[++i];
+        console.error('Lỗi: --node cần một tham số đường dẫn.');
+        process.exit(1);
       }
+      nodeBin = args[++i];
     } else if (arg.startsWith('--node=')) {
       nodeBin = arg.slice(7);
     } else if (arg === '--dry-run') {
@@ -56,6 +59,10 @@ function parseArgs() {
       console.error(`Lỗi: Tuỳ chọn không hợp lệ: ${arg}`);
       usage();
     }
+  }
+
+  if (!homeDir) {
+    homeDir = os.homedir();
   }
 
   if (!homeDir) {

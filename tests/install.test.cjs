@@ -358,3 +358,88 @@ test('7. run each hook in installed settings: Claude Code invocation, exit 0 or 
 
   assert.strictEqual(testedHooks, 23, `Expected to test 23 hooks, tested ${testedHooks}`);
 });
+
+test('8. install --node <path> uses specified node binary', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+
+  const customNode = path.join(os.tmpdir(), 'custom-node-bin');
+  const res = runInstall(home, ['--node', customNode]);
+  assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
+
+  const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
+  const sampleHook = settings.hooks.PostToolUse[0].hooks[0];
+  if (process.platform === 'win32') {
+    assert.strictEqual(sampleHook.command, customNode.replace(/\\/g, '/'));
+  } else {
+    assert.ok(sampleHook.command.includes(`"${customNode}"`));
+  }
+});
+
+test('9. install --node without argument fails with exit 1 and error message', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+
+  const res = runInstall(home, ['--node']);
+  assert.strictEqual(res.status, 1, 'Expected exit code 1');
+  assert.ok(
+    res.stderr.includes('Lỗi: --node cần một tham số đường dẫn.'),
+    `Expected error message in stderr, got: ${res.stderr}`
+  );
+});
+
+test('10. HARNESS_PLATFORM=win32 generates quoted node and script paths in hooks.json', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+
+  fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+
+  const customWinNode = 'C:\\Program Files\\nodejs\\node.exe';
+  const res = child_process.spawnSync(
+    process.execPath,
+    [
+      path.join(repoDir, 'tools', 'merge-hooks.cjs'),
+      '--home', home,
+      '--node', customWinNode,
+    ],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, HARNESS_PLATFORM: 'win32' },
+    }
+  );
+  assert.strictEqual(res.status, 0, `merge-hooks failed: ${res.stderr}\n${res.stdout}`);
+
+  const agyHooksPath = path.join(home, '.gemini', 'config', 'hooks.json');
+  assert.ok(fs.existsSync(agyHooksPath), 'hooks.json does not exist');
+  const agyHooks = JSON.parse(fs.readFileSync(agyHooksPath, 'utf8'));
+  const bridge = agyHooks['claude-bridge'];
+  assert.ok(bridge, 'claude-bridge missing in hooks.json');
+
+  function checkCmd(cmd) {
+    assert.match(
+      cmd,
+      /^"[^"]+" "[^"]+"\s+\w+$/,
+      `Command should have quoted node and script paths on win32: ${cmd}`
+    );
+    assert.ok(!cmd.includes('\\'), `Command should use forward slashes: ${cmd}`);
+    assert.ok(cmd.startsWith('"C:/Program Files/nodejs/node.exe"'), `Command should start with quoted node: ${cmd}`);
+  }
+
+  for (const item of bridge.PreInvocation || []) {
+    checkCmd(item.command);
+  }
+  for (const group of bridge.PreToolUse || []) {
+    for (const h of group.hooks || []) {
+      checkCmd(h.command);
+    }
+  }
+  for (const group of bridge.PostToolUse || []) {
+    for (const h of group.hooks || []) {
+      checkCmd(h.command);
+    }
+  }
+  for (const item of bridge.Stop || []) {
+    checkCmd(item.command);
+  }
+});
+
