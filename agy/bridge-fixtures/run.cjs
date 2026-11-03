@@ -67,7 +67,7 @@ function conversation(mode, worker, hasBrain = true) {
   const gh = path.join(root, 'chat');
   const acp = path.join(gh, 'antigravity-acp');
   fs.mkdirSync(path.join(acp, 'conversations'), { recursive: true });
-  fs.writeFileSync(path.join(acp, 'conversations', `${cid}.db`), JSON.stringify(firstInput) + '\n');
+  fs.writeFileSync(path.join(acp, 'conversations', `${cid}.db`), '');
   if (hasBrain) {
     const logs = path.join(acp, 'brain', cid, '.system_generated', 'logs');
     fs.mkdirSync(logs, { recursive: true });
@@ -160,7 +160,6 @@ if (NAP && fs.existsSync(NAP)) {
     const tmpB = fs.mkdtempSync(path.join(root, 'tmp-b-'));
     const convo = conversation('chat', false);
     const brainDir = path.join(convo.vars['{ACP}'], 'brain', convo.cid, '.system_generated');
-    fs.mkdirSync(brainDir, { recursive: true });
     const home = { workspacePaths: [os.homedir()] };
     bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmpA);
     const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmpB);
@@ -170,6 +169,17 @@ if (NAP && fs.existsSync(NAP)) {
     const stateInBrain = fs.existsSync(napBrainState) && !fs.existsSync(napTmpA) && !fs.existsSync(napTmpB);
     const ok = got === 'allow' && stateInBrain;
     report(ok, name, ok ? '' : `got ${got}, stateInBrain=${stateInBrain}`);
+  }
+  {
+    const name = 'umbrella: fallback to os.tmpdir() when brain dir is missing';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('chat', false, false);
+    const home = { workspacePaths: [os.homedir()] };
+    bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmp);
+    const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const napTmp = path.join(tmp, 'claude-nap-context-repo-con');
+    const fellBack = got === 'allow' && fs.existsSync(napTmp);
+    report(fellBack, name, fellBack ? '' : `got ${got}, napInTmp=${fs.existsSync(napTmp)}`);
   }
 } else {
   console.log(`SKIP  umbrella guard (${NAP ? `${NAP} not found` : 'no napHook in local.json'})`);
@@ -183,15 +193,6 @@ for (const mode of ['cli', 'chat']) {
   const direct = conversation(mode, false);
   bridge(payload(mode, direct, { name: 'run_command', args: { CommandLine: 'ls', Cwd: ws } }), tmp);
   report(storedMode(mode, direct, tmp) !== 'worker', `${mode} direct session not taken for a worker`);
-}
-
-{
-  const noBrainWorker = conversation('chat', true, false);
-  const tmpFallback = fs.mkdtempSync(path.join(root, 'tmp-'));
-  bridge(payload('chat', noBrainWorker, { name: 'run_command', args: { CommandLine: 'ls', Cwd: ws } }), tmpFallback);
-  const fallbackFile = path.join(tmpFallback, `agy-hook-state-${noBrainWorker.cid}.json`);
-  const fellBack = fs.existsSync(fallbackFile) && storedMode('chat', noBrainWorker, tmpFallback) === 'worker';
-  report(fellBack, 'chat fallback to os.tmpdir() when brain dir is missing', fellBack ? '' : `missing ${fallbackFile}`);
 }
 
 fs.rmSync(root, { recursive: true, force: true });
