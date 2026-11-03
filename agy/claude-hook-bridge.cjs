@@ -230,12 +230,27 @@ function isDispatchedWorker(payload) {
   return worker;
 }
 
-function getStateFile(payload) {
+function getStateDir(payload) {
   const dir = payload.artifactDirectoryPath;
-  // CLI: brain/<conversationId>. Orca chat sends one shared `<GEMINI_HOME>/artifacts` for every
-  // conversation: a state file there would leak one chat's `mode` into all others.
-  if (dir && payload.conversationId && String(dir).includes(String(payload.conversationId)) && fs.existsSync(dir)) {
-    return path.join(dir, '.system_generated', 'agy-hook-state.json');
+  const cid = payload.conversationId;
+  // CLI: brain/<conversationId>. artifactDirectoryPath holds conversationId and exists.
+  if (dir && cid && String(dir).includes(String(cid)) && fs.existsSync(dir)) {
+    return path.join(dir, '.system_generated');
+  }
+  // Orca chat: transcriptPath is <acp home>/conversations/<cid>.db,
+  // with per-conversation directory at <acp home>/brain/<cid>/.system_generated.
+  const tp = typeof payload.transcriptPath === 'string' ? payload.transcriptPath : '';
+  if (tp.endsWith('.db') && cid) {
+    const brainDir = path.join(path.dirname(path.dirname(tp)), 'brain', String(cid), '.system_generated');
+    if (fs.existsSync(brainDir)) return brainDir;
+  }
+  return os.tmpdir();
+}
+
+function getStateFile(payload) {
+  const dir = getStateDir(payload);
+  if (dir !== os.tmpdir()) {
+    return path.join(dir, 'agy-hook-state.json');
   }
   const id = (payload.conversationId || 'default').replace(/[^A-Za-z0-9_-]/g, '_');
   return path.join(os.tmpdir(), `agy-hook-state-${id}.json`);
@@ -316,6 +331,10 @@ function handlePreInvocation(payload) {
       if (nap) {
         try {
           process.env.CLAUDE_PROJECT_DIR = nap.root;
+          const stateDir = getStateDir(payload);
+          if (stateDir !== os.tmpdir() && !process.env.NAP_CONTEXT_STATE_DIR) {
+            process.env.NAP_CONTEXT_STATE_DIR = path.join(stateDir, 'claude-nap-context-repo-con');
+          }
           const { handle } = require(nap.hookPath);
           handle({ session_id: payload.conversationId, hook_event_name: 'PreCompact' });
         } catch (_) {}
@@ -506,6 +525,10 @@ function handlePreToolUse(payload) {
     if (nap) {
       try {
         process.env.CLAUDE_PROJECT_DIR = nap.root;
+        const stateDir = getStateDir(payload);
+        if (stateDir !== os.tmpdir() && !process.env.NAP_CONTEXT_STATE_DIR) {
+          process.env.NAP_CONTEXT_STATE_DIR = path.join(stateDir, 'claude-nap-context-repo-con');
+        }
         const { handle: napHandle } = require(nap.hookPath);
         if (claudeTool === 'Read') {
           const limit = args.EndLine ?? args.Limit ?? null;
