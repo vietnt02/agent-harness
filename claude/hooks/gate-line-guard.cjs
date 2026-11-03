@@ -10,12 +10,17 @@
  * Same gate for git writing into the user's main checkout (merge, pull, reset, checkout, …): a linked
  * worktree passes, since workers and approved work live in their own. Reading the latest code needs
  * only `git fetch` + `git show origin/<b>:<path>`. `git -c core.hooksPath=…` is gated everywhere.
+ * Scope: this catches the slips of an agent that follows its rules, not an agent trying to get past
+ * it (that is no security boundary; permissions are). Commands agents really write are read right
+ * and never blocked by mistake; shell tricks that hide a git write (brace expansion, escaped
+ * flags, deep nesting) are out of scope, since chasing them grows the parser and the false blocks.
  */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { promptText } = require('./lib/user-intent.cjs');
 const { expandHome } = require('./lib/platform.cjs');
+const { commands, program, innerScript } = require('./lib/shell-words.cjs');
 
 const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
@@ -32,14 +37,11 @@ const REMOTE_WRITE = new RegExp(
   'is'
 );
 
-const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
-const GIT_LOCAL_WRITE = new RegExp(
-  String.raw`(?:^|[;&|(\n]\s*|\b(?:then|do)\s+)git((?:\s+-C\s+${ARG}|\s+-c\s+\S+)*)\s+` +
-    String.raw`(?:(?:merge|pull|rebase|reset|checkout|switch|commit|cherry-pick|revert|am|clean|restore)(?![\w-])` +
-    String.raw`|stash(?:\s+(?:push|pop|drop|apply|clear)\b|\s*(?:$|[;&|)]))` +
-    String.raw`|branch\s+(?:-[dDmM]|--delete|--move)\b|worktree\s+(?:add|remove)\b|tag\s+(?:-d|--delete)\b)`,
-  'gm'
-);
+const GIT_WRITE = new Set(['merge', 'pull', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am', 'clean', 'restore', 'update-ref']);
+const STASH_READ = new Set(['list', 'show', 'create']);
+const WORKTREE_WRITE = new Set(['add', 'remove', 'move']);
+// Global options that take the next word as their value.
+const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
 const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
@@ -57,20 +59,67 @@ function isMainCheckout(dir) {
   }
 }
 
-// True when a git write in the command targets a main checkout: its `-C` path, else the last
-// `cd <path>` before it, else the hook's cwd.
-// A heredoc body is data written somewhere, not a command that runs.
-const stripHeredocs = (s) => s.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, '<<HEREDOC');
+// Where a git command that writes into a checkout runs: `{ dirs }` (its `-C` paths, applied in
+// order), `{ dirs: null }` when a global option or variable points it elsewhere (`--git-dir`,
+// `--work-tree`, `GIT_DIR=`), or null when it is no write. `words` are one simple command from
+// shell-words, so text inside quotes, comments and heredoc bodies are never read as commands.
+function gitWrite(raw, words) {
+  if (words[0] !== 'git') return null;
+  let dirs = raw.some((w) => /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w)) ? null : [];
+  let i = 1;
+  while (i < words.length && words[i].startsWith('-')) {
+    const w = words[i];
+    if (w === '-C' && dirs) dirs.push(words[i + 1] || '.');
+    if (/^--(git-dir|work-tree)(=|$)/.test(w)) dirs = null;
+    i += GLOBAL_VALUE.has(w) ? 2 : 1;
+  }
+  const sub = words[i];
+  const args = words.slice(i + 1);
+  const write = GIT_WRITE.has(sub) ||
+    (sub === 'stash' && !STASH_READ.has(args[0])) ||
+    (sub === 'branch' && args.some((a) => /^-[a-zA-Z]*[dDmMfcCu]/.test(a) || /^--(delete|move|force|copy|set-upstream-to|unset-upstream|edit-description)\b/.test(a))) ||
+    (sub === 'worktree' && WORKTREE_WRITE.has(args[0])) ||
+    (sub === 'tag' && args.some((a) => /^-[a-zA-Z]*[df]/.test(a) || a === '--delete' || a === '--force'));
+  return write ? { dirs } : null;
+}
 
+// The directory a `cd`/`pushd` leads to from `base`, or null when it cannot be known here (a
+// variable, `-`, a stack entry, a directory that does not exist yet).
+function cdTarget(words, base) {
+  if (base === null) return null;
+  const args = words.slice(1).filter((a, k, all) => !(/^-[LPe@]+$/.test(a) && all.slice(0, k).every((b) => b.startsWith('-'))));
+  const target = args[0] === '--' ? args[1] : args[0];
+  if (words[0] === 'popd' || !target || target === '-' || /^[+-]\d+$/.test(target) || /[$`]/.test(target)) return null;
+  const dir = resolveDir(target, base);
+  return fs.existsSync(dir) ? dir : null;
+}
+
+// True when a git write in the command may target a main checkout. Its directory: the `-C` paths,
+// from the one the `cd`s before it lead to in its own shell (a `cd` inside `(…)` or `$(…)` ends
+// there), else the hook's cwd; a directory that cannot be known counts as a main checkout. The
+// script of `bash -c`/`eval` is read the same way.
 function writesMainCheckout(command, cwd) {
-  command = stripHeredocs(command);
-  for (const m of command.matchAll(GIT_LOCAL_WRITE)) {
-    const dashC = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].pop();
-    const cds = [...command.slice(0, m.index).matchAll(new RegExp(String.raw`(?:^|[;&|(\n]\s*)cd\s+(${ARG})`, 'g'))];
+  const cds = [];
+  const dirIn = (scope) => {
     let dir = cwd;
-    if (cds.length) dir = resolveDir(cds.pop()[1], cwd);
-    if (dashC) dir = resolveDir(dashC[1], dir);
-    if (isMainCheckout(dir)) return true;
+    for (const cd of cds) if (scope === cd.scope || scope.startsWith(`${cd.scope}.`)) dir = cd.dir;
+    return dir;
+  };
+  const isMain = (dir) => dir === null || isMainCheckout(dir);
+  for (const raw of commands(command)) {
+    const words = program(raw);
+    let here = dirIn(raw.scope);
+    if (words.chdir !== undefined) here = cdTarget(['cd', words.chdir], here);
+    if (['cd', 'pushd', 'popd'].includes(words[0])) {
+      cds.push({ scope: raw.scope, dir: cdTarget(words, here) });
+      continue;
+    }
+    const script = innerScript(words);
+    if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
+    const git = gitWrite(raw, words);
+    if (!git) continue;
+    const dir = git.dirs && git.dirs.reduce((d, c) => (d === null || /[$`]/.test(c) ? null : resolveDir(c, d)), here);
+    if (isMain(git.dirs ? dir : null)) return true;
   }
   return false;
 }

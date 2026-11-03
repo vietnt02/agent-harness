@@ -590,6 +590,146 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { transcript_path: wt }), '');
       assert.equal(guard.decide({ session_id: session(), cwd: tmp, tool_name: 'Bash', tool_input: { command: `cat ${sh(repos)}/app/a` } }, { list: null }), '');
     });
+
+    await t.test("a whole Read of the instructions file a rules hook asks for does not count", () => {
+      turn();
+      const repo = (name, files) => {
+        const dir = path.join(repos, name);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, '.git'), 'gitdir: x');
+        for (const f of files) fs.writeFileSync(path.join(dir, f), f);
+        return dir;
+      };
+      const both = repo('both', ['AGENTS.md', 'CLAUDE.md', 'README.md']);
+      const claudeOnly = repo('claude-only', ['CLAUDE.md', 'README.md']);
+      const readmeOnly = repo('readme-only', ['README.md']);
+      const linked = repo('linked', ['CLAUDE.md']);
+      fs.writeFileSync(path.join(tmp, 'outside.md'), 'data');
+      fs.symlinkSync(path.join(tmp, 'outside.md'), path.join(linked, 'AGENTS.md'));
+      const plain = path.join(repos, 'plain');
+      fs.mkdirSync(plain, { recursive: true });
+      fs.writeFileSync(path.join(plain, 'AGENTS.md'), 'x');
+      call('Bash', { command: `cat ${sh(repos)}/app/a` });
+      call('Bash', { command: `cat ${sh(repos)}/app/b` });
+      for (const f of [path.join(both, 'AGENTS.md'), path.join(claudeOnly, 'README.md'), 'repos/both/AGENTS.md', path.join(linked, 'AGENTS.md')]) {
+        assert.equal(call('Read', { file_path: f }), '', f);
+      }
+      for (const [f, extra] of [
+        [path.join(both, 'AGENTS.md'), { limit: 30 }],
+        [path.join(both, 'AGENTS.md'), { offset: 10 }],
+        [path.join(both, 'CLAUDE.md'), {}],
+        [path.join(both, 'README.md'), {}],
+        [path.join(claudeOnly, 'CLAUDE.md'), {}],
+        [path.join(readmeOnly, 'README.md'), {}],
+        [path.join(linked, 'CLAUDE.md'), {}],
+        [path.join(plain, 'AGENTS.md'), {}],
+        [path.join(both, 'sub', 'AGENTS.md'), {}],
+      ]) assert.notEqual(call('Read', { file_path: f, ...extra }), '', `${f} ${JSON.stringify(extra)}`);
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('shell-words: a backslash in double quotes escapes only $ ` " \\', () => {
+  const { commands } = require('../claude/hooks/lib/shell-words.cjs');
+  assert.deepEqual([...commands('echo "a\\b \\$x \\" \\\\"')[0]], ['echo', 'a\\b $x " \\']);
+});
+
+test('gate-line-guard: only git that runs is a git write', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-echo-'));
+  execFileSync('git', ['init', '-q', tmp]);
+  const linked = path.join(tmp, 'linked');
+  fs.writeFileSync(path.join(tmp, 'f'), 'x');
+  execFileSync('git', ['-C', tmp, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--allow-empty']);
+  execFileSync('git', ['-C', tmp, 'worktree', 'add', '-q', linked]);
+  const writes = (command) => gateLineGuard.writesMainCheckout(command, tmp);
+  // Bash command strings use forward slashes: a shell reads `\` as an escape (Git Bash on Windows too).
+  const L = linked.split(path.sep).join('/');
+  const T = tmp.split(path.sep).join('/');
+  try {
+    await t.test('git quoted as text, in a comment or a heredoc passes', () => {
+      for (const c of [
+        'echo "Worktree: \\`git fetch origin x && git checkout --detach abc\\`."',
+        "{ echo '# Spec'; echo \"run: git fetch && git checkout x\"; } > /tmp/w1.md",
+        'printf "%s\\n" "git -C repo reset --hard && git merge x" > /tmp/s.md',
+        'echo hi \\&\\& git checkout x',
+        "echo 'Run `git fetch` && git checkout x' > /tmp/spec.md",
+        "echo 'see $(git rev-parse HEAD) && git merge x' > /tmp/spec.md",
+        'if true; then :; else echo "a && git checkout x"; fi',
+        'command echo "a && git checkout x"',
+        '# git checkout main',
+        "cat > /tmp/s.md <<'EOF'\ngit checkout main\nEOF",
+        `cd ${L} && git checkout -q HEAD`,
+        `git -C ${L} reset --hard`,
+        'git fetch origin && git show origin/main:f',
+      ]) assert.equal(writes(c), false, c);
+    });
+    await t.test('git that runs stays gated, whatever text surrounds it', () => {
+      for (const c of [
+        'echo start; git checkout main',
+        'echo "a" && git merge feat',
+        'echo "$(git checkout main)"',
+        'echo "x" "$(git reset --hard)"',
+        'echo "`true && git checkout main`"',
+        'echo `git checkout main`',
+        'echo "${x:-`git checkout main`}"',
+        'git commit -m "echo x"',
+        `grep "a;echo it's" f && git checkout main`,
+        "echo $'it\\'s'; git checkout main",
+        "# note; echo can't hurt\ngit checkout main",
+        `ls "x|echo don't" ; git reset --hard`,
+        'echo "a\\"b" && git checkout main',
+        `cd ${L} && cd .. && git stash`,
+        `git -C ${L} -C .. branch -D x`,
+        'sudo git clean -fd',
+        'echo "$(printf "%s" x; git checkout main)"',
+        `echo "$(printf '"')" && git checkout main`,
+        'out="$(git log -1 --format="%H" && git reset --hard)"',
+        'bash -c "true; git checkout main"',
+        'eval "true; git checkout main"',
+        'sh -c "git checkout main"',
+        'bash -lc \'git pull\'',
+        ...['-u', '-m wip', '--keep-index', 'save wip', 'branch tmp', 'store abc'].map((a) => `git stash ${a}`),
+        'git branch -f main HEAD~1',
+        'git branch -Df x',
+        'git update-ref refs/heads/main HEAD~1',
+        'git tag -f v1',
+        `git --work-tree . checkout main`,
+        `cd ${L} && git --work-tree=${T} checkout main`,
+        `cd ${L} && GIT_WORK_TREE=${T} git checkout main`,
+        'timeout 30 git pull',
+        'xargs -J % git branch -D %',
+        'xargs -s 100 git branch -d',
+        `cd ${L} && env -C ${T} git checkout main`,
+        `(cd ${L} && git status); git checkout main`,
+        `x=$(cd ${L}; pwd); git checkout main`,
+        `cd ${L} && pushd ${T} && git checkout main`,
+        `cd ${L} && cd -- ${T} && git checkout main`,
+        `cd ${L} && cd -P ${T} && git checkout main`,
+        `cd ${L} && M=${T}; cd $M && git checkout main`,
+        `cd ${L} && cd - && git checkout main`,
+        `cd ${L} && cd ${L}/not-made-yet && git checkout main`,
+        'cat <<EOF > /tmp/x && git checkout main\nbody\nEOF',
+        'cat > /tmp/f <<EOF\n$(git checkout main)\nEOF',
+      ]) assert.equal(writes(c), true, c);
+    });
+    await t.test('printed text after a substitution, or under a dashed heredoc tag, is not run', () => {
+      for (const c of [
+        'gh pr create --body "see $(date); git checkout main"',
+        'echo "$(date) \\$(git checkout main)"',
+        "cat <<'END-X'\ngit checkout main\nEND-X",
+        "cat > /tmp/f <<'EOF'\n$(git checkout main)\nEOF",
+        `(cd ${L} && git checkout -q HEAD)`,
+        `cd ${L} && x=$(cd ${T}; pwd) && git checkout -q HEAD`,
+        `cd ${L} && bash -c "git checkout -q HEAD"`,
+        'ssh host "git checkout main"',
+        `cd -- ${L} && git checkout -q HEAD`,
+        'git stash list',
+        'git branch -a',
+        'git tag -l',
+      ]) assert.equal(writes(c), false, c);
+    });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
