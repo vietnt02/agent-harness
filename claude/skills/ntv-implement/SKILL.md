@@ -53,7 +53,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
   denominator, exclusions and every miss by identifier.
 - Reviewing code: report everything you find, no severity filter unless Viet asks. After fixing
   review findings, one last review round on the diff only, then stop. Orca review rounds follow the
-  stop rule Viet set: the bullet **Tiêu chí dừng** in `ntv-orca/references/coordinator-rules.md`.
+  stop rule Viet set: **Tiêu chí dừng** in `ntv-orca` § 4.
 - Reviewing someone's bug fix (its author's own check is this section's first bullet): reproduce the bug first
   with a free read on the runtime the PR/MR blames (a log, a run's output, whether a setting is set
   there, never a secret's value); the diagnosis is right only then, else report it as `chẩn đoán

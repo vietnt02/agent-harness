@@ -5,7 +5,7 @@
  * `Track:` line per worker, listing each task with the files it
  * touches: `Track: w17 ← sửa chốt [gui/chot.py, giao_dien.py] | tắt backend [app.py]`.
  * A worker given ≥2 tasks whose file sets do not chain through a shared source file is blocked: they are
- * separate tracks for separate workers (skills/ntv-orca/SKILL.md Rule 5). Test, doc, plan and fixture files
+ * separate tracks for separate workers (skills/ntv-orca/SKILL.md § 2, Song song và cap). Test, doc, plan and fixture files
  * never link tasks: a shared test suite is not a shared file. The user's request for serial work or memory pressure is written on the line as
  * `(serial: <lý do>)`; it counts only when one of the user's last 10 prompts asks for it ("chạy serial",
  * "làm tuần tự"; not a complaint, a negation, a question or "serial number") or
@@ -14,12 +14,12 @@
  * file list it in each group and chain into one track. A command whose every worker-start is `--retry-of`
  * is exempt.
  * An antigravity worker started without `--effort` is blocked, `--retry-of` included: agy then runs
- * Medium, not the High ntv-orca coordinator-rules.md (Rule 18) requires. `--terminal` reuses a running agy.
+ * Medium, not the High ntv-orca § 2 (Chọn model) requires. `--terminal` reuses a running agy.
  * A claude worker whose `--model` is not a bare alias (opus, sonnet, fable, haiku) is blocked unless the
  * command holds a `# Model: user chỉ định <bản>` line: a full id outside Orca's catalog drops the
- * worker's `Approve for me` permission mode (ntv-orca Rule 18). A claude worker at all needs a
+ * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude worker at all needs a
  * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
- * (Rule 18), and the manifest's model column is written before that rule is in view.
+ * (ntv-orca § 2, Chọn model), and the manifest's model column is written before that rule is in view.
  * `worker-start --help` is not a dispatch.
  * A spec or message the coordinator hands a worker (`worker-start`, `task-create`, `send`, `reply`,
  * `dispatch`) that holds a Lark or n8n production write is blocked: a worker only scouts, builds the
@@ -309,14 +309,14 @@ function verdict(lines, input, ctx) {
     if (roots) {
       return `\`${line.trim()}\` gives a task files under ${roots.join(', ')}: name each file group as its own ` +
         'task (`| task [files]`), so unrelated groups go to separate workers, each on its own branch; the ' +
-        'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca Rule 5). ' +
+        'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca § 2, Song song và cap). ' +
         'Groups that truly edit one shared source file list that file in each group, and stay one track. ' +
         'A shared test, doc, plan or fixture file does not link groups.';
     }
     const split = unrelatedTasks(line, ctx);
     if (split.length) {
       return `\`${line.trim()}\` bundles tasks that share no source file (${split.join(', ')}): give each its own ` +
-        'worker, dispatched now (ntv-orca Rule 5); shared test, doc, plan or fixture files do not count. Only the ' +
+        'worker, dispatched now (ntv-orca § 2, Song song và cap); shared test, doc, plan or fixture files do not count. Only the ' +
         'user\'s request for serial work or memory pressure ≥2 keeps them together, written on the line as ' +
         '`(serial: <lý do>)`.' + serialNote;
     }
@@ -354,19 +354,19 @@ process.stdin.on('end', () => {
     const model = unpinnedClaudeModel(command, starts);
     if (model) {
       process.stderr.write(`dispatch-split-guard: a claude worker takes a bare alias (\`--model opus\`, sonnet, ` +
-        `fable, haiku), not \`${model}\` (ntv-orca Rule 18): an id outside Orca's catalog drops the worker's ` +
+        `fable, haiku), not \`${model}\` (ntv-orca § 2, Chọn model): an id outside Orca's catalog drops the worker's ` +
         '`Approve for me` mode. A version the user named: add a `# Model: user chỉ định <bản>` line.\n');
       process.exit(2);
     }
     if (claudeWithoutReason(command, starts)) {
       process.stderr.write('dispatch-split-guard: a claude worker needs a `# Model: <lý do>` line in the command. ' +
-        'A medium task goes to `gemini-flash`, and to `gpt-luna` only when flash is out of quota (ntv-orca Rule 18); ' +
+        'A medium task goes to `gemini-flash`, and to `gpt-luna` only when flash is out of quota (ntv-orca § 2, Chọn model); ' +
         'claude only when its column pick wins or the user named it.\n');
       process.exit(2);
     }
     if (missingEffort(starts)) {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
-        'e.g. `--model gemini-3.8-flash --effort high` (ntv-orca coordinator-rules.md, Rule 18); without it agy ' +
+        'e.g. `--model gemini-3.8-flash --effort high` (ntv-orca § 2, Chọn model); without it agy ' +
         'runs Medium. A model with one level gets exactly that level (`agy models`).\n');
       process.exit(2);
     }
