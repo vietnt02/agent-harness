@@ -522,10 +522,10 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
 
     await t.test('reads outside the list, gate and CI commands do not count', () => {
       turn();
-      for (let i = 0; i < 4; i++) assert.equal(call('Bash', { command: `cat ${sh(tmp)}/other-${i}` }), '');
+      for (let i = 0; i < 4; i++) assert.equal(call('Bash', { command: `cat "${sh(tmp)}/other-${i}"` }), '');
       assert.equal(call('Bash', { command: 'gh pr view 3 --json state' }), '');
       assert.equal(call('Bash', { command: 'git -C repos/app fetch -q origin' }), '');
-      assert.equal(call('Bash', { command: `sh ${sh(tmp)}/watch.sh 600 sh ci.sh 3` }), '');
+      assert.equal(call('Bash', { command: `sh "${sh(tmp)}/watch.sh" 600 sh ci.sh 3` }), '');
       assert.equal(call('Bash', { command: 'orca orchestration check --run r1' }), '');
       assert.equal(call('Read', { file_path: path.join(repos, 'app', 'a') }), '');
       assert.equal(call('Read', { file_path: path.join(repos, 'app', 'b') }), '');
@@ -552,8 +552,8 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
 
     await t.test('a free command in a chain frees only itself; wrappers are seen through', () => {
       turn();
-      call('Bash', { command: `gh --version; cat ${sh(repos)}/app/a` });
-      call('Bash', { command: `git -C ${sh(repos)}/app fetch && cat ${sh(repos)}/app/b` });
+      call('Bash', { command: `gh --version; cat "${sh(repos)}/app/a"` });
+      call('Bash', { command: `git -C "${sh(repos)}/app" fetch && cat "${sh(repos)}/app/b"` });
       assert.notEqual(call('Bash', { command: 'sudo ssh h3 ls' }), '');
     });
 
@@ -561,25 +561,25 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       turn();
       call('Bash', { command: 'echo orchestration worker-start' });
       call('Bash', { command: 'orca orchestration worker-start --help' });
-      call('Bash', { command: `cat ${sh(repos)}/app/a` });
-      call('Bash', { command: `cat ${sh(repos)}/app/b` });
-      assert.notEqual(call('Bash', { command: `cat ${sh(repos)}/app/c` }), '');
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      call('Bash', { command: `cat "${sh(repos)}/app/b"` });
+      assert.notEqual(call('Bash', { command: `cat "${sh(repos)}/app/c"` }), '');
     });
 
     await t.test('a turn Orca wakes is the gate: its reads do not count', () => {
       n++;
       guard.decide({ session_id: session(), hook_event_name: 'UserPromptSubmit', prompt: 'You have 1 orchestration message. Run `orca orchestration check --run r1`.' }, { list });
-      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: `git -C ${sh(repos)}/app diff HEAD~1` }), '');
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: `git -C "${sh(repos)}/app" diff HEAD~1` }), '');
     });
 
     await t.test('a CI script frees only when it is the program, not an argument; git add is free', () => {
       turn();
       const inRepo = { cwd: path.join(repos, 'app') };
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'git add f.sql' }, inRepo), '');
-      call('Bash', { command: `sh ${sh(tmp)}/watch.sh 600 sh ci.sh 3` });
-      call('Bash', { command: `cat ${sh(tmp)}/ci.sh ${sh(repos)}/app/a` });
-      call('Bash', { command: `cat ${sh(repos)}/app/b` });
-      assert.notEqual(call('Bash', { command: `cat ${sh(repos)}/app/c` }), '');
+      call('Bash', { command: `sh "${sh(tmp)}/watch.sh" 600 sh ci.sh 3` });
+      call('Bash', { command: `cat "${sh(tmp)}/ci.sh" "${sh(repos)}/app/a"` });
+      call('Bash', { command: `cat "${sh(repos)}/app/b"` });
+      assert.notEqual(call('Bash', { command: `cat "${sh(repos)}/app/c"` }), '');
     });
 
     await t.test('a subagent, a worker session and no list all pass', () => {
@@ -588,7 +588,7 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       const wt = path.join(tmp, 'w.jsonl');
       fs.writeFileSync(wt, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'Please carry out this task from my Orca coordinator.\nTask: x' } })}\n`);
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { transcript_path: wt }), '');
-      assert.equal(guard.decide({ session_id: session(), cwd: tmp, tool_name: 'Bash', tool_input: { command: `cat ${sh(repos)}/app/a` } }, { list: null }), '');
+      assert.equal(guard.decide({ session_id: session(), cwd: tmp, tool_name: 'Bash', tool_input: { command: `cat "${sh(repos)}/app/a"` } }, { list: null }), '');
     });
 
     await t.test("a whole Read of the instructions file a rules hook asks for does not count", () => {
@@ -609,8 +609,8 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       const plain = path.join(repos, 'plain');
       fs.mkdirSync(plain, { recursive: true });
       fs.writeFileSync(path.join(plain, 'AGENTS.md'), 'x');
-      call('Bash', { command: `cat ${sh(repos)}/app/a` });
-      call('Bash', { command: `cat ${sh(repos)}/app/b` });
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      call('Bash', { command: `cat "${sh(repos)}/app/b"` });
       for (const f of [path.join(both, 'AGENTS.md'), path.join(claudeOnly, 'README.md'), 'repos/both/AGENTS.md', path.join(linked, 'AGENTS.md')]) {
         assert.equal(call('Read', { file_path: f }), '', f);
       }
@@ -660,8 +660,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'command echo "a && git checkout x"',
         '# git checkout main',
         "cat > /tmp/s.md <<'EOF'\ngit checkout main\nEOF",
-        `cd ${L} && git checkout -q HEAD`,
-        `git -C ${L} reset --hard`,
+        `cd "${L}" && git checkout -q HEAD`,
+        `git -C "${L}" reset --hard`,
         'git fetch origin && git show origin/main:f',
       ]) assert.equal(writes(c), false, c);
     });
@@ -680,8 +680,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         "# note; echo can't hurt\ngit checkout main",
         `ls "x|echo don't" ; git reset --hard`,
         'echo "a\\"b" && git checkout main',
-        `cd ${L} && cd .. && git stash`,
-        `git -C ${L} -C .. branch -D x`,
+        `cd "${L}" && cd .. && git stash`,
+        `git -C "${L}" -C .. branch -D x`,
         'sudo git clean -fd',
         'echo "$(printf "%s" x; git checkout main)"',
         `echo "$(printf '"')" && git checkout main`,
@@ -696,20 +696,20 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'git update-ref refs/heads/main HEAD~1',
         'git tag -f v1',
         `git --work-tree . checkout main`,
-        `cd ${L} && git --work-tree=${T} checkout main`,
-        `cd ${L} && GIT_WORK_TREE=${T} git checkout main`,
+        `cd "${L}" && git --work-tree="${T}" checkout main`,
+        `cd "${L}" && GIT_WORK_TREE="${T}" git checkout main`,
         'timeout 30 git pull',
         'xargs -J % git branch -D %',
         'xargs -s 100 git branch -d',
-        `cd ${L} && env -C ${T} git checkout main`,
-        `(cd ${L} && git status); git checkout main`,
-        `x=$(cd ${L}; pwd); git checkout main`,
-        `cd ${L} && pushd ${T} && git checkout main`,
-        `cd ${L} && cd -- ${T} && git checkout main`,
-        `cd ${L} && cd -P ${T} && git checkout main`,
-        `cd ${L} && M=${T}; cd $M && git checkout main`,
-        `cd ${L} && cd - && git checkout main`,
-        `cd ${L} && cd ${L}/not-made-yet && git checkout main`,
+        `cd "${L}" && env -C "${T}" git checkout main`,
+        `(cd "${L}" && git status); git checkout main`,
+        `x=$(cd "${L}"; pwd); git checkout main`,
+        `cd "${L}" && pushd "${T}" && git checkout main`,
+        `cd "${L}" && cd -- "${T}" && git checkout main`,
+        `cd "${L}" && cd -P "${T}" && git checkout main`,
+        `cd "${L}" && M="${T}"; cd $M && git checkout main`,
+        `cd "${L}" && cd - && git checkout main`,
+        `cd "${L}" && cd "${L}/not-made-yet" && git checkout main`,
         'cat <<EOF > /tmp/x && git checkout main\nbody\nEOF',
         'cat > /tmp/f <<EOF\n$(git checkout main)\nEOF',
       ]) assert.equal(writes(c), true, c);
@@ -720,11 +720,11 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'echo "$(date) \\$(git checkout main)"',
         "cat <<'END-X'\ngit checkout main\nEND-X",
         "cat > /tmp/f <<'EOF'\n$(git checkout main)\nEOF",
-        `(cd ${L} && git checkout -q HEAD)`,
-        `cd ${L} && x=$(cd ${T}; pwd) && git checkout -q HEAD`,
-        `cd ${L} && bash -c "git checkout -q HEAD"`,
+        `(cd "${L}" && git checkout -q HEAD)`,
+        `cd "${L}" && x=$(cd "${T}"; pwd) && git checkout -q HEAD`,
+        `cd "${L}" && bash -c "git checkout -q HEAD"`,
         'ssh host "git checkout main"',
-        `cd -- ${L} && git checkout -q HEAD`,
+        `cd -- "${L}" && git checkout -q HEAD`,
         'git stash list',
         'git branch -a',
         'git tag -l',
