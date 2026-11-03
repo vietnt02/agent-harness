@@ -55,7 +55,7 @@ fs.writeFileSync(path.join(ws, 'README.md'), '# fixture\n');
 
 let n = 0;
 // A conversation laid out as the given mode stores it; `worker` puts the Orca preamble first.
-function conversation(mode, worker) {
+function conversation(mode, worker, hasBrain = true) {
   const cid = `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
   const firstInput = { type: 'USER_INPUT', content: worker ? `${PREAMBLE}\nTask: x` : 'Kiểm pipeline hôm nay' };
   if (mode === 'cli') {
@@ -68,9 +68,11 @@ function conversation(mode, worker) {
   const acp = path.join(gh, 'antigravity-acp');
   fs.mkdirSync(path.join(acp, 'conversations'), { recursive: true });
   fs.writeFileSync(path.join(acp, 'conversations', `${cid}.db`), '');
-  const logs = path.join(acp, 'brain', cid, '.system_generated', 'logs');
-  fs.mkdirSync(logs, { recursive: true });
-  fs.writeFileSync(path.join(logs, 'transcript.jsonl'), JSON.stringify(firstInput) + '\n');
+  if (hasBrain) {
+    const logs = path.join(acp, 'brain', cid, '.system_generated', 'logs');
+    fs.mkdirSync(logs, { recursive: true });
+    fs.writeFileSync(path.join(logs, 'transcript.jsonl'), JSON.stringify(firstInput) + '\n');
+  }
   fs.mkdirSync(path.join(gh, 'artifacts'), { recursive: true }); // the shared dir Orca names
   return { cid, vars: { '{ACP}': acp, '{GH}': gh, '{CID}': cid, '{WS}': ws } };
 }
@@ -93,7 +95,10 @@ function bridge(p, tmp) {
 function storedMode(mode, convo, tmp) {
   const files = [path.join(tmp, `agy-hook-state-${convo.cid}.json`)];
   if (mode === 'cli') files.push(path.join(convo.vars['{CLI_BRAIN}'], '.system_generated', 'agy-hook-state.json'));
-  else files.push(path.join(convo.vars['{GH}'], 'artifacts', '.system_generated', 'agy-hook-state.json'));
+  else {
+    files.push(path.join(convo.vars['{GH}'], 'artifacts', '.system_generated', 'agy-hook-state.json'));
+    if (convo.vars['{ACP}']) files.push(path.join(convo.vars['{ACP}'], 'brain', convo.cid, '.system_generated', 'agy-hook-state.json'));
+  }
   for (const f of files) { try { return JSON.parse(fs.readFileSync(f, 'utf8')).mode || null; } catch (_) { /* next */ } }
   return null;
 }
@@ -148,6 +153,33 @@ if (NAP && fs.existsSync(NAP)) {
     if (readFirst) bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmp);
     const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
     report(got === want, name, got === want ? '' : `got ${got}, want ${want}`);
+  }
+  {
+    const name = 'umbrella: read AGENTS.md with TMPDIR=A, then ls in sub-repo with TMPDIR=B';
+    const tmpA = fs.mkdtempSync(path.join(root, 'tmp-a-'));
+    const tmpB = fs.mkdtempSync(path.join(root, 'tmp-b-'));
+    const convo = conversation('chat', false);
+    const brainDir = path.join(convo.vars['{ACP}'], 'brain', convo.cid, '.system_generated');
+    const home = { workspacePaths: [os.homedir()] };
+    bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmpA);
+    const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmpB);
+    const napBrainState = path.join(brainDir, 'claude-nap-context-repo-con');
+    const napTmpA = path.join(tmpA, 'claude-nap-context-repo-con');
+    const napTmpB = path.join(tmpB, 'claude-nap-context-repo-con');
+    const stateInBrain = fs.existsSync(napBrainState) && !fs.existsSync(napTmpA) && !fs.existsSync(napTmpB);
+    const ok = got === 'allow' && stateInBrain;
+    report(ok, name, ok ? '' : `got ${got}, stateInBrain=${stateInBrain}`);
+  }
+  {
+    const name = 'umbrella: fallback to os.tmpdir() when brain dir is missing';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('chat', false, false);
+    const home = { workspacePaths: [os.homedir()] };
+    bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmp);
+    const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const napTmp = path.join(tmp, 'claude-nap-context-repo-con');
+    const fellBack = got === 'allow' && fs.existsSync(napTmp);
+    report(fellBack, name, fellBack ? '' : `got ${got}, napInTmp=${fs.existsSync(napTmp)}`);
   }
 } else {
   console.log(`SKIP  umbrella guard (${NAP ? `${NAP} not found` : 'no napHook in local.json'})`);
