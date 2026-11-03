@@ -590,6 +590,51 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { transcript_path: wt }), '');
       assert.equal(guard.decide({ session_id: session(), cwd: tmp, tool_name: 'Bash', tool_input: { command: `cat ${sh(repos)}/app/a` } }, { list: null }), '');
     });
+
+    await t.test("a whole Read of a checkout's agent instructions does not count", () => {
+      turn();
+      const app = path.join(repos, 'app');
+      const docs = path.join(repos, 'docs');
+      fs.mkdirSync(path.join(app, '.git'), { recursive: true });
+      fs.mkdirSync(docs, { recursive: true });
+      fs.writeFileSync(path.join(docs, '.git'), 'gitdir: x');
+      fs.writeFileSync(path.join(app, 'AGENTS.md'), 'rules');
+      call('Bash', { command: `cat ${sh(repos)}/app/a` });
+      call('Bash', { command: `cat ${sh(repos)}/app/b` });
+      for (const f of [path.join(app, 'AGENTS.md'), path.join(app, 'CLAUDE.md'), path.join(docs, 'README.md'), 'repos/app/AGENTS.md']) {
+        assert.equal(call('Read', { file_path: f }), '', f);
+      }
+      assert.notEqual(call('Read', { file_path: path.join(app, 'AGENTS.md'), limit: 30 }), '');
+      assert.notEqual(call('Read', { file_path: path.join(app, 'README.md') }), '');
+      assert.notEqual(call('Read', { file_path: path.join(app, 'sub', 'AGENTS.md') }), '');
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('gate-line-guard: git text printed by echo/printf is not a git write', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-echo-'));
+  execFileSync('git', ['init', '-q', tmp]);
+  const writes = (command) => gateLineGuard.writesMainCheckout(command, tmp);
+  try {
+    await t.test('quoted git commands inside echo/printf arguments pass', () => {
+      for (const c of [
+        'echo "Worktree: \\`git fetch origin x && git checkout --detach abc\\`."',
+        "{ echo '# Spec'; echo \"run: git fetch && git checkout x\"; } > /tmp/w1.md",
+        'printf "%s\\n" "git -C repo reset --hard && git merge x" > /tmp/s.md',
+        'echo hi \\&\\& git checkout x',
+      ]) assert.equal(writes(c), false, c);
+    });
+    await t.test('real git writes stay gated, beside or inside an echo', () => {
+      for (const c of [
+        'echo start; git checkout main',
+        'echo "a" && git merge feat',
+        'echo "$(git checkout main)"',
+        'echo "x" "$(git reset --hard)"',
+        'git commit -m "echo x"',
+      ]) assert.equal(writes(c), true, c);
+    });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

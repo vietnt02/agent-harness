@@ -62,8 +62,35 @@ function isMainCheckout(dir) {
 // A heredoc body is data written somewhere, not a command that runs.
 const stripHeredocs = (s) => s.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, '<<HEREDOC');
 
+// The arguments of `echo`/`printf` are text printed somewhere, not commands that run: a worker spec
+// often quotes a git command. Kept when they hold `$(` or an unescaped backtick, which do run.
+const ECHO_START = /(^|[;&|({\n]\s*|\b(?:then|do)\s+)(echo|printf)(?=\s)/g;
+function stripEchoArgs(s) {
+  let out = '';
+  let from = 0;
+  for (const m of s.matchAll(ECHO_START)) {
+    const start = m.index + m[0].length;
+    if (m.index < from) continue;
+    let i = start;
+    let quote = '';
+    for (; i < s.length; i++) {
+      const c = s[i];
+      if (quote) {
+        if (c === '\\' && quote === '"') i++;
+        else if (c === quote) quote = '';
+      } else if (c === '\\') i++;
+      else if (c === '"' || c === "'") quote = c;
+      else if (';&|)}<>\n'.includes(c)) break;
+    }
+    if (/\$\(|`/.test(s.slice(start, i).replace(/\\[\\`$]/g, ''))) continue;
+    out += s.slice(from, start);
+    from = i;
+  }
+  return out + s.slice(from);
+}
+
 function writesMainCheckout(command, cwd) {
-  command = stripHeredocs(command);
+  command = stripEchoArgs(stripHeredocs(command));
   for (const m of command.matchAll(GIT_LOCAL_WRITE)) {
     const dashC = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].pop();
     const cds = [...command.slice(0, m.index).matchAll(new RegExp(String.raw`(?:^|[;&|(\n]\s*)cd\s+(${ARG})`, 'g'))];
@@ -102,7 +129,7 @@ function gatePrinted(lines) {
   return false;
 }
 
-module.exports = { resolveDir, isMainCheckout, writesMainCheckout, gatePrinted };
+module.exports = { resolveDir, isMainCheckout, writesMainCheckout, gatePrinted, stripEchoArgs };
 if (require.main !== module) return;
 
 let raw = '';
