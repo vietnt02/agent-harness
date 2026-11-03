@@ -81,7 +81,7 @@ function readTarget(data, list) {
     if (list.words.has(w)) return w;
     for (const x of words.slice(1)) {
       const v = x.replace(/^[^=]*=(?=[~/.])/, '');
-      const m = named(v, !/^[~/]/.test(v));
+      const m = named(v, !(v.startsWith('~') || path.isAbsolute(v)));
       if (m) return m;
     }
   }
