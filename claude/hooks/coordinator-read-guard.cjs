@@ -93,20 +93,16 @@ function readTarget(data, list) {
 
 // True when the call is a whole-file Read of the one instructions file a checkout's rules hook asks
 // for: in a directory holding `.git` and `AGENTS.md` or `CLAUDE.md`, the first of `AGENTS.md`,
-// `README.md`, `CLAUDE.md` there, resolving to a file in that same directory.
+// `README.md`, `CLAUDE.md` there. A symlink counts as that file wherever it leads: the rules hook
+// demands that path, so counting it would bring back the deadlock; one file per checkout is exempt.
 function readsInstructions(data) {
   const input = data.tool_input || {};
   if (data.tool_name !== 'Read' || input.limit != null || input.offset != null || !input.file_path) return false;
-  try {
-    const file = path.resolve(data.cwd || process.cwd(), expandHome(input.file_path));
-    const dir = path.dirname(file);
-    const has = (name) => fs.existsSync(path.join(dir, name));
-    if (!has('.git') || !(has('AGENTS.md') || has('CLAUDE.md'))) return false;
-    if (path.basename(file) !== ['AGENTS.md', 'README.md', 'CLAUDE.md'].find(has)) return false;
-    return path.dirname(fs.realpathSync(file)) === fs.realpathSync(dir);
-  } catch {
-    return false;
-  }
+  const file = path.resolve(data.cwd || process.cwd(), expandHome(input.file_path));
+  const dir = path.dirname(file);
+  const has = (name) => fs.existsSync(path.join(dir, name));
+  if (!has('.git') || !(has('AGENTS.md') || has('CLAUDE.md'))) return false;
+  return path.basename(file) === ['AGENTS.md', 'README.md', 'CLAUDE.md'].find(has);
 }
 
 // True when the call starts an Orca worker (not its --help).

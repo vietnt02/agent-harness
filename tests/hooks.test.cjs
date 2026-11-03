@@ -611,7 +611,7 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       fs.writeFileSync(path.join(plain, 'AGENTS.md'), 'x');
       call('Bash', { command: `cat ${sh(repos)}/app/a` });
       call('Bash', { command: `cat ${sh(repos)}/app/b` });
-      for (const f of [path.join(both, 'AGENTS.md'), path.join(claudeOnly, 'README.md'), 'repos/both/AGENTS.md']) {
+      for (const f of [path.join(both, 'AGENTS.md'), path.join(claudeOnly, 'README.md'), 'repos/both/AGENTS.md', path.join(linked, 'AGENTS.md')]) {
         assert.equal(call('Read', { file_path: f }), '', f);
       }
       for (const [f, extra] of [
@@ -621,7 +621,7 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
         [path.join(both, 'README.md'), {}],
         [path.join(claudeOnly, 'CLAUDE.md'), {}],
         [path.join(readmeOnly, 'README.md'), {}],
-        [path.join(linked, 'AGENTS.md'), {}],
+        [path.join(linked, 'CLAUDE.md'), {}],
         [path.join(plain, 'AGENTS.md'), {}],
         [path.join(both, 'sub', 'AGENTS.md'), {}],
       ]) assert.notEqual(call('Read', { file_path: f, ...extra }), '', `${f} ${JSON.stringify(extra)}`);
