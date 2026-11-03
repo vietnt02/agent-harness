@@ -12,7 +12,6 @@
  * only `git fetch` + `git show origin/<b>:<path>`. `git -c core.hooksPath=…` is gated everywhere.
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { promptText } = require('./lib/user-intent.cjs');
@@ -34,24 +33,11 @@ const REMOTE_WRITE = new RegExp(
   'is'
 );
 
-// Subcommands that change a checkout, its index, refs or config; the rest by their arguments below.
-const GIT_WRITE = new Set(['merge', 'pull', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am',
-  'clean', 'restore', 'update-ref', 'rm', 'mv', 'add', 'apply', 'update-index', 'read-tree', 'checkout-index']);
-// Subcommands whose first argument says whether they read: the listed values read, any other writes.
-const READS_BY_FIRST_ARG = {
-  stash: ['list', 'show', 'create'],
-  worktree: ['list'],
-  submodule: [undefined, 'status', 'summary'],
-  bisect: ['log', 'visualize', 'view'],
-  'sparse-checkout': ['list'],
-  notes: [undefined, 'list', 'show'],
-};
-const TAG_LIST = /^(-l|--list|-n\d*|--contains|--no-contains|--points-at|--merged|--no-merged|-v|--verify|--column|--sort(=.*)?|--format(=.*)?|-i|--ignore-case)$/;
-const CONFIG_WRITE = /^(--unset|--unset-all|--add|--replace-all|--rename-section|--remove-section|-e|--edit)$/;
+const GIT_WRITE = new Set(['merge', 'pull', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am', 'clean', 'restore', 'update-ref']);
+const STASH_READ = new Set(['list', 'show', 'create']);
+const WORKTREE_WRITE = new Set(['add', 'remove', 'move']);
 // Global options that take the next word as their value.
 const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
-const GIT_ENV = /^GIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE)=/;
-const MAX_SCRIPT_DEPTH = 8;
 const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
@@ -69,32 +55,13 @@ function isMainCheckout(dir) {
   }
 }
 
-// True when `git <sub> <args…>` changes a checkout, its index, refs or config.
-function gitWrites(sub, args) {
-  if (GIT_WRITE.has(sub)) return true;
-  if (Object.hasOwn(READS_BY_FIRST_ARG, sub)) return !READS_BY_FIRST_ARG[sub].includes(args[0]);
-  if (sub === 'branch') {
-    return args.some((a) => /^-[a-zA-Z]*[dDmMfcCu]/.test(a) || /^--(delete|move|force|copy|set-upstream-to|unset-upstream|edit-description)\b/.test(a));
-  }
-  if (sub === 'tag') {
-    if (args.some((a) => /^-[a-zA-Z]*[df]/.test(a) || a === '--delete' || a === '--force')) return true;
-    return args.some((a) => !a.startsWith('-')) && !args.some((a) => TAG_LIST.test(a));
-  }
-  if (sub === 'config') {
-    if (['set', 'unset', 'rename-section', 'remove-section', 'edit'].includes(args[0])) return true;
-    if (['get', 'list'].includes(args[0]) || args.some((a) => /^--get/.test(a) || a === '-l' || a === '--list')) return false;
-    return args.some((a) => CONFIG_WRITE.test(a)) || args.filter((a) => !a.startsWith('-')).length >= 2;
-  }
-  return false;
-}
-
-// Where a git command that writes runs: `{ dirs }` (its `-C` paths, applied in order), `{ dirs:
-// null }` when a global option or variable points it elsewhere (`--git-dir`, `--work-tree`,
-// `GIT_DIR=`), or null when it is no write. `words` are one simple command from shell-words, so
-// text inside quotes, comments and heredoc bodies are never read as commands.
-function gitWrite(words, envUnknown) {
+// Where a git command that writes into a checkout runs: `{ dirs }` (its `-C` paths, applied in
+// order), `{ dirs: null }` when a global option or variable points it elsewhere (`--git-dir`,
+// `--work-tree`, `GIT_DIR=`), or null when it is no write. `words` are one simple command from
+// shell-words, so text inside quotes, comments and heredoc bodies are never read as commands.
+function gitWrite(raw, words) {
   if (words[0] !== 'git') return null;
-  let dirs = envUnknown ? null : [];
+  let dirs = raw.some((w) => /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w)) ? null : [];
   let i = 1;
   while (i < words.length && words[i].startsWith('-')) {
     const w = words[i];
@@ -102,86 +69,53 @@ function gitWrite(words, envUnknown) {
     if (/^--(git-dir|work-tree)(=|$)/.test(w)) dirs = null;
     i += GLOBAL_VALUE.has(w) ? 2 : 1;
   }
-  return gitWrites(words[i], words.slice(i + 1)) ? { dirs } : null;
+  const sub = words[i];
+  const args = words.slice(i + 1);
+  const write = GIT_WRITE.has(sub) ||
+    (sub === 'stash' && !STASH_READ.has(args[0])) ||
+    (sub === 'branch' && args.some((a) => /^-[a-zA-Z]*[dDmMfcCu]/.test(a) || /^--(delete|move|force|copy|set-upstream-to|unset-upstream|edit-description)\b/.test(a))) ||
+    (sub === 'worktree' && WORKTREE_WRITE.has(args[0])) ||
+    (sub === 'tag' && args.some((a) => /^-[a-zA-Z]*[df]/.test(a) || a === '--delete' || a === '--force'));
+  return write ? { dirs } : null;
 }
 
-// The directory `p` names from `base`, or null when it cannot be known here: a variable, a
-// substitution, a brace or glob, or no such directory (yet).
-function knownDir(p, base) {
-  if (base === null || p === undefined || /[$`{}*?]/.test(p)) return null;
-  const dir = resolveDir(p, base);
-  try { return fs.statSync(dir).isDirectory() ? dir : null; } catch { return null; }
-}
-
-// The directory a `cd`/`pushd`/`popd` leads to from `base`, or null when it cannot be known.
+// The directory a `cd`/`pushd` leads to from `base`, or null when it cannot be known here (a
+// variable, `-`, a stack entry, a directory that does not exist yet).
 function cdTarget(words, base) {
-  if (words[0] === 'popd') return null;
-  let k = 1;
-  while (/^-[LPe@]+$/.test(words[k] || '')) k++;
-  if (words[k] === '--') k++;
-  const target = words[k];
-  if (target === undefined) return words[0] === 'cd' ? knownDir(os.homedir(), '/') : null;
-  if (target === '-' || /^[+-]\d+$/.test(target)) return null;
-  return knownDir(target, base);
+  if (base === null) return null;
+  const args = words.slice(1).filter((a, k, all) => !(/^-[LPe@]+$/.test(a) && all.slice(0, k).every((b) => b.startsWith('-'))));
+  const target = args[0] === '--' ? args[1] : args[0];
+  if (words[0] === 'popd' || !target || target === '-' || /^[+-]\d+$/.test(target) || /[$`]/.test(target)) return null;
+  const dir = resolveDir(target, base);
+  return fs.existsSync(dir) ? dir : null;
 }
 
 // True when a git write in the command may target a main checkout. Its directory: the `-C` paths,
-// from the one the `cd`s before it lead to in its own shell (a `cd` inside `(…)`, `$(…)`, a
-// pipeline element or a background job ends there; one inside `if`/`while`/`case` may not run, so
-// it makes the directory unknown), else the hook's cwd. A directory that cannot be known counts as
-// a main checkout, and so does any `git` in a command the parser could not read whole. Scripts of
-// `bash -c`, `bash <<<` and `eval` are read the same way; `eval` runs in this shell, so its `cd`
-// carries on. A shell reading a script from a pipe is unknown.
+// from the one the `cd`s before it lead to in its own shell (a `cd` inside `(…)` or `$(…)` ends
+// there), else the hook's cwd; a directory that cannot be known counts as a main checkout. The
+// script of `bash -c`/`eval` is read the same way.
 function writesMainCheckout(command, cwd) {
-  const state = { entries: [], next: 0 };
-  return walk(String(command || ''), (s) => s, cwd, state, 0);
-}
-
-function walk(command, scopeOf, cwd, state, level) {
-  const list = commands(command);
-  const mentionsGit = /git/.test(command);
-  if (list.incomplete || level > MAX_SCRIPT_DEPTH) return mentionsGit;
-  const applies = (entry, scope) => scope === entry.scope || scope.startsWith(`${entry.scope}.`);
+  const cds = [];
   const dirIn = (scope) => {
     let dir = cwd;
-    for (const e of state.entries) if ('dir' in e && applies(e, scope)) dir = e.dir;
+    for (const cd of cds) if (scope === cd.scope || scope.startsWith(`${cd.scope}.`)) dir = cd.dir;
     return dir;
   };
-  const envIn = (scope) => state.entries.some((e) => e.env && applies(e, scope));
-  let cond = 0;
-  for (const raw of list) {
-    const scope = scopeOf(raw.scope);
-    if (/^(if|while|until|case)$/.test(raw[0])) cond++;
-    if (/^(fi|done|esac)$/.test(raw[0])) cond = Math.max(0, cond - 1);
-    if (raw.braces && raw.some((w) => /git/.test(w))) return true;
+  const isMain = (dir) => dir === null || isMainCheckout(dir);
+  for (const raw of commands(command)) {
     const words = program(raw);
-    const pre = raw.slice(0, Math.max(0, raw.length - words.length));
-    if (!words.length || /^(export|declare|typeset|readonly|local)$/.test(words[0])) {
-      if ([...pre, ...words].some((w) => GIT_ENV.test(w))) state.entries.push({ scope, env: true });
-      continue;
-    }
-    let here = dirIn(scope);
-    if (words.chdir !== undefined) here = knownDir(words.chdir, here);
+    let here = dirIn(raw.scope);
+    if (words.chdir !== undefined) here = cdTarget(['cd', words.chdir], here);
     if (['cd', 'pushd', 'popd'].includes(words[0])) {
-      state.entries.push({ scope, dir: cond > 0 ? null : cdTarget(words, here) });
+      cds.push({ scope: raw.scope, dir: cdTarget(words, here) });
       continue;
     }
-    const inner = innerScript(words);
-    if (inner) {
-      if (inner.script === null) {
-        if (mentionsGit) return true;
-        continue;
-      }
-      const id = ++state.next;
-      const child = inner.same ? (s) => (s === '0' ? scope : `${scope}.e${id}${s.slice(1)}`) : (s) => `${scope}.c${id}${s.slice(1)}`;
-      if (!inner.same) state.entries.push({ scope: child('0'), dir: here });
-      if (walk(inner.script, child, cwd, state, level + 1)) return true;
-      continue;
-    }
-    const git = gitWrite(words, envIn(scope) || pre.some((w) => GIT_ENV.test(w)));
+    const script = innerScript(words);
+    if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
+    const git = gitWrite(raw, words);
     if (!git) continue;
-    const dir = git.dirs && git.dirs.reduce((d, c) => knownDir(c, d), here);
-    if (!git.dirs || dir === null || isMainCheckout(dir)) return true;
+    const dir = git.dirs && git.dirs.reduce((d, c) => (d === null || /[$`]/.test(c) ? null : resolveDir(c, d)), here);
+    if (isMain(git.dirs ? dir : null)) return true;
   }
   return false;
 }
