@@ -647,7 +647,59 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
   // Bash command strings use forward slashes: a shell reads `\` as an escape (Git Bash on Windows too).
   const L = linked.split(path.sep).join('/');
   const T = tmp.split(path.sep).join('/');
+  fs.writeFileSync(path.join(linked, 'afile'), 'x');
   try {
+    await t.test('shell forms that leave the git write in the main checkout stay gated', () => {
+      for (const c of [
+        `${'( '.repeat(3400)}true${' )'.repeat(3400)}; git reset --hard`,
+        `echo ${'$( '.repeat(3000)}x${' )'.repeat(3000)}; git reset --hard`,
+        `echo "${'$( echo "'.repeat(3000)}x${'" )'.repeat(3000)}"; git reset --hard`,
+        `echo ${'('.repeat(20000)}; git reset --hard`,
+        `echo ${'$('.repeat(20000)}; git reset --hard`,
+        `(cd ${L} # don't\n); git commit -m x`,
+        `(cd ${L} # it's the wt\n npm test)\ngit commit -m x`,
+        `(printf $'it\\'s'; cd ${L}); git commit -m x`,
+        `cd ${L} | cat; git commit -m x`,
+        `cd ${L} & git commit -m x`,
+        `diff <(cd ${L}) x; git commit -m x`,
+        `if false; then cd ${L}; fi; git commit -m x`,
+        `cd ${L} && eval cd ${T}; git commit -m x`,
+        `cd ${L}/afile; git commit -m x`,
+        'time -p git commit -m x',
+        'sudo --user me git commit',
+        'timeout --signal KILL 5 git commit',
+        'env --unset FOO git commit',
+        `cd ${L} && env -C${T} git commit`,
+        `cd ${L} && env --chdir=${T} git commit`,
+        `cd ${L} && env -S 'git -C ${T} commit'`,
+        `cd ${L} && env -C ${T} bash -c 'git commit -m x'`,
+        'git {reset,--hard}',
+        '{git,reset,--hard}',
+        `cd ${L} && xargs -I{} git -C {} commit`,
+        ...['rm -rf .', 'add -A', 'apply p.diff', 'config user.name x', 'config set user.name x', 'tag v1', 'mv a b',
+          'submodule update', 'bisect start', 'sparse-checkout set x', 'worktree prune', 'notes add -m x'].map((a) => `git ${a}`),
+        "bash <<< 'git commit -m x'",
+        "echo 'git commit -m x' | bash",
+        `cd ${L} && export GIT_DIR=${T}/.git; git commit -m x`,
+        `cd ${L} && GIT_WORK_TREE=${T}; git commit -m x`,
+      ]) assert.equal(writes(c), true, c.slice(0, 120));
+    });
+    await t.test('ordinary work in a linked worktree and git reads are not gated', () => {
+      for (const c of [
+        `cd ${L} && git commit -m GIT_DIR=x`,
+        'cd "$X" && bash -c \'git log\'',
+        `cd ${L} 2>&1 && git commit -m x`,
+        `cd ${L} >/dev/null 2>&1 && git add -A && git commit -m x`,
+        `cd ${L} && { git add -A; git commit -m x; }`,
+        `cd ${L} && git log --format=%H | cat`,
+        `cd ${L} && (git status) && git commit -m x`,
+        `cd ${L} && x=$(git rev-parse HEAD) && git tag v-$x`,
+        `cd ${L} && time git commit -m x`,
+        `git -C ${L} rm -q x`,
+        ...['config --get user.name', 'config get user.name', 'config user.name', 'tag -l', 'tag', 'tag --contains HEAD',
+          'submodule status', 'submodule', 'worktree list', 'stash list', 'bisect log', 'notes show', 'log -1'].map((a) => `git ${a}`),
+      ]) assert.equal(writes(c), false, c);
+    });
     await t.test('git quoted as text, in a comment or a heredoc passes', () => {
       for (const c of [
         'echo "Worktree: \\`git fetch origin x && git checkout --detach abc\\`."',
