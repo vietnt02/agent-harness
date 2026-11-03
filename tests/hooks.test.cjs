@@ -564,6 +564,22 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.notEqual(call('Bash', { command: `cat ${repos}/app/c` }), '');
     });
 
+    await t.test('a turn Orca wakes is the gate: its reads do not count', () => {
+      n++;
+      guard.decide({ session_id: session(), hook_event_name: 'UserPromptSubmit', prompt: 'You have 1 orchestration message. Run `orca orchestration check --run r1`.' }, { list });
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: `git -C ${repos}/app diff HEAD~1` }), '');
+    });
+
+    await t.test('a CI script frees only when it is the program, not an argument; git add is free', () => {
+      turn();
+      const inRepo = { cwd: path.join(repos, 'app') };
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'git add f.sql' }, inRepo), '');
+      call('Bash', { command: `sh ${tmp}/watch.sh 600 sh ci.sh 3` });
+      call('Bash', { command: `cat ${tmp}/ci.sh ${repos}/app/a` });
+      call('Bash', { command: `cat ${repos}/app/b` });
+      assert.notEqual(call('Bash', { command: `cat ${repos}/app/c` }), '');
+    });
+
     await t.test('a subagent, a worker session and no list all pass', () => {
       turn();
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { agent_id: 'sub-1' }), '');

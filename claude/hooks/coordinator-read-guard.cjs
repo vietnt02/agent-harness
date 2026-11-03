@@ -4,7 +4,8 @@
  * and hands a chain of reads to a worker (ntv-orca § 1, "Câu hỏi của user"). A rule alone did not
  * hold: answering "is X already there?" the coordinator ran its own grep/show/query chain across
  * child repos, the work a read-only worker does on a quota that costs less.
- * - UserPromptSubmit: starts a new turn (resets the count).
+ * - UserPromptSubmit: starts a new turn (resets the count). A turn Orca's wake prompt opens handles a
+ *   worker's report, so its reads (the gate: diff, checks) are not counted.
  * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place counts; the third one in a
  *   turn is denied unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
  *   one confirming read the skill allows, plus one of slack, since a hook cannot tell a confirm
@@ -15,7 +16,7 @@
  * an absolute or `~` path inside it, or a relative path that exists from cwd (so `git commit -m x`
  * run inside a watched repo does not count; `git log` with no path is not seen). Read/Grep/Glob:
  * their path, else cwd. Not counted: gh/glab, CI watching (watch.sh, ci.sh), git merge/push/pull/
- * fetch/worktree, any `orca` call (the gate and CI stay with the coordinator), each judged per
+ * fetch/worktree/add/commit/rm/mv/checkout/switch/stash, any `orca` call (the gate and CI stay with the coordinator), each judged per
  * simple command. Known limit: a turn woken without a prompt keeps the last turn's count.
  * Passes: an Orca worker session, a subagent (`agent_id`), and a repo the session note names in a
  * `Người làm: Claude — <repo> — <evidence>` line (worker-default-guard's check: the user named
@@ -33,7 +34,9 @@ const LIMIT = 2; // reads allowed per turn before a worker is required
 const LIST = path.join(os.homedir(), '.claude', 'knowledge', 'coordinator-reads.txt');
 const STATE_DIR = path.join(os.tmpdir(), 'claude-coordinator-reads');
 const FREE_WORDS = new Set(['gh', 'glab', 'orca']);
-const FREE_GIT = new Set(['merge', 'push', 'pull', 'fetch', 'worktree']);
+const FREE_GIT = new Set(['merge', 'push', 'pull', 'fetch', 'worktree', 'add', 'commit', 'rm', 'mv', 'checkout', 'switch', 'stash']);
+// Orca's wake prompt: the turn handles a worker's report (the gate), not a question.
+const ORCA_WAKE = /orchestration message/i;
 const FREE_SCRIPT = /(^|\/)(watch|ci)\.sh$/;
 
 // { paths, words } from the list file; null when there is none.
@@ -68,7 +71,8 @@ function readTarget(data, list) {
   for (const raw of commands(input.command)) {
     const words = program(raw);
     const w = words[0] || '';
-    if (FREE_WORDS.has(w) || FREE_SCRIPT.test(w) || words.some((x) => FREE_SCRIPT.test(x))) continue;
+    const script = /^(ba|z|da)?sh$/.test(w) ? (words[1] || '') : w;
+    if (FREE_WORDS.has(w) || FREE_SCRIPT.test(script)) continue;
     if (w === 'git') {
       let i = 1;
       while (i < words.length && words[i].startsWith('-')) i += /^-[Cc]$/.test(words[i]) ? 2 : 1;
@@ -110,7 +114,7 @@ function save(sessionId, state) {
 function decide(data, { list = watched(), notesDir } = {}) {
   if (!data.session_id) return '';
   if (data.hook_event_name === 'UserPromptSubmit') {
-    save(data.session_id, { reads: 0, delegated: false });
+    save(data.session_id, { reads: 0, delegated: ORCA_WAKE.test(String(data.prompt || '')) });
     return '';
   }
   if (!list || data.agent_id) return '';

@@ -28,7 +28,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | Chặng | Coordinator | Worker |
 |---|---|---|
 | 1. Nhận việc | Hiểu ý user, chốt phạm vi và tiêu chí xong (thứ user sẽ thấy). Ý chưa rõ thì hỏi user. | — |
-| 2. Giao | Viết spec (§ 2) từ những gì đang có, gửi user manifest một lần, spawn. **Không tự rà trước khi giao.** | — |
+| 2. Giao | Viết spec (§ 2) từ những gì đang có, gửi user manifest một lần (câu hỏi của user: không cần, xem dưới), spawn. **Không tự rà trước khi giao.** | — |
 | 3. Rà, lập kế hoạch | — | Đọc code, query dữ liệu thật trên toàn bộ dữ liệu, tìm nguyên nhân gốc. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
 | 4. Duyệt kế hoạch | Đối chiếu kế hoạch với ý user và với bằng chứng worker dán; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy → hỏi user. Duyệt hoặc trả lại kèm lý do. | Sửa kế hoạch, gửi lại. |
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
@@ -39,7 +39,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
 coordinator trả lời từ thứ đang có, hoặc chạy **một** lệnh xác nhận một đích đã biết (một file, một
 trạng thái). Cần hơn một lệnh, hay chạm nhiều repo → giao ngay một worker rà chỉ-đọc (model không
-phải Claude, không cần manifest: câu hỏi đã mở khối cho nó) và báo user "đã giao rà, khoảng N phút". Đây là cách `CLAUDE.md` § Verification ("run the reads that answer it") áp ở vai
+phải Claude, không cần manifest: câu hỏi đã mở khối cho nó, `CLAUDE.md` § Delegation) và báo user "đã giao rà, khoảng N phút". Đây là cách `CLAUDE.md` § Verification ("run the reads that answer it") áp ở vai
 coordinator: lần đọc vẫn chạy, nhưng do worker chạy.
 
 **Coordinator tự làm, không giao, chỉ khi:** sửa harness `~/.claude`; đổi một giá trị có sẵn, không
@@ -59,7 +59,8 @@ chặng 4 coordinator đối chiếu từng con số trong kế hoạch với ou
 user nói "supervised" → worker Orca. Việc chỉ đọc trong cùng repo của coordinator → subagent native
 được. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
 
-**Manifest — một `**Cần bạn:**` duy nhất trước khi spawn**, mỗi worker một dòng:
+**Manifest — một `**Cần bạn:**` duy nhất trước khi spawn** (trừ worker rà chỉ-đọc cho câu hỏi, § 1), mỗi
+worker một dòng:
 
     **Cần bạn:** khối <X> — parallel <n> (cap <N>), <agent> <slug> <effort>.
       Kế hoạch: <k> phase · <n> worker · w1-<việc>: phase 1, 2 · w2-<việc>: phase 3
