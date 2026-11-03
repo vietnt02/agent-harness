@@ -10,6 +10,10 @@
  * Same gate for git writing into the user's main checkout (merge, pull, reset, checkout, …): a linked
  * worktree passes, since workers and approved work live in their own. Reading the latest code needs
  * only `git fetch` + `git show origin/<b>:<path>`. `git -c core.hooksPath=…` is gated everywhere.
+ * Scope: this catches the slips of an agent that follows its rules, not an agent trying to get past
+ * it (that is no security boundary; permissions are). Commands agents really write are read right
+ * and never blocked by mistake; shell tricks that hide a git write (brace expansion, escaped
+ * flags, deep nesting) are out of scope, since chasing them grows the parser and the false blocks.
  */
 const fs = require('fs');
 const path = require('path');
