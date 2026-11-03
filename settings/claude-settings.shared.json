@@ -145,6 +145,15 @@
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-default-guard.cjs\""
           }
         ]
+      },
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -192,6 +201,14 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/session-notes.cjs\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
           }
         ]
       }

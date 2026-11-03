@@ -479,3 +479,118 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('coordinator-read-guard: a third read of a watched place in one turn needs a worker', async (t) => {
+  const guard = require('../claude/hooks/coordinator-read-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'coord-reads-'));
+  const repos = path.join(tmp, 'umb', 'repos');
+  // Bash command strings use forward slashes: a shell reads `\` as an escape (Git Bash on Windows too).
+  const sh = (p) => p.split(path.sep).join('/');
+  fs.mkdirSync(path.join(repos, 'app'), { recursive: true });
+  const listFile = path.join(tmp, 'list.txt');
+  fs.writeFileSync(listFile, `# watched\n${sh(repos)}\ncmd:ssh\n`);
+  const list = guard.watched(listFile);
+  const transcript = path.join(tmp, 't.jsonl');
+  fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'bảng X đã có chưa' } })}\n`);
+  const notesDir = path.join(tmp, 'notes');
+  fs.mkdirSync(notesDir);
+  let n = 0;
+  const session = () => `coord-test-${process.pid}-${n}`;
+  const call = (tool_name, tool_input, extra = {}) =>
+    guard.decide({ session_id: session(), transcript_path: transcript, cwd: path.join(tmp, 'umb'), tool_name, tool_input, ...extra }, { list, notesDir });
+  const turn = () => { n++; guard.decide({ session_id: session(), hook_event_name: 'UserPromptSubmit' }, { list }); };
+
+  try {
+    await t.test('two reads pass, the third is denied', () => {
+      turn();
+      assert.equal(call('Bash', { command: 'git -C repos/app grep -n foo' }), '');
+      assert.equal(call('Read', { file_path: path.join(repos, 'app', 'a.sql') }), '');
+      assert.match(call('Grep', { pattern: 'x', path: 'repos/app' }), /read 3 of a watched place/);
+    });
+
+    await t.test('a new turn starts the count again', () => {
+      turn();
+      assert.equal(call('Bash', { command: 'cat repos/app/x' }), '');
+    });
+
+    await t.test('ssh is watched by its command word', () => {
+      turn();
+      call('Bash', { command: 'ssh host uptime' });
+      call('Bash', { command: 'ssh host df -h' });
+      assert.notEqual(call('Bash', { command: 'ssh host ls' }), '');
+    });
+
+    await t.test('reads outside the list, gate and CI commands do not count', () => {
+      turn();
+      for (let i = 0; i < 4; i++) assert.equal(call('Bash', { command: `cat ${sh(tmp)}/other-${i}` }), '');
+      assert.equal(call('Bash', { command: 'gh pr view 3 --json state' }), '');
+      assert.equal(call('Bash', { command: 'git -C repos/app fetch -q origin' }), '');
+      assert.equal(call('Bash', { command: `sh ${sh(tmp)}/watch.sh 600 sh ci.sh 3` }), '');
+      assert.equal(call('Bash', { command: 'orca orchestration check --run r1' }), '');
+      assert.equal(call('Read', { file_path: path.join(repos, 'app', 'a') }), '');
+      assert.equal(call('Read', { file_path: path.join(repos, 'app', 'b') }), '');
+      assert.notEqual(call('Read', { file_path: path.join(repos, 'app', 'c') }), '');
+    });
+
+    await t.test('after worker-start in the turn, reads pass', () => {
+      turn();
+      call('Bash', { command: 'cat repos/app/a' });
+      call('Bash', { command: 'cat repos/app/b' });
+      assert.equal(call('Bash', { command: 'orca orchestration worker-start --spec-file s.md --worktree path:/x' }), '');
+      assert.equal(call('Bash', { command: 'cat repos/app/c' }), '');
+    });
+
+    await t.test('commands that name no watched path do not count, even run inside one', () => {
+      turn();
+      const inRepo = { cwd: path.join(repos, 'app') };
+      for (const c of ['date', 'echo hi', 'git commit -qm msg', 'git status --short']) assert.equal(call('Bash', { command: c }, inRepo), '');
+      fs.writeFileSync(path.join(repos, 'app', 'f.sql'), 'x');
+      call('Bash', { command: 'cat f.sql' }, inRepo);
+      call('Grep', { pattern: 'x' }, inRepo);
+      assert.notEqual(call('Bash', { command: 'cat f.sql' }, inRepo), '');
+    });
+
+    await t.test('a free command in a chain frees only itself; wrappers are seen through', () => {
+      turn();
+      call('Bash', { command: `gh --version; cat ${sh(repos)}/app/a` });
+      call('Bash', { command: `git -C ${sh(repos)}/app fetch && cat ${sh(repos)}/app/b` });
+      assert.notEqual(call('Bash', { command: 'sudo ssh h3 ls' }), '');
+    });
+
+    await t.test('only a real worker-start unlocks the turn', () => {
+      turn();
+      call('Bash', { command: 'echo orchestration worker-start' });
+      call('Bash', { command: 'orca orchestration worker-start --help' });
+      call('Bash', { command: `cat ${sh(repos)}/app/a` });
+      call('Bash', { command: `cat ${sh(repos)}/app/b` });
+      assert.notEqual(call('Bash', { command: `cat ${sh(repos)}/app/c` }), '');
+    });
+
+    await t.test('a turn Orca wakes is the gate: its reads do not count', () => {
+      n++;
+      guard.decide({ session_id: session(), hook_event_name: 'UserPromptSubmit', prompt: 'You have 1 orchestration message. Run `orca orchestration check --run r1`.' }, { list });
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: `git -C ${sh(repos)}/app diff HEAD~1` }), '');
+    });
+
+    await t.test('a CI script frees only when it is the program, not an argument; git add is free', () => {
+      turn();
+      const inRepo = { cwd: path.join(repos, 'app') };
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'git add f.sql' }, inRepo), '');
+      call('Bash', { command: `sh ${sh(tmp)}/watch.sh 600 sh ci.sh 3` });
+      call('Bash', { command: `cat ${sh(tmp)}/ci.sh ${sh(repos)}/app/a` });
+      call('Bash', { command: `cat ${sh(repos)}/app/b` });
+      assert.notEqual(call('Bash', { command: `cat ${sh(repos)}/app/c` }), '');
+    });
+
+    await t.test('a subagent, a worker session and no list all pass', () => {
+      turn();
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { agent_id: 'sub-1' }), '');
+      const wt = path.join(tmp, 'w.jsonl');
+      fs.writeFileSync(wt, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'Please carry out this task from my Orca coordinator.\nTask: x' } })}\n`);
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { transcript_path: wt }), '');
+      assert.equal(guard.decide({ session_id: session(), cwd: tmp, tool_name: 'Bash', tool_input: { command: `cat ${sh(repos)}/app/a` } }, { list: null }), '');
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

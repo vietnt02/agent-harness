@@ -5,7 +5,7 @@
  * out of its own output. Registered on both events: a call that exits non-zero (`ok:false`, a
  * `jq -e` check) fires PostToolUseFailure, with the output in `error`.
  * - failed or a lastError: print it with the lines of ~/.claude/skills/ntv-orca/ that mention it, so
- *   the guide is read before any guess or `**Cần bạn:**` (ntv-orca Nhóm D).
+ *   the guide is read before any guess or `**Cần bạn:**` (ntv-orca § 6, Khi có sự cố).
  * - otherwise: remind that a receipt is a claim; the worker's terminal shows whether it took the spec.
  * - no dispatch id, or Orca unreachable: say so, and how to read the run instead.
  * - an antigravity worker: every running Orca agy chat server (`agy_acp_server`) must find
@@ -59,7 +59,7 @@ function describe(dispatch) {
   }
   const head = `${dispatch}: state=${w.state}, stage=${w.stage}, lastError="${w.lastError || ''}". ` +
     `Trước hết đọc ${read} (agent đã nhận spec? đang chạy?).`;
-  if (!w.lastError) return `${head} Không có lastError: đọc ${read} và bảng Nhóm D trước khi kết luận.`;
+  if (!w.lastError) return `${head} Không có lastError: đọc ${read} và bảng § 6 của ntv-orca trước khi kết luận.`;
   const refs = guideLines(w.lastError);
   return refs.length
     ? `${head} Guide nhắc tới lỗi này, đọc các dòng sau trước mọi bước khác (kể cả trước khi hỏi user):\n${refs.map((r) => `    ${r}`).join('\n')}`
