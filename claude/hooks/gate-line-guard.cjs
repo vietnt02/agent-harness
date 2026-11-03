@@ -16,6 +16,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { promptText } = require('./lib/user-intent.cjs');
 const { expandHome } = require('./lib/platform.cjs');
+const { commands, program } = require('./lib/shell-words.cjs');
 
 const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
@@ -32,14 +33,8 @@ const REMOTE_WRITE = new RegExp(
   'is'
 );
 
-const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
-const GIT_LOCAL_WRITE = new RegExp(
-  String.raw`(?:^|[;&|(\n]\s*|\b(?:then|do)\s+)git((?:\s+-C\s+${ARG}|\s+-c\s+\S+)*)\s+` +
-    String.raw`(?:(?:merge|pull|rebase|reset|checkout|switch|commit|cherry-pick|revert|am|clean|restore)(?![\w-])` +
-    String.raw`|stash(?:\s+(?:push|pop|drop|apply|clear)\b|\s*(?:$|[;&|)]))` +
-    String.raw`|branch\s+(?:-[dDmM]|--delete|--move)\b|worktree\s+(?:add|remove)\b|tag\s+(?:-d|--delete)\b)`,
-  'gm'
-);
+const GIT_WRITE = new Set(['merge', 'pull', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am', 'clean', 'restore']);
+const STASH_WRITE = new Set(['push', 'pop', 'drop', 'apply', 'clear']);
 const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
@@ -57,47 +52,39 @@ function isMainCheckout(dir) {
   }
 }
 
-// True when a git write in the command targets a main checkout: its `-C` path, else the last
-// `cd <path>` before it, else the hook's cwd.
-// A heredoc body is data written somewhere, not a command that runs.
-const stripHeredocs = (s) => s.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, '<<HEREDOC');
-
-// The arguments of `echo`/`printf` are text printed somewhere, not commands that run: a worker spec
-// often quotes a git command. Kept when they hold `$(` or an unescaped backtick, which do run.
-const ECHO_START = /(^|[;&|({\n]\s*|\b(?:then|do)\s+)(echo|printf)(?=\s)/g;
-function stripEchoArgs(s) {
-  let out = '';
-  let from = 0;
-  for (const m of s.matchAll(ECHO_START)) {
-    const start = m.index + m[0].length;
-    if (m.index < from) continue;
-    let i = start;
-    let quote = '';
-    for (; i < s.length; i++) {
-      const c = s[i];
-      if (quote) {
-        if (c === '\\' && quote === '"') i++;
-        else if (c === quote) quote = '';
-      } else if (c === '\\') i++;
-      else if (c === '"' || c === "'") quote = c;
-      else if (';&|)}<>\n'.includes(c)) break;
-    }
-    if (/\$\(|`/.test(s.slice(start, i).replace(/\\[\\`$]/g, ''))) continue;
-    out += s.slice(from, start);
-    from = i;
+// The `-C` directories of a git command that writes into a checkout, or null. `words` are one simple
+// command from shell-words, so text inside quotes (a spec quoting `git checkout`), comments and
+// heredoc bodies are never read as commands, while `$(…)` and backticks are.
+function gitWriteDirs(words) {
+  if (words[0] !== 'git') return null;
+  const dirs = [];
+  let i = 1;
+  while (i < words.length && words[i].startsWith('-')) {
+    if (words[i] === '-C') dirs.push(words[i + 1] || '.');
+    i += words[i] === '-C' || words[i] === '-c' ? 2 : 1;
   }
-  return out + s.slice(from);
+  const sub = words[i];
+  const args = words.slice(i + 1);
+  const write = GIT_WRITE.has(sub) ||
+    (sub === 'stash' && (!args.length || STASH_WRITE.has(args[0]))) ||
+    (sub === 'branch' && args.some((a) => /^(-[dDmM]|--delete|--move)$/.test(a))) ||
+    (sub === 'worktree' && (args[0] === 'add' || args[0] === 'remove')) ||
+    (sub === 'tag' && args.some((a) => a === '-d' || a === '--delete'));
+  return write ? dirs : null;
 }
 
+// True when a git write in the command targets a main checkout: its `-C` path, from the directory
+// the `cd`s before it lead to, else the hook's cwd.
 function writesMainCheckout(command, cwd) {
-  command = stripEchoArgs(stripHeredocs(command));
-  for (const m of command.matchAll(GIT_LOCAL_WRITE)) {
-    const dashC = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].pop();
-    const cds = [...command.slice(0, m.index).matchAll(new RegExp(String.raw`(?:^|[;&|(\n]\s*)cd\s+(${ARG})`, 'g'))];
-    let dir = cwd;
-    if (cds.length) dir = resolveDir(cds.pop()[1], cwd);
-    if (dashC) dir = resolveDir(dashC[1], dir);
-    if (isMainCheckout(dir)) return true;
+  let dir = cwd;
+  for (const raw of commands(command)) {
+    const words = program(raw);
+    if (words[0] === 'cd' && words[1]) {
+      dir = resolveDir(words[1], dir);
+      continue;
+    }
+    const dirs = gitWriteDirs(words);
+    if (dirs && isMainCheckout(dirs.reduce((d, c) => resolveDir(c, d), dir))) return true;
   }
   return false;
 }
@@ -129,7 +116,7 @@ function gatePrinted(lines) {
   return false;
 }
 
-module.exports = { resolveDir, isMainCheckout, writesMainCheckout, gatePrinted, stripEchoArgs };
+module.exports = { resolveDir, isMainCheckout, writesMainCheckout, gatePrinted };
 if (require.main !== module) return;
 
 let raw = '';

@@ -1,6 +1,6 @@
 /**
  * shell-words.cjs - split a Bash command into simple commands, each a list of words, the way a
- * shell would read them closely enough for a guard: quotes kept together (and removed), `\`+newline
+ * shell would read them closely enough for a guard: quotes (`'…'`, `"…"`, `$'…'`) kept together (and removed), `\`+newline
  * joined, separators outside quotes (`;` `&` `|` `(` `)` backtick, `$(`, newline) end a command.
  * Heredoc bodies are dropped unless the heredoc feeds a shell (`bash <<EOF`), whose body runs.
  * Expansions (`$URL`) are left as written: a guard cannot see their value.
@@ -34,11 +34,23 @@ function commands(command) {
     } else if (c === '"') {
       let j = i + 1;
       let s = '';
-      while (j < cmd.length && cmd[j] !== '"') { if (cmd[j] === '\\' && j + 1 < cmd.length) j++; s += cmd[j]; j++; }
+      // `$(…)` and backticks still run inside double quotes, unless escaped (`\``).
+      let sub = -1;
+      while (j < cmd.length && cmd[j] !== '"') {
+        if (cmd[j] === '\\' && j + 1 < cmd.length) j++;
+        else if (sub < 0 && (cmd[j] === '`' || (cmd[j] === '$' && cmd[j + 1] === '('))) sub = s.length;
+        s += cmd[j];
+        j++;
+      }
       word = (word || '') + s;
-      // `$(…)` and backticks still run inside double quotes.
-      const sub = s.search(/\$\(|`/);
       if (sub >= 0) out.push(...commands(s.slice(sub)));
+      i = j;
+    } else if (c === '$' && cmd[i + 1] === "'") {
+      // ANSI-C quoting: `\'` does not end it.
+      let j = i + 2;
+      let s = '';
+      while (j < cmd.length && cmd[j] !== "'") { if (cmd[j] === '\\' && j + 1 < cmd.length) j++; s += cmd[j]; j++; }
+      word = (word || '') + s;
       i = j;
     } else if (c === '\\' && i + 1 < cmd.length) {
       word = (word || '') + cmd[++i];

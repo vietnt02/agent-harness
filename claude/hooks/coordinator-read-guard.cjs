@@ -18,10 +18,9 @@
  * their path, else cwd. Not counted: gh/glab, CI watching (watch.sh, ci.sh), git merge/push/pull/
  * fetch/worktree/add/commit/rm/mv/checkout/switch/stash, any `orca` call (the gate and CI stay with the coordinator), each judged per
  * simple command. Known limit: a turn woken without a prompt keeps the last turn's count.
- * Not counted either: a whole-file Read (no limit/offset) of a checkout's own agent instructions
- * (`AGENTS.md`, `CLAUDE.md`, or `README.md` with no `AGENTS.md` beside it, in a directory holding
- * `.git`): a project hook may require that Read before any command touches the repo, and counting
- * it left the two hooks with no allowed path.
+ * Not counted either: a whole-file Read (no limit/offset) of the one file a project rules hook
+ * makes Claude read before touching a checkout (`readsInstructions`): counting it left the two
+ * hooks with no allowed path.
  * Passes: an Orca worker session, a subagent (`agent_id`), and a repo the session note names in a
  * `Người làm: Claude — <repo> — <evidence>` line (worker-default-guard's check: the user named
  * Claude for that repo, so reading it is Claude's work).
@@ -92,15 +91,22 @@ function readTarget(data, list) {
   return null;
 }
 
-// True when the call is a whole-file Read of a checkout's agent instructions file.
+// True when the call is a whole-file Read of the one instructions file a checkout's rules hook asks
+// for: in a directory holding `.git` and `AGENTS.md` or `CLAUDE.md`, the first of `AGENTS.md`,
+// `README.md`, `CLAUDE.md` there, resolving to a file in that same directory.
 function readsInstructions(data) {
   const input = data.tool_input || {};
   if (data.tool_name !== 'Read' || input.limit != null || input.offset != null || !input.file_path) return false;
-  const file = path.resolve(data.cwd || process.cwd(), expandHome(input.file_path));
-  const dir = path.dirname(file);
-  const name = path.basename(file);
-  if (!fs.existsSync(path.join(dir, '.git'))) return false;
-  return name === 'AGENTS.md' || name === 'CLAUDE.md' || (name === 'README.md' && !fs.existsSync(path.join(dir, 'AGENTS.md')));
+  try {
+    const file = path.resolve(data.cwd || process.cwd(), expandHome(input.file_path));
+    const dir = path.dirname(file);
+    const has = (name) => fs.existsSync(path.join(dir, name));
+    if (!has('.git') || !(has('AGENTS.md') || has('CLAUDE.md'))) return false;
+    if (path.basename(file) !== ['AGENTS.md', 'README.md', 'CLAUDE.md'].find(has)) return false;
+    return path.dirname(fs.realpathSync(file)) === fs.realpathSync(dir);
+  } catch {
+    return false;
+  }
 }
 
 // True when the call starts an Orca worker (not its --help).

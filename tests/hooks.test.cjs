@@ -591,48 +591,90 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.equal(guard.decide({ session_id: session(), cwd: tmp, tool_name: 'Bash', tool_input: { command: `cat ${sh(repos)}/app/a` } }, { list: null }), '');
     });
 
-    await t.test("a whole Read of a checkout's agent instructions does not count", () => {
+    await t.test("a whole Read of the instructions file a rules hook asks for does not count", () => {
       turn();
-      const app = path.join(repos, 'app');
-      const docs = path.join(repos, 'docs');
-      fs.mkdirSync(path.join(app, '.git'), { recursive: true });
-      fs.mkdirSync(docs, { recursive: true });
-      fs.writeFileSync(path.join(docs, '.git'), 'gitdir: x');
-      fs.writeFileSync(path.join(app, 'AGENTS.md'), 'rules');
+      const repo = (name, files) => {
+        const dir = path.join(repos, name);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, '.git'), 'gitdir: x');
+        for (const f of files) fs.writeFileSync(path.join(dir, f), f);
+        return dir;
+      };
+      const both = repo('both', ['AGENTS.md', 'CLAUDE.md', 'README.md']);
+      const claudeOnly = repo('claude-only', ['CLAUDE.md', 'README.md']);
+      const readmeOnly = repo('readme-only', ['README.md']);
+      const linked = repo('linked', ['CLAUDE.md']);
+      fs.writeFileSync(path.join(tmp, 'outside.md'), 'data');
+      fs.symlinkSync(path.join(tmp, 'outside.md'), path.join(linked, 'AGENTS.md'));
+      const plain = path.join(repos, 'plain');
+      fs.mkdirSync(plain, { recursive: true });
+      fs.writeFileSync(path.join(plain, 'AGENTS.md'), 'x');
       call('Bash', { command: `cat ${sh(repos)}/app/a` });
       call('Bash', { command: `cat ${sh(repos)}/app/b` });
-      for (const f of [path.join(app, 'AGENTS.md'), path.join(app, 'CLAUDE.md'), path.join(docs, 'README.md'), 'repos/app/AGENTS.md']) {
+      for (const f of [path.join(both, 'AGENTS.md'), path.join(claudeOnly, 'README.md'), 'repos/both/AGENTS.md']) {
         assert.equal(call('Read', { file_path: f }), '', f);
       }
-      assert.notEqual(call('Read', { file_path: path.join(app, 'AGENTS.md'), limit: 30 }), '');
-      assert.notEqual(call('Read', { file_path: path.join(app, 'README.md') }), '');
-      assert.notEqual(call('Read', { file_path: path.join(app, 'sub', 'AGENTS.md') }), '');
+      for (const [f, extra] of [
+        [path.join(both, 'AGENTS.md'), { limit: 30 }],
+        [path.join(both, 'AGENTS.md'), { offset: 10 }],
+        [path.join(both, 'CLAUDE.md'), {}],
+        [path.join(both, 'README.md'), {}],
+        [path.join(claudeOnly, 'CLAUDE.md'), {}],
+        [path.join(readmeOnly, 'README.md'), {}],
+        [path.join(linked, 'AGENTS.md'), {}],
+        [path.join(plain, 'AGENTS.md'), {}],
+        [path.join(both, 'sub', 'AGENTS.md'), {}],
+      ]) assert.notEqual(call('Read', { file_path: f, ...extra }), '', `${f} ${JSON.stringify(extra)}`);
     });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('gate-line-guard: git text printed by echo/printf is not a git write', async (t) => {
+test('gate-line-guard: only git that runs is a git write', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-echo-'));
   execFileSync('git', ['init', '-q', tmp]);
+  const linked = path.join(tmp, 'linked');
+  fs.writeFileSync(path.join(tmp, 'f'), 'x');
+  execFileSync('git', ['-C', tmp, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--allow-empty']);
+  execFileSync('git', ['-C', tmp, 'worktree', 'add', '-q', linked]);
   const writes = (command) => gateLineGuard.writesMainCheckout(command, tmp);
   try {
-    await t.test('quoted git commands inside echo/printf arguments pass', () => {
+    await t.test('git quoted as text, in a comment or a heredoc passes', () => {
       for (const c of [
         'echo "Worktree: \\`git fetch origin x && git checkout --detach abc\\`."',
         "{ echo '# Spec'; echo \"run: git fetch && git checkout x\"; } > /tmp/w1.md",
         'printf "%s\\n" "git -C repo reset --hard && git merge x" > /tmp/s.md',
         'echo hi \\&\\& git checkout x',
+        "echo 'Run `git fetch` && git checkout x' > /tmp/spec.md",
+        "echo 'see $(git rev-parse HEAD) && git merge x' > /tmp/spec.md",
+        'if true; then :; else echo "a && git checkout x"; fi',
+        'command echo "a && git checkout x"',
+        '# git checkout main',
+        "cat > /tmp/s.md <<'EOF'\ngit checkout main\nEOF",
+        `cd ${linked} && git checkout -q HEAD`,
+        `git -C ${linked} reset --hard`,
+        'git fetch origin && git show origin/main:f',
       ]) assert.equal(writes(c), false, c);
     });
-    await t.test('real git writes stay gated, beside or inside an echo', () => {
+    await t.test('git that runs stays gated, whatever text surrounds it', () => {
       for (const c of [
         'echo start; git checkout main',
         'echo "a" && git merge feat',
         'echo "$(git checkout main)"',
         'echo "x" "$(git reset --hard)"',
+        'echo "`true && git checkout main`"',
+        'echo `git checkout main`',
+        'echo "${x:-`git checkout main`}"',
         'git commit -m "echo x"',
+        `grep "a;echo it's" f && git checkout main`,
+        "echo $'it\\'s'; git checkout main",
+        "# note; echo can't hurt\ngit checkout main",
+        `ls "x|echo don't" ; git reset --hard`,
+        'echo "a\\"b" && git checkout main',
+        `cd ${linked} && cd .. && git stash`,
+        `git -C ${linked} -C .. branch -D x`,
+        'sudo git clean -fd',
       ]) assert.equal(writes(c), true, c);
     });
   } finally {
