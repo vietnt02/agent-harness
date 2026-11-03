@@ -644,6 +644,9 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
   execFileSync('git', ['-C', tmp, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--allow-empty']);
   execFileSync('git', ['-C', tmp, 'worktree', 'add', '-q', linked]);
   const writes = (command) => gateLineGuard.writesMainCheckout(command, tmp);
+  // Bash command strings use forward slashes: a shell reads `\` as an escape (Git Bash on Windows too).
+  const L = linked.split(path.sep).join('/');
+  const T = tmp.split(path.sep).join('/');
   try {
     await t.test('git quoted as text, in a comment or a heredoc passes', () => {
       for (const c of [
@@ -657,8 +660,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'command echo "a && git checkout x"',
         '# git checkout main',
         "cat > /tmp/s.md <<'EOF'\ngit checkout main\nEOF",
-        `cd ${linked} && git checkout -q HEAD`,
-        `git -C ${linked} reset --hard`,
+        `cd ${L} && git checkout -q HEAD`,
+        `git -C ${L} reset --hard`,
         'git fetch origin && git show origin/main:f',
       ]) assert.equal(writes(c), false, c);
     });
@@ -677,8 +680,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         "# note; echo can't hurt\ngit checkout main",
         `ls "x|echo don't" ; git reset --hard`,
         'echo "a\\"b" && git checkout main',
-        `cd ${linked} && cd .. && git stash`,
-        `git -C ${linked} -C .. branch -D x`,
+        `cd ${L} && cd .. && git stash`,
+        `git -C ${L} -C .. branch -D x`,
         'sudo git clean -fd',
         'echo "$(printf "%s" x; git checkout main)"',
         `echo "$(printf '"')" && git checkout main`,
@@ -693,20 +696,20 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'git update-ref refs/heads/main HEAD~1',
         'git tag -f v1',
         `git --work-tree . checkout main`,
-        `cd ${linked} && git --work-tree=${tmp} checkout main`,
-        `cd ${linked} && GIT_WORK_TREE=${tmp} git checkout main`,
+        `cd ${L} && git --work-tree=${T} checkout main`,
+        `cd ${L} && GIT_WORK_TREE=${T} git checkout main`,
         'timeout 30 git pull',
         'xargs -J % git branch -D %',
         'xargs -s 100 git branch -d',
-        `cd ${linked} && env -C ${tmp} git checkout main`,
-        `(cd ${linked} && git status); git checkout main`,
-        `x=$(cd ${linked}; pwd); git checkout main`,
-        `cd ${linked} && pushd ${tmp} && git checkout main`,
-        `cd ${linked} && cd -- ${tmp} && git checkout main`,
-        `cd ${linked} && cd -P ${tmp} && git checkout main`,
-        `cd ${linked} && M=${tmp}; cd $M && git checkout main`,
-        `cd ${linked} && cd - && git checkout main`,
-        `cd ${linked} && cd ${linked}/not-made-yet && git checkout main`,
+        `cd ${L} && env -C ${T} git checkout main`,
+        `(cd ${L} && git status); git checkout main`,
+        `x=$(cd ${L}; pwd); git checkout main`,
+        `cd ${L} && pushd ${T} && git checkout main`,
+        `cd ${L} && cd -- ${T} && git checkout main`,
+        `cd ${L} && cd -P ${T} && git checkout main`,
+        `cd ${L} && M=${T}; cd $M && git checkout main`,
+        `cd ${L} && cd - && git checkout main`,
+        `cd ${L} && cd ${L}/not-made-yet && git checkout main`,
         'cat <<EOF > /tmp/x && git checkout main\nbody\nEOF',
         'cat > /tmp/f <<EOF\n$(git checkout main)\nEOF',
       ]) assert.equal(writes(c), true, c);
@@ -717,11 +720,11 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'echo "$(date) \\$(git checkout main)"',
         "cat <<'END-X'\ngit checkout main\nEND-X",
         "cat > /tmp/f <<'EOF'\n$(git checkout main)\nEOF",
-        `(cd ${linked} && git checkout -q HEAD)`,
-        `cd ${linked} && x=$(cd ${tmp}; pwd) && git checkout -q HEAD`,
-        `cd ${linked} && bash -c "git checkout -q HEAD"`,
+        `(cd ${L} && git checkout -q HEAD)`,
+        `cd ${L} && x=$(cd ${T}; pwd) && git checkout -q HEAD`,
+        `cd ${L} && bash -c "git checkout -q HEAD"`,
         'ssh host "git checkout main"',
-        `cd -- ${linked} && git checkout -q HEAD`,
+        `cd -- ${L} && git checkout -q HEAD`,
         'git stash list',
         'git branch -a',
         'git tag -l',
