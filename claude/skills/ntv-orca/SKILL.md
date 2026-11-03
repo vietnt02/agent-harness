@@ -38,8 +38,8 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
 coordinator trả lời từ thứ đang có, hoặc chạy **một** lệnh xác nhận một đích đã biết (một file, một
-trạng thái). Cần hơn một lệnh, hay chạm nhiều repo → trả lời user bằng manifest một worker rà
-chỉ-đọc (§ 2), "ok" thì spawn. Đây là cách `CLAUDE.md` § Verification ("run the reads that answer it") áp ở vai
+trạng thái). Cần hơn một lệnh, hay chạm nhiều repo → giao ngay một worker rà chỉ-đọc (model không
+phải Claude, không cần manifest: câu hỏi đã mở khối cho nó) và báo user "đã giao rà, khoảng N phút". Đây là cách `CLAUDE.md` § Verification ("run the reads that answer it") áp ở vai
 coordinator: lần đọc vẫn chạy, nhưng do worker chạy.
 
 **Coordinator tự làm, không giao, chỉ khi:** sửa harness `~/.claude`; đổi một giá trị có sẵn, không

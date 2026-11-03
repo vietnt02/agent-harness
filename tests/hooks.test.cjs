@@ -538,6 +538,32 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.equal(call('Bash', { command: 'cat repos/app/c' }), '');
     });
 
+    await t.test('commands that name no watched path do not count, even run inside one', () => {
+      turn();
+      const inRepo = { cwd: path.join(repos, 'app') };
+      for (const c of ['date', 'echo hi', 'git commit -qm msg', 'git status --short']) assert.equal(call('Bash', { command: c }, inRepo), '');
+      fs.writeFileSync(path.join(repos, 'app', 'f.sql'), 'x');
+      call('Bash', { command: 'cat f.sql' }, inRepo);
+      call('Grep', { pattern: 'x' }, inRepo);
+      assert.notEqual(call('Bash', { command: 'cat f.sql' }, inRepo), '');
+    });
+
+    await t.test('a free command in a chain frees only itself; wrappers are seen through', () => {
+      turn();
+      call('Bash', { command: `gh --version; cat ${repos}/app/a` });
+      call('Bash', { command: `git -C ${repos}/app fetch && cat ${repos}/app/b` });
+      assert.notEqual(call('Bash', { command: 'sudo ssh h3 ls' }), '');
+    });
+
+    await t.test('only a real worker-start unlocks the turn', () => {
+      turn();
+      call('Bash', { command: 'echo orchestration worker-start' });
+      call('Bash', { command: 'orca orchestration worker-start --help' });
+      call('Bash', { command: `cat ${repos}/app/a` });
+      call('Bash', { command: `cat ${repos}/app/b` });
+      assert.notEqual(call('Bash', { command: `cat ${repos}/app/c` }), '');
+    });
+
     await t.test('a subagent, a worker session and no list all pass', () => {
       turn();
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'cat repos/app/a' }, { agent_id: 'sub-1' }), '');

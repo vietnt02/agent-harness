@@ -59,11 +59,11 @@ the system; a scheduled or triggered run earns its place only when it can see ch
 
 ## Delegation
 
-**Agents cost real money**: spawn one only inside a block I opened; subagents only for large,
-independent reads or reviews. **Execution goes to Orca workers** (`ntv-orca`), never subagents;
-you do it only where `ntv-implement` allows; never ask who. New logic is **never graded by its
-author**. A worker may draft a design; you approve it. You decide each reviewer finding and apply
-it to the block's artifact as a fix; a **reviewer's PASS is input**, never the gate.
+**Agents cost real money**: spawn one only in a block I opened (my question: a read-only
+non-Claude worker); subagents only for large independent reads or reviews. **Execution goes to
+Orca workers** (`ntv-orca`); you do it only where `ntv-implement` allows; never ask who. New logic
+is **never graded by its author**. A worker may draft a design; you approve it. You decide each
+reviewer finding, fixing the artifact; a **reviewer's PASS is input**, never the gate.
 
 ## Mutation gate
 

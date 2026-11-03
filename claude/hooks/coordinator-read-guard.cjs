@@ -6,11 +6,17 @@
  * child repos, the work a read-only worker does on a quota that costs less.
  * - UserPromptSubmit: starts a new turn (resets the count).
  * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place counts; the third one in a
- *   turn is denied unless the turn already ran `orca orchestration worker-start`.
+ *   turn is denied unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
+ *   one confirming read the skill allows, plus one of slack, since a hook cannot tell a confirm
+ *   from the start of a chain.
  * Watched places come from the local list `~/.claude/knowledge/coordinator-reads.txt`, one per
  * line: a path prefix (`~/…` or absolute), or `cmd:<word>` for a command word (`cmd:ssh`). No list:
- * nothing is watched. Not counted: gh/glab, CI watching (watch.sh, ci.sh), git merge/push/pull/
- * fetch/worktree, any `orca` call (the gate and CI stay with the coordinator).
+ * nothing is watched. A Bash call reads a watched place when one of its simple commands names it:
+ * an absolute or `~` path inside it, or a relative path that exists from cwd (so `git commit -m x`
+ * run inside a watched repo does not count; `git log` with no path is not seen). Read/Grep/Glob:
+ * their path, else cwd. Not counted: gh/glab, CI watching (watch.sh, ci.sh), git merge/push/pull/
+ * fetch/worktree, any `orca` call (the gate and CI stay with the coordinator), each judged per
+ * simple command. Known limit: a turn woken without a prompt keeps the last turn's count.
  * Passes: an Orca worker session, a subagent (`agent_id`), and a repo the session note names in a
  * `Người làm: Claude — <repo> — <evidence>` line (worker-default-guard's check: the user named
  * Claude for that repo, so reading it is Claude's work).
@@ -19,7 +25,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { commands } = require('./lib/shell-words.cjs');
+const { commands, program } = require('./lib/shell-words.cjs');
 const { expandHome } = require('./lib/platform.cjs');
 const { inside, repoOf, claimed, isWorker, liveLines } = require('./worker-default-guard.cjs');
 
@@ -47,34 +53,46 @@ function watched(file = LIST) {
 
 const word0 = (w) => path.basename(w || '');
 
-// The watched path or command word a tool call reads, or null. `cwd` resolves relative paths and,
-// for Bash, counts itself: a command run from inside a watched folder reads it.
+// The watched path or command word a tool call reads, or null.
 function readTarget(data, list) {
   const input = data.tool_input || {};
   const cwd = data.cwd || process.cwd();
-  const hit = (p) => {
-    if (!p || p.startsWith('$')) return null;
+  const inList = (abs) => list.paths.some((w) => inside(abs, w));
+  const named = (p, mustExist) => {
+    if (!p || p.startsWith('$') || p.startsWith('-')) return null;
     const abs = path.resolve(cwd, expandHome(p));
-    return list.paths.find((w) => inside(abs, w)) ? abs : null;
+    if (!inList(abs)) return null;
+    return !mustExist || fs.existsSync(abs) ? abs : null;
   };
-  if (data.tool_name !== 'Bash') return hit(input.file_path || input.path);
-  const cmds = commands(input.command);
-  for (const words of cmds) {
-    const w = word0(words[0]);
-    if (FREE_WORDS.has(w) || FREE_SCRIPT.test(words[0] || '') || words.some((x) => FREE_SCRIPT.test(x))) return null;
+  if (data.tool_name !== 'Bash') return named(input.file_path || input.path || cwd, false);
+  for (const raw of commands(input.command)) {
+    const words = program(raw);
+    const w = words[0] || '';
+    if (FREE_WORDS.has(w) || FREE_SCRIPT.test(w) || words.some((x) => FREE_SCRIPT.test(x))) continue;
     if (w === 'git') {
-      const sub = words.slice(1).find((x, i, a) => !x.startsWith('-') && a[i - 1] !== '-C');
-      if (FREE_GIT.has(sub)) return null;
+      let i = 1;
+      while (i < words.length && words[i].startsWith('-')) i += /^-[Cc]$/.test(words[i]) ? 2 : 1;
+      if (FREE_GIT.has(words[i])) continue;
     }
-  }
-  for (const words of cmds) {
-    if (list.words.has(word0(words[0]))) return word0(words[0]);
+    if (list.words.has(w)) return w;
     for (const x of words.slice(1)) {
-      const m = hit(x.replace(/^[^=]*=(?=[~/])/, ''));
+      const v = x.replace(/^[^=]*=(?=[~/.])/, '');
+      const m = named(v, !/^[~/]/.test(v));
       if (m) return m;
     }
   }
-  return cmds.length ? hit(cwd) : null;
+  return null;
+}
+
+// True when the call starts an Orca worker (not its --help).
+function startsWorker(data) {
+  if (data.tool_name !== 'Bash') return false;
+  return commands(data.tool_input?.command).some((raw) => {
+    const words = program(raw);
+    const at = words.indexOf('worker-start');
+    return words[0] === 'orca' && at > 0 && words.slice(0, at).includes('orchestration') &&
+      !words.includes('--help') && !words.includes('-h');
+  });
 }
 
 function statePath(sessionId) {
@@ -88,8 +106,6 @@ function save(sessionId, state) {
   fs.writeFileSync(statePath(sessionId), JSON.stringify(state));
 }
 
-const WORKER_START = /\borchestration\s+worker-start\b/;
-
 // Why this call is blocked, or ''. Updates the turn's state as a side effect.
 function decide(data, { list = watched(), notesDir } = {}) {
   if (!data.session_id) return '';
@@ -99,7 +115,7 @@ function decide(data, { list = watched(), notesDir } = {}) {
   }
   if (!list || data.agent_id) return '';
   const state = load(data.session_id);
-  if (data.tool_name === 'Bash' && WORKER_START.test(String(data.tool_input?.command || ''))) {
+  if (startsWorker(data)) {
     save(data.session_id, { ...state, delegated: true });
     return '';
   }
@@ -115,8 +131,8 @@ function decide(data, { list = watched(), notesDir } = {}) {
     return (
       `this would be read ${state.reads + 1} of a watched place (${target}) in this turn with no worker. ` +
       'The coordinator answers from what it has or one confirming read; a chain of reads goes to a ' +
-      'read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): dispatch one and tell the user it is ' +
-      'checking. If the user named Claude for this repo, add the `Người làm: Claude — <repo> — "<their sentence>"` ' +
+      'read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): dispatch one now (no manifest: the ' +
+      'question opens a block for it) and tell the user it is checking. If the user named Claude for this repo, add the `Người làm: Claude — <repo> — "<their sentence>"` ' +
       'line to the session note first.'
     );
   }
