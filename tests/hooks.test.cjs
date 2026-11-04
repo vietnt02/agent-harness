@@ -414,6 +414,19 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       for (const l of miss) assert.equal(dispatchSplitGuard.prodWrites(l).length, 0, l);
     });
 
+    await t.test('a dispatch whose spec never asks for a mid-turn inbox check is blocked', () => {
+      const ws = 'worker' + '-start';
+      const spec = (name, body) => { fs.writeFileSync(path.join(tmp, name), body); return name; };
+      const cmd = (f, extra = '') => `# Track: w9 ← rà [a.py]\ncd "${tmp}" && orca orchestration ${ws} --spec-file ${f} --agent antigravity --model gemini-3.8-flash --effort high ${extra}`;
+      const no = run(cmd(spec('no.md', 'Rà a.py, báo lại.')));
+      assert.equal(no.status, 2);
+      assert.match(no.stderr, /check --peek/);
+      assert.equal(run(cmd(spec('no2.md', 'Rà a.py.'), '--retry-of ctx_1')).status, 2, 'a retry needs it too');
+      const yes = run(cmd(spec('yes.md', 'Rà a.py. Chạy `orca orchestration check --peek` trước mỗi commit.')));
+      assert.equal(yes.status, 0, yes.stderr);
+      assert.equal(run(`orca orchestration ${ws} --help`).status, 0);
+    });
+
     await t.test('send with an inline write is blocked', () => {
       const res = run('orca orchestration send --to dispatch:ctx_1 --subject s --body "chạy lark-cli base +record-batch-update --json @a.json"');
       assert.equal(res.status, 2);
@@ -920,7 +933,8 @@ test('worker-start-receipt: a send to a running worker reminds that the message 
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
   const lines = (c) => receipt.sendLines(c, (d) => states[d]);
   assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
-  assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Queued.*Steer/);
+  assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /check --peek.*worker-stop --dispatch ctx_a1/);
+  assert.doesNotMatch(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Cần bạn/);
   assert.match(lines('orca orchestration send --to=dispatch:ctx_c3 --subject x')[0], /state=ready/);
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --subject x'), []);
   assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);

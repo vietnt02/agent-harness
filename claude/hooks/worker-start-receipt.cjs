@@ -12,9 +12,10 @@
  *   `$GEMINI_HOME/config` -> ~/.gemini/config, or it runs without the global AGENTS.md and skills.
  *   Orca picks GEMINI_HOME itself, so a new Orca version or account can move it silently.
  * After `orca orchestration send --to dispatch:<ctx>` to a worker not yet finished: the receipt only
- * says the message reached the mailbox. A chat worker mid-turn holds it as Queued until the turn
- * ends, the CLI has no steer, so the reply to the user says "nhận sau lượt này", or asks them to
- * press Steer when it cannot wait.
+ * says the message reached the mailbox. A chat worker mid-turn sees it only at its next
+ * `check --peek` (the spec asks for one; dispatch-split-guard blocks a spec without it); the CLI
+ * cannot interrupt a turn, so an urgent message to a worker stuck in a long command is the
+ * coordinator's own `worker-stop` plus `--retry-of`, never an ask to the user.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -168,9 +169,10 @@ function sendLines(command, show = showState) {
       return [`${d} (state=${st.state}): session của worker đã thoát, tin sẽ không tới. Đừng báo user là worker đã nhận; ` +
         'chạy lại task (`--retry-of`) hoặc giao worker mới.'];
     }
-    return [`${d} (state=${st.state}): \`ok:true\` chỉ là tin đã vào hộp thư. Nếu worker Chat đang trong một lượt, tin nằm ` +
-      'Queued tới hết lượt đó, CLI không steer được: báo user "worker nhận sau lượt này"; cần đổi hướng ngay thì ' +
-      '`**Cần bạn:** bấm Steer trên tab worker`.'];
+    return [`${d} (state=${st.state}): \`ok:true\` chỉ là tin đã vào hộp thư. Worker Chat đang trong một lượt chỉ thấy tin ` +
+      'ở lần `orca orchestration check --peek` kế tiếp mà spec đòi; CLI không ngắt được lượt. Gấp mà worker không đọc kịp ' +
+      `(đang chạy lệnh dài) → tự \`orca orchestration worker-stop --dispatch ${d}\` rồi giao lại bằng \`--retry-of\` ` +
+      'kèm nội dung tin; không nhờ user bấm Steer.'];
   });
 }
 

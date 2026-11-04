@@ -20,6 +20,9 @@
  * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude worker at all needs a
  * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
  * (ntv-orca § 2, Chọn model), and the manifest's model column is written before that rule is in view.
+ * A dispatch whose spec never asks the worker to run `orca orchestration check --peek` is blocked,
+ * `--retry-of` included: a Chat worker sees a coordinator's `send` only after its turn ends and the CLI
+ * cannot interrupt the turn, so the spec's inbox check is the only way a correction lands mid-turn.
  * `worker-start --help` is not a dispatch.
  * A spec or message the coordinator hands a worker (`worker-start`, `task-create`, `send`, `reply`,
  * `dispatch`) that holds a Lark or n8n production write is blocked: a worker only scouts, builds the
@@ -161,6 +164,9 @@ function workerText(command, cwd) {
   }
   return parts.join('\n');
 }
+
+// True when the worker's text asks it to read its inbox mid-turn (`orca orchestration check --peek`).
+const readsInbox = (text) => /\bcheck\s+--peek\b/.test(text);
 
 // Lines of the worker's text that run a production write for real.
 function prodWrites(text) {
@@ -324,7 +330,7 @@ function verdict(lines, input, ctx) {
   return null;
 }
 
-module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
+module.exports = { readsInbox, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
 if (require.main !== module) return;
 
 let raw = '';
@@ -368,6 +374,13 @@ process.stdin.on('end', () => {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
         'e.g. `--model gemini-3.8-flash --effort high` (ntv-orca § 2, Chọn model); without it agy ' +
         'runs Medium. A model with one level gets exactly that level (`agy models`).\n');
+      process.exit(2);
+    }
+    if (!readsInbox(workerText(command, cwd))) {
+      process.stderr.write('dispatch-split-guard: the spec never asks the worker to read its inbox mid-turn. A Chat worker ' +
+        'sees a `send` only after its turn ends, and the CLI cannot interrupt the turn (ntv-orca § 2, § 3). Add to the spec: ' +
+        '"chạy `orca orchestration check --peek` trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của ' +
+        'coordinator thì làm theo trước, tin đã làm theo thì bỏ qua khi thấy lại".\n');
       process.exit(2);
     }
     if (starts.segs.every((seg) => /\s--retry-of\b/.test(seg))) process.exit(0);
