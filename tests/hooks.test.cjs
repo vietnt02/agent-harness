@@ -473,6 +473,55 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       for (const l of miss) assert.equal(dispatchSplitGuard.prodWrites(l).length, 0, l);
     });
 
+    await t.test('a new spec that never asks for a mid-turn inbox check is blocked', () => {
+      const ws = 'worker' + '-start';
+      const spec = (name, body) => { fs.writeFileSync(path.join(tmp, name), body); return name; };
+      const flags = '--agent antigravity --model gemini-3.8-flash --effort high';
+      const cmd = (rest) => `# Track: w9 ← rà [a.py]\ncd "${tmp}" && orca orchestration ${ws} ${rest} ${flags}`;
+      const yes = spec('yes.md', 'Rà a.py. Chạy `orca orchestration check --peek` trước mỗi commit.');
+      const no = spec('no.md', 'Rà a.py, báo lại.');
+      const neg = spec('neg.md', 'Rà a.py. Đừng chạy `orca orchestration check --peek`.');
+      const block = (c, why) => { const r = run(c); assert.equal(r.status, 2, why); assert.match(r.stderr, /check --peek/, why); };
+      const pass = (c, why) => { const r = run(c); assert.equal(r.status, 0, `${why}: ${r.stderr}`); };
+      block(cmd(`--spec-file ${no}`), 'spec without it');
+      block(cmd(`--spec-file ${neg}`), 'a negated mention');
+      block(`# nhắc: check --peek\n${cmd(`--spec-file ${no}`)}`, 'a comment in the command is not the spec');
+      block(`orca orchestration check --peek; ${cmd(`--spec-file ${no}`)}`, 'the coordinator checking is not the spec');
+      block(`${cmd(`--spec-file ${yes}`)}; orca orchestration ${ws} --spec-file ${no} ${flags}`, 'each dispatch is judged');
+      block(`orca orchestration task-create --spec 'Rà a.py'`, 'task-create brings a spec too');
+      block(`# Track: w9 ← rà [a.py]\ncd "${tmp}" && D=$(orca orchestration ${ws} --spec-file ${no} ${flags} --json)`, 'a dispatch inside $(…)');
+      block(`T=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a task-create inside backticks');
+      block(`git commit -m "don't"; T=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a lone quote inside "…" hides nothing');
+      block(`cat > /tmp/n <<'EOF'\nDon't push.\nEOF\nT=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a quote in a heredoc body hides nothing');
+      block(cmd(`--spec-file ${no} --task-title x`), '--task-title is not --task');
+      pass(cmd(`--spec "Không push; chạy orca orchestration check --peek sau mỗi 10 lệnh"`), 'a `;` inside the inline spec');
+      pass(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nChạy orca orchestration check --peek trước mỗi commit.\nEOF\n)"`), 'a heredoc spec');
+      block(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nEOF\n)"`), 'a heredoc spec without it');
+      pass(cmd('--spec "$SPEC"'), 'an inline spec in a variable is not judged');
+      const two = (a, b) => `${cmd(`--spec "$(cat <<'EOF'\n${a}\nEOF\n)"`)}\norca orchestration ${ws} --spec "$(cat <<'EOF'\n${b}\nEOF\n)" ${flags}`;
+      block(two('Chạy orca orchestration check --peek.', 'Rà b.py.'), 'each heredoc spec is read from its own body');
+      pass(`cat > /tmp/x <<'EOF'\nnotes\nEOF\n${cmd(`--spec "$(cat <<'EOF'\nChạy orca orchestration check --peek.\nEOF\n)"`)}`, 'an earlier heredoc is not the spec');
+      pass(cmd(`--spec-file ${yes}`), 'spec with it');
+      pass(cmd(`--spec "Rà a.py; chạy orca orchestration check --unread --peek sau mỗi 10 lệnh"`), 'inline, other flags between');
+      pass(cmd('--task task_1 --retry-of ctx_1'), 'a --task retry runs a Task already judged');
+      pass(cmd('--spec-file "$F"'), 'a spec path in a variable is not judged');
+      pass(cmd('--spec-file missing.md'), 'an unreadable spec is not judged');
+      pass(`orca orchestration ${ws} --help`, 'help');
+    });
+
+    await t.test('the words of a dispatch inside a quoted string are not a dispatch', () => {
+      const ws = 'worker' + '-start';
+      for (const c of [`git commit -m "docs: mô tả \\\`orca orchestration ${ws}\\\` trong skill"`,
+        `orca orchestration send --to w1 --message "ví dụ: D=\\$(orca orchestration ${ws} --spec-file a.md)"`,
+        `gh pr create --body 'Docs: \`orca orchestration send\` rồi lark-cli base +record-update'`,
+        `CMD='cd /x && orca orchestration ${ws} --spec-file a.md'; echo "$CMD"`,
+        `python3 -c "print('cd /x && orca orchestration ${ws} --spec-file a.md')"`,
+        `cat > /tmp/s.md <<'EOF'\norca orchestration ${ws} --spec-file a.md\nEOF`]) {
+        const r = run(c);
+        assert.equal(r.status, 0, `${c}: ${r.stderr}`);
+      }
+    });
+
     await t.test('send with an inline write is blocked', () => {
       const res = run('orca orchestration send --to dispatch:ctx_1 --subject s --body "chạy lark-cli base +record-batch-update --json @a.json"');
       assert.equal(res.status, 2);
@@ -498,7 +547,7 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
     });
 
     await t.test('task-create with only a dry-run passes', () => {
-      const res = run('orca orchestration task-create --spec "lark-cli base +record-batch-update --dry-run --json @a.json"');
+      const res = run('orca orchestration task-create --spec "lark-cli base +record-batch-update --dry-run --json @a.json; chạy orca orchestration check --peek sau mỗi 10 lệnh"');
       assert.equal(res.status, 0, res.stderr);
     });
 
@@ -979,7 +1028,8 @@ test('worker-start-receipt: a send to a running worker reminds that the message 
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
   const lines = (c) => receipt.sendLines(c, (d) => states[d]);
   assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
-  assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Queued.*Steer/);
+  assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /check --peek.*worker-stop --dispatch ctx_a1/);
+  assert.doesNotMatch(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Cần bạn/);
   assert.match(lines('orca orchestration send --to=dispatch:ctx_c3 --subject x')[0], /state=ready/);
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --subject x'), []);
   assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);

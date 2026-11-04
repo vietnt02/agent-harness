@@ -85,6 +85,10 @@ trước mutation đầu tiên, ngoài scope thì `ask`); mục **Nghiệm thu**
 chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
 
 - gửi kế hoạch qua `ask` trước khi sửa, kèm output thô của query chạy trên toàn bộ dữ liệu;
+- kiểm hộp thư giữa lượt: chạy `orca orchestration check --peek` trước mỗi commit, trước một lệnh
+  dài, và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo tin đó trước, tin đã làm
+  theo thì bỏ qua khi thấy lại (`--peek` không đánh dấu đã đọc; worker Chat không tự nhận tin `send`
+  tới giữa lượt, tin nằm Queued tới hết lượt);
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;
@@ -139,13 +143,16 @@ vậy thành một PR/MR để pipeline chạy một lần.
 - **Session worker là tài sản** (~30–60k token nạp). Việc kế tiếp cụ thể cần đúng context của worker
   đó và tới trong TTL cache (codex 30 phút, Claude 1 giờ) → giao bằng `send --to dispatch:<id>`
   (thành Task mới). Việc định gửi bằng `send` phải xét lại **Chọn model** (§ 2) như một lần giao
-  mới: khác loại task, hoặc làm task vượt mức § 2 cho model context ngắn → worker mới (ngoài manifest
-  đã duyệt thì hỏi lại, § 2; worker rà chỉ-đọc cho câu hỏi thì không cần). Worker chạy chế độ Chat
-  đang trong một lượt giữ tin ở Queued tới hết lượt (receipt vẫn `ok:true`), CLI không steer được:
-  báo user "worker nhận sau lượt này"; cần đổi hướng ngay → `**Cần bạn:** bấm Steer trên tab
-  <worker>`. Không có việc kế tiếp → release ngay (`worker-release`; worker trong worktree mới không
-  tự đóng), gỡ worktree sau khi lưu báo cáo. Đừng release rồi vài phút sau spawn
-  lại; cũng đừng giữ "phòng khi cần".
+  mới: khác loại task, hoặc làm task vượt mức § 2 cho model context ngắn → worker mới (ngoài
+  manifest đã duyệt thì hỏi lại, § 2; worker rà chỉ-đọc cho câu hỏi thì không cần). Worker chạy chế
+  độ Chat đang trong một lượt giữ tin ở Queued tới hết lượt và CLI không ngắt được lượt (Esc,
+  `--interrupt` bị từ chối), nên tin tới worker qua lần `check --peek` kế tiếp mà spec đòi (§ 2).
+  Tin gấp mà `worker-read --source transcript` cho thấy worker chưa `check --peek` trong vài phút
+  (đang chạy một lệnh dài, hoặc spec giao trước khi có câu kiểm hộp thư) → coordinator tự
+  `worker-stop`, rồi `worker-start --spec-file` mới gồm spec cũ, nội dung tin và câu kiểm hộp thư,
+  cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. Không có việc kế tiếp →
+  release ngay (`worker-release`; worker trong worktree mới không tự đóng), gỡ worktree sau khi lưu
+  báo cáo. Đừng release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
   luận. Im lặng, timeout hay `unverifiable` không bao giờ đủ để tự dừng, bỏ hay chạy lại worker
   (guide). Worker còn sống thì nó vẫn là người sửa duy nhất của worktree.

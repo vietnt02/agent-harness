@@ -20,6 +20,12 @@
  * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude worker at all needs a
  * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
  * (ntv-orca § 2, Chọn model), and the manifest's model column is written before that rule is in view.
+ * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
+ * `orca orchestration check --peek` (a negated mention does not count) is blocked: a Chat worker sees a
+ * coordinator's `send` only after its turn ends and the CLI cannot interrupt the turn, so the spec's
+ * inbox check is the only way a correction lands mid-turn. A `--task` dispatch brings a Task whose
+ * spec `task-create` brought; a spec this hook cannot read (`$var` path, stdin) is not judged.
+ * Only a simple command that runs `worker-start` is a dispatch, not the words inside a quoted string.
  * `worker-start --help` is not a dispatch.
  * A spec or message the coordinator hands a worker (`worker-start`, `task-create`, `send`, `reply`,
  * `dispatch`) that holds a Lark or n8n production write is blocked: a worker only scouts, builds the
@@ -48,10 +54,24 @@ const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
 const POLL_MS = 100;
 
-const DISPATCH = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 // A command handing a worker text to act on: a spec, a message, an answer to its `ask`.
 const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
+// Text that runs nothing dropped: an escaped character, a single-quoted string (scanned left to
+// right, so a `'` inside "…" opens none).
+const inert = (t) => t.replace(/\\[\s\S]|'[^']*'|"(?:[^"\\]|\\.)*"/g,
+  (m) => (m[0] === '\\' ? '' : m[0] === "'" ? "''" : m.replace(/\\[\s\S]/g, '')));
+// A backtick dispatch is looked for in the command without heredoc bodies and comments.
+const toWorker = (command) => TO_WORKER.test(command) ||
+  /`\s*(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/.test(inert(workerStarts(command).cmd));
 // Orca's dispatch brief opens a worker session with this line (as in worker-default-guard.cjs).
+// A simple command that runs `orca orchestration worker-start` (not a mention of it inside a quoted string).
+const STARTS_WORKER = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
+const CREATES_TASK = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+task-create\b/;
+// The same command run inside a command substitution: `D=$(orca … worker-start …)`, `` `orca …` ``.
+const SUBST = (verb) => new RegExp(String.raw`(?:\$\(|\`)\s*(?:\w+=\S*\s+)*orca\s+orchestration\s+${verb}\b`);
+const runs = (lead, verb) => (seg) => lead.test(seg) || SUBST(verb).test(inert(seg));
+const startsWorker = runs(STARTS_WORKER, 'worker-start');
+const createsTask = runs(CREATES_TASK, 'task-create');
 const DISPATCH_LEAD = 'Please carry out this task from my Orca coordinator';
 // A lark-cli shortcut is a read when one segment of its name is a read verb.
 const LARK_READ = new Set(['get', 'list', 'search', 'fetch', 'download', 'preview', 'query', 'read', 'show',
@@ -105,12 +125,18 @@ function memoryPressure() {
 const serialOk = (line, ctx) => /\(serial:\s*\S/.test(line) && (ctx.serial() || ctx.pressure() >= 2);
 
 // The command with heredoc bodies and comment lines dropped (they are not commands), and its
-// `worker-start` segments.
-function workerStarts(command) {
-  const cmd = command.replace(/(<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g, '$1')
+// `worker-start` segments. Separators inside quotes do not split a segment: they become spaces, or
+// with `keep` stand-in characters that `restore` turns back (a spec's own `;` and line breaks), and
+// each heredoc's opening line marked with the index of its body in `bodies`.
+const STAND_IN = { ';': '\u0001', '&': '\u0002', '|': '\u0003', '\n': '\u0004' };
+const restore = (t) => t.replace(/[\u0001-\u0004]/g, (c) => Object.keys(STAND_IN).find((k) => STAND_IN[k] === c));
+function workerStarts(command, keep = false) {
+  const bodies = [];
+  const cmd = command.replace(/(<<-?\s*(['"]?)(\w+)\2[^\n]*)\n([\s\S]*?)\n[ \t]*\3[ \t]*(?=\n|$)/g,
+    (_, open, q, tag, body) => (keep ? `${open}\u0005${bodies.push(body) - 1}\u0005` : open))
     .replace(/\\\n/g, ' ').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
-    .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => q.replace(/[;&|\n]/g, ' '));
-  return { cmd, segs: cmd.split(/[;&|\n]/).filter((seg) => /\borca\s+orchestration\s+worker-start\b/.test(seg)) };
+    .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => q.replace(/[;&|\n]/g, (c) => (keep ? STAND_IN[c] : ' ')));
+  return { cmd, bodies, segs: cmd.split(/[;&|\n]/).filter(startsWorker) };
 }
 
 const onlyHelp = (segs) => segs.length > 0 && segs.every((seg) => /\s(--help|-h)\b/.test(seg));
@@ -160,6 +186,46 @@ function workerText(command, cwd) {
     try { parts.push(fs.readFileSync(abs, 'utf8')); } catch (_) { /* unreadable: nothing to judge */ }
   }
   return parts.join('\n');
+}
+
+// True when the text asks for a mid-turn inbox read: a sentence holding `check … --peek` with no
+// negation before it in that sentence ("đừng chạy … check --peek" does not count).
+function readsInbox(text) {
+  return String(text).split(/[.\n;]+/).some((sentence) => {
+    const at = sentence.search(/\bcheck\b[^.\n;]*--peek\b/);
+    return at >= 0 && !/(?:^|[^\p{L}])(?:đừng|không|chớ|do not|don't|never)(?![\p{L}])/iu.test(sentence.slice(0, at));
+  });
+}
+
+// The spec each segment that creates work hands a worker: a `task-create`, or a dispatch that is not
+// `--task` (that one runs a Task whose spec `task-create` already brought). Each item is the spec
+// text (a `$(cat <<TAG …)` heredoc read from the command), or null when it cannot be read here
+// (`$var`, `--spec-file -`, unreadable file, another substitution): then nothing is judged (fail-open).
+function newSpecs(command, cwd) {
+  const { cmd, segs, bodies } = workerStarts(command, true);
+  const all = cmd.split(/[;&|\n]/).filter(createsTask);
+  let base = cwd || process.cwd();
+  const PATH = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s'")]+))`;
+  const pick = (m) => m[1] ?? m[2] ?? m[3];
+  for (const m of command.matchAll(new RegExp(String.raw`(?:^|[;&|\n]\s*)cd\s+${PATH}\s*(?:&&|;)`, 'g'))) {
+    base = path.resolve(base, expandHome(pick(m)));
+  }
+  const read = (f) => {
+    if (!f || f === '-' || f.startsWith('$')) return null;
+    try { return fs.readFileSync(path.resolve(base, expandHome(f)), 'utf8'); } catch (_) { return null; }
+  };
+  return [...segs.filter((seg) => !/\s--task(?:[ =]|$)/.test(seg) && !/\s(--help|-h)\b/.test(seg)), ...all].map((seg) => {
+    const file = seg.match(new RegExp(String.raw`--spec-file[ =]${PATH}`));
+    if (file) return read(pick(file));
+    const inline = seg.match(/--spec[ =](?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/);
+    if (!inline) return null;
+    const text = restore(inline[1] ?? inline[2] ?? inline[3]);
+    if (!text.startsWith('$')) return text;
+    const here = text.match(/^\$\(\s*cat\s*<<-?\s*(['"]?)\w+\1[^\u0005]*\u0005(\d+)\u0005/);
+    if (here) return bodies[Number(here[2])] ?? null;
+    const cat = text.match(new RegExp(String.raw`^\$\(\s*(?:cat\s+|<\s*)${PATH}\s*\)$`));
+    return cat ? read(pick(cat)) : null;
+  });
 }
 
 // Lines of the worker's text that run a production write for real.
@@ -324,7 +390,7 @@ function verdict(lines, input, ctx) {
   return null;
 }
 
-module.exports = { rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
+module.exports = { readsInbox, newSpecs, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
 if (require.main !== module) return;
 
 let raw = '';
@@ -335,7 +401,7 @@ process.stdin.on('end', () => {
   try {
     const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd } = JSON.parse(raw);
     const command = String(input?.command || '');
-    if (!transcript || agentId || !TO_WORKER.test(command)) process.exit(0);
+    if (!transcript || agentId || !toWorker(command)) process.exit(0);
     const writes = prodWrites(workerText(command, cwd));
     let lines = null;
     if (writes.length) { try { lines = tailLines(transcript); } catch (_) { lines = []; } }
@@ -348,8 +414,15 @@ process.stdin.on('end', () => {
         'worker must not run it. The user asked for this worker to write: add a `# Prod-write: "<their sentence>"` line.\n');
       process.exit(2);
     }
-    if (!DISPATCH.test(command)) process.exit(0);
     const starts = workerStarts(command);
+    if (newSpecs(command, cwd).some((spec) => spec !== null && !readsInbox(spec))) {
+      process.stderr.write('dispatch-split-guard: the spec never asks the worker to read its inbox mid-turn. A Chat worker ' +
+        'sees a `send` only after its turn ends, and the CLI cannot interrupt the turn (ntv-orca § 2, § 3). Add to the spec: ' +
+        '"chạy `orca orchestration check --peek` trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của ' +
+        'coordinator thì làm theo trước, tin đã làm theo thì bỏ qua khi thấy lại".\n');
+      process.exit(2);
+    }
+    if (!starts.segs.length) process.exit(0);
     if (onlyHelp(starts.segs)) process.exit(0);
     const model = unpinnedClaudeModel(command, starts);
     if (model) {
