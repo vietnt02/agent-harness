@@ -25,6 +25,10 @@ Mặc định làm **Reviewer** (`SKILL.md` § 2, § 4) và cho **Coordinator** 
 
        Chỉ đúng chữ ký trong thiết kế đã duyệt: không bí danh, không nhận nhiều kiểu đầu vào, không `except Exception`, không thêm khoá ngoài hợp đồng. Có cổng cho từng ca biên: giá trị `None`, khoá cấu hình thiếu, lỗi ghi giữa chừng.
 
+2. Khi làm worker research:
+
+       Mỗi kết luận dẫn nguồn đã mở (URL tài liệu, `file:dòng`, output lệnh dán nguyên); thứ chưa mở được thì ghi "chưa xác minh" ngay tại chỗ.
+
 ## Review gì
 
 - **Khi làm worker:** cắt nhánh dự phòng thừa, `except Exception` nuốt lỗi, khoá ngoài hợp đồng; kiểm test cho từng ca biên.

@@ -12,7 +12,7 @@
 ## Chọn model và Spawn Worker
 
 - **Phân vai (`SKILL.md` § 2, § 4):**
-  - Worker và Checker: `gemini-flash` (`--effort high`).
+  - Worker và Checker: `gemini-flash` (`--effort high`); worker research: `gemini-argon` (`--effort high`).
   - Reviewer mặc định và Coordinator (khi user mở trực tiếp): `gemini-argon` (`--effort high`).
   - Không dùng model Claude qua `agy`. Luôn ghi kèm tên agent (`agy gemini-3.8-flash high`) trong manifest, spec và báo cáo để tránh nhầm quota với agent khác.
 - **Truyền đủ `--model` và `--effort`:** bỏ trống `--model` sẽ lấy model của Coordinator trong settings:

@@ -13,9 +13,9 @@ description: "How Claude does execution work itself: before Claude itself edits 
   scouts, builds the command and runs it `--dry-run`; Claude reads that output, runs it for real
   and reads the result back. `hooks/dispatch-split-guard.cjs` blocks a worker spec or message
   holding a Lark or n8n write; it does not see SQL, curl or a job trigger. Claude does a gated change itself only: in `~/.claude`
-  (rules, skills, hooks: only an agent on this harness judges them), in a session Viet opened for
-  the harness or a kaizen, or a block naming it; a harness defect met during other work goes to a
-  kaizen file (`ntv-kaizen`), never a fix, a PR or an ask to open one; the specs, plans and
+  (rules, skills, hooks: only an agent on this harness judges them), and only in a session Viet
+  opened for the harness or a kaizen or a block naming it (a harness defect met during other work
+  goes to a kaizen file, `ntv-kaizen`: never a fix, a PR or an ask to open one); the specs, plans and
   knowledge docs a coordinator writes (`plans/`, `knowledge/` in a repo); a change to an existing
   value or parameter with no new logic; work Viet names Claude for; a step needing a tool only
   this session holds (an MCP connector, a login).
@@ -92,7 +92,7 @@ Push the branch, open the PR and report its link (tier A). Before merging a PR t
 the whole diff from your last read to the SHA being merged and run the repo's checks on that SHA.
 Once its deploy is green, read what now runs on production (the deployed code, workflow or config)
 and open both the changed page and one outside the change that shares its platform (a report beside
-the new one) before reporting done. Production off from what the change should show past the deploy
-time, a "loading"/"updating" state included → revert first and debug on the reverted state; never
+the new one) before reporting done. Either page still off from what it should show once the deploy reports
+green, a "loading"/"updating" state included → revert first and debug on the reverted state; never
 wait one out on a revertible deploy. A branch that already had a PR:
 `CLAUDE.md` § Irreversible actions.

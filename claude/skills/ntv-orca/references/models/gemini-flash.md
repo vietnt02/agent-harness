@@ -10,7 +10,7 @@ source: 1 phiên (2 worker gemini-3.8-flash high song song, 2 MR, CI xanh)
 
 # gemini-flash
 
-Mặc định cho worker/checker ở task nhỏ–vừa; hết quota mới dùng `gpt-luna` (`SKILL.md` § 2). Spawn: `--agent antigravity --model <slug trần> --effort high` (`../antigravity.md`).
+Mặc định cho worker/checker ở task nhỏ–vừa, trừ research (`gemini-argon`); hết quota mới dùng `gpt-luna` (`SKILL.md` § 2). Spawn: `--agent antigravity --model <slug trần> --effort high` (`../antigravity.md`).
 
 ## Giao gì / Không giao gì
 
