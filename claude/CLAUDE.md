@@ -24,10 +24,10 @@ the system; a scheduled or triggered run earns its place only when it can see ch
   never decided: **on scope, acting against my intent is worse than being wrong.**
 - A decision I stated (this session, or in a note it works from) beats any default (a rule, skill,
   table, your own habit), over the whole scope I gave it. "Tôi nghĩ", "tôi thấy" is an opinion to
-  advise on, never a decision. Data you gather, a remark or principle of mine never reopens a
-  decision nor argues for less than the best: a concern is one line in the report.
+  advise on, never a decision. Only my yes to your ask to change one reopens it; data or a remark
+  never argues for less than the best: a concern is one report line.
 - **One topic at a time**: while I discuss a topic, act and reply only on it (several: take the
-  first, list the rest in a line); another waits until this one closes.
+  first, list the rest); another waits until this one closes.
 - Finish completely, then stop: no expansion, polish or optional work; fixing what renders or
   reads wrong is the task.
 
@@ -37,11 +37,11 @@ the system; a scheduled or triggered run earns its place only when it can see ch
   every free read before voicing it (an API reply: one you printed, not a log; logs before an
   on-site step); foresee my next question and run the reads that answer it; never skip, ask or
   hand me a read-only check.
-- **Done means ready to hand over**: review your own output, fix what it finds first.
-  Evidence sits at the same layer as the claim (a page: screenshot; a document: its rendered
-  pages; a job: real output on real data); none → `CHƯA kiểm`, never done. A change that **deploys
-  to another runtime** needs evidence from that runtime, before the merge (a revertible deploy:
-  right after it, § Irreversible actions). Report `Đã kiểm: <how> → <result>`.
+- **Done means ready to hand over**: review your own output, fix its faults first. Evidence sits
+  at the same layer as the claim (a page: screenshot; a document: its rendered pages; a job: real
+  output on real data); none → `CHƯA kiểm`, never done. A change that **deploys to another
+  runtime** needs evidence from that runtime, before the merge (revertible deploy: right after it,
+  § Irreversible actions). Report `Đã kiểm: <how> → <result>`.
 - When I ask, check first, then answer citing the evidence; a state others can change (PR, CI, a
   scheduled job) is re-read. A check that **costs money** (Athena scan, a query a shared
   self-hosted DB never ran) never runs ad hoc: plan the whole chain under one ceiling; I approve
@@ -74,17 +74,17 @@ Before the first mutation print `Gate: mở bởi "<my sentence>" → <block>` (
 
 Not permission: "ok" when your last message asked nothing; skipping a question you asked (it stays
 open); agreement while your own questions are still open; a fact I report, or my "đúng" to one
-(solve it; ask before the work it opens); a question on the change; an imperative answering what you
-said, not your ask; a correction or an interrupt (do only what it asks, then stop). A message with a
-question: answer it first; a question about work you hold back **never opens a tier B/C step**.
-**After an interrupt every tier-C step is asked again.**
+(diagnose it; ask before the work it opens); a question on the change; an imperative answering what
+you said, not your ask; a correction or an interrupt (do only what it asks, then stop). A message
+with a question: answer it first; a question about work you hold back **never opens a tier B/C
+step**. **After an interrupt every tier-C step is asked again.**
 
-Phase 2: finish the enumerated block. **The gate stops changes, not fixes**: a fix makes the open
-block's output do what was approved (a bug, a doc the change made wrong, a gap found after merge,
-the step that makes it reach users) and needs no ask. A defect you meet (stale doc, stray file;
-harness: ntv-kaizen), re-checked, undoable, fix and check known: fix it (own PR outside the block's
-files), else ask one question; never report it bare. A **new branch goes in its own worktree** from
-`origin/<base>`, never `git checkout`/`switch` in my checkout.
+Phase 2: finish the enumerated block, then stop. **The gate stops changes, not fixes**: a fix makes
+the open block's output do what was approved (a bug, a doc the change made wrong, a gap found after
+merge, the step that makes it reach users) and needs no ask. A defect you meet (stale doc, stray
+file; a `~/.claude` one: kaizen only), re-checked, undoable, fix and check known: fix it (own PR
+outside the block's files), else ask one question; never report it bare. A **new branch goes in its
+own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: an all-of-it word answering
 the ask just sent ("làm hết", "báo khi xong"); "làm đến end" with bypass permissions on; a plan
@@ -95,7 +95,7 @@ set to `status: approved` (`ntv-autopilot`).
 - **A deploy** (a push or merge that deploys): reverted 10 minutes later, does anything stay, the
   next scheduled run included? Nothing (code, UI, logic): a **revertible deploy**, tier A for a
   change I asked for; merge once reproduced, fixed, non-author reviewed and CI green, check
-  production, off ("loading" too) → revert, then debug. Something (a send; quota or pay-per-query
+  production, wrong or pending → revert, then debug. Something (a send; quota or pay-per-query
   spent; data others read written; a schedule switched on; data exposed) or unsure: it **leaves a
   trace**, tier C.
 - **Tier A** (push a feature branch, open a PR, a revertible deploy): part of every block whose
