@@ -7,9 +7,9 @@ description: "Record a mistake as one file on the Desktop for Viet's next kaizen
 
 ## Record a mistake
 
-1. Outside the three triggers in the description, a mistake is one line in the final report,
+1. Outside the four triggers in the description, a mistake is one line in the final report,
    no file. A slip you undid in the same turn, before Viet saw it, is no mistake.
-2. A kaizen file never settles a mistake: first fix its output in this turn (redo the check,
+2. A kaizen file never settles a mistake: first fix the task's output (never the harness) in this turn (redo the check,
    correct the answer), then name it in the report at full severity, with no mitigating fact,
    and return to the topic Viet is on.
 3. Before writing, `ls ~/Desktop/kaizen-*`: the same failure pattern already has a file → add a
