@@ -11,6 +11,10 @@
  * - an antigravity worker: every running Orca agy chat server (`agy_acp_server`) must find
  *   `$GEMINI_HOME/config` -> ~/.gemini/config, or it runs without the global AGENTS.md and skills.
  *   Orca picks GEMINI_HOME itself, so a new Orca version or account can move it silently.
+ * After `orca orchestration send --to dispatch:<ctx>` to a worker not yet finished: the receipt only
+ * says the message reached the mailbox. A chat worker mid-turn holds it as Queued until the turn
+ * ends, the CLI has no steer, so the reply to the user says "nhận sau lượt này", or asks them to
+ * press Steer when it cannot wait.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -137,7 +141,27 @@ function receipts(output, max = MAX_IDS) {
   return { ids: [...new Set(ids)].slice(0, max), errors: [...new Set(errors)] };
 }
 
-module.exports = { DISPATCH, HELP, receipts, agyConfigLines, agyVersionLines, acpHomes };
+const SEND = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+send\b/;
+const DONE = new Set(['succeeded', 'failed', 'stopped', 'abandoned']);
+
+// The dispatches a `send` command addresses with `--to dispatch:<ctx>`.
+function sendTargets(command) {
+  if (!SEND.test(command)) return [];
+  return [...new Set([...command.matchAll(/--to[\s=]+["']?dispatch:(ctx_[0-9a-f]+)/g)].map((m) => m[1]))];
+}
+
+// One reminder per addressed worker still running; `state` reads its worker-show state.
+function sendLines(command, state = (d) => JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', d, '--json'])).result.state) {
+  return sendTargets(command).flatMap((d) => {
+    let st;
+    try { st = state(d); } catch (_) { return []; }
+    return DONE.has(st) ? [] : [`${d} (state=${st}): \`ok:true\` chỉ là tin đã vào hộp thư. Worker chat đang chạy giữ tin ở ` +
+      'Queued tới hết lượt hiện tại, CLI không steer được: báo user "worker nhận sau lượt này"; cần đổi hướng ngay thì ' +
+      '`**Cần bạn:** bấm Steer trên tab worker`.'];
+  });
+}
+
+module.exports = { DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, acpHomes };
 if (require.main !== module) return;
 
 let raw = '';
@@ -146,7 +170,16 @@ process.stdin.on('end', () => {
   try {
     const { hook_event_name: event, tool_name: tool, tool_input: input = {}, tool_response: resp = {}, error } = JSON.parse(raw);
     const command = input.command || '';
-    if (tool !== 'Bash' || !DISPATCH.test(command) || HELP.test(command)) process.exit(0);
+    if (tool !== 'Bash') process.exit(0);
+    if (event !== 'PostToolUseFailure' && !DISPATCH.test(command)) {
+      const sent = sendLines(command);
+      if (sent.length) {
+        process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse',
+          additionalContext: 'worker-start-receipt (send):\n' + sent.map((l) => `- ${l}`).join('\n') } }));
+      }
+      process.exit(0);
+    }
+    if (!DISPATCH.test(command) || HELP.test(command)) process.exit(0);
     const output = event === 'PostToolUseFailure'
       ? String(error || '')
       : typeof resp === 'string' ? resp : `${resp.stdout || ''}\n${resp.stderr || ''}`;

@@ -37,6 +37,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -47,6 +56,15 @@
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-start-receipt.cjs\"",
             "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
           }
         ]
       }
@@ -138,7 +156,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",

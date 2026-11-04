@@ -6,15 +6,21 @@
  * child repos, the work a read-only worker does on a quota that costs less.
  * - UserPromptSubmit: starts a new turn (resets the count). A turn Orca's wake prompt opens handles a
  *   worker's report, so its reads (the gate: diff, checks) are not counted.
- * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place counts; the third one in a
- *   turn is denied unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
+ * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place is denied once the turn has
+ *   counted two, unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
  *   one confirming read the skill allows, plus one of slack, since a hook cannot tell a confirm
  *   from the start of a chain.
+ * - PostToolUse / PostToolUseFailure (same tools): the call ran, so it counts (and a worker-start
+ *   unlocks the turn). Counting here, not at PreToolUse, leaves out a call another PreToolUse hook
+ *   denied: hooks run in parallel and never see each other's decision, so a call the project rules
+ *   hook stopped was counted as read 1 though it never ran.
  * Watched places come from the local list `~/.claude/knowledge/coordinator-reads.txt`, one per
  * line: a path prefix (`~/…` or absolute), or `cmd:<word>` for a command word (`cmd:ssh`). No list:
  * nothing is watched. A Bash call reads a watched place when one of its simple commands names it:
  * an absolute or `~` path inside it, or a relative path that exists from cwd (so `git commit -m x`
- * run inside a watched repo does not count; `git log` with no path is not seen). Read/Grep/Glob:
+ * run inside a watched repo does not count; `git log` with no path is not seen). A git `<rev>:<path>`
+ * argument names `<path>` from the repo of `-C <dir>` (else cwd), so `git show :2:f` reads `f` as a
+ * Read of it would. Read/Grep/Glob:
  * their path, else cwd. Not counted: gh/glab, CI watching (watch.sh, ci.sh), git merge/push/pull/
  * fetch/worktree/add/commit/rm/mv/checkout/switch/stash, any `orca` call (the gate and CI stay with the coordinator), each judged per
  * simple command. Known limit: a turn woken without a prompt keeps the last turn's count.
@@ -29,6 +35,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { commands, program } = require('./lib/shell-words.cjs');
 const { expandHome } = require('./lib/platform.cjs');
 const { inside, repoOf, claimed, isWorker, liveLines } = require('./worker-default-guard.cjs');
@@ -59,6 +66,17 @@ function watched(file = LIST) {
 
 const word0 = (w) => path.basename(w || '');
 
+// The top folder of the repo holding `dir`, or null. Built from `dir` (`--show-cdup`) so a symlinked
+// path keeps the form the watched list uses.
+function gitRoot(dir) {
+  try {
+    const up = execFileSync('git', ['-C', dir, 'rev-parse', '--show-cdup'], {
+      encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return path.resolve(dir, up);
+  } catch { return null; }
+}
+
 // The watched path or command word a tool call reads, or null.
 function readTarget(data, list) {
   const input = data.tool_input || {};
@@ -82,6 +100,17 @@ function readTarget(data, list) {
       if (FREE_GIT.has(words[i])) continue;
     }
     if (list.words.has(w)) return w;
+    if (w === 'git') {
+      let dir = cwd;
+      for (let i = 1; i < words.length - 1; i++) if (words[i] === '-C') dir = path.resolve(dir, expandHome(words[i + 1]));
+      for (const x of words.slice(1)) {
+        const rev = /^[^:\s-][^:\s]*:(?!\/\/)(.+)$|^:(?:[0-3]:)?(.+)$/.exec(x);
+        if (!rev) continue;
+        const root = gitRoot(dir);
+        const m = root && named(path.join(root, rev[1] || rev[2]), false);
+        if (m) return m;
+      }
+    }
     for (const x of words.slice(1)) {
       const v = x.replace(/^[^=]*=(?=[~/.])/, '');
       const m = named(v, !(v.startsWith('~') || path.isAbsolute(v)));
@@ -127,7 +156,7 @@ function save(sessionId, state) {
   fs.writeFileSync(statePath(sessionId), JSON.stringify(state));
 }
 
-// Why this call is blocked, or ''. Updates the turn's state as a side effect.
+// Why this call is blocked, or ''. A UserPromptSubmit or PostToolUse* event updates the turn's state.
 function decide(data, { list = watched(), notesDir } = {}) {
   if (!data.session_id) return '';
   if (data.hook_event_name === 'UserPromptSubmit') {
@@ -136,8 +165,9 @@ function decide(data, { list = watched(), notesDir } = {}) {
   }
   if (!list || data.agent_id) return '';
   const state = load(data.session_id);
+  const ran = /^PostToolUse/.test(String(data.hook_event_name || ''));
   if (startsWorker(data)) {
-    save(data.session_id, { ...state, delegated: true });
+    if (ran) save(data.session_id, { ...state, delegated: true });
     return '';
   }
   if (state.delegated || readsInstructions(data)) return '';
@@ -148,6 +178,10 @@ function decide(data, { list = watched(), notesDir } = {}) {
     if (repo && claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
   }
   if (isWorker(data.transcript_path)) return '';
+  if (ran) {
+    save(data.session_id, { ...state, reads: state.reads + 1 });
+    return '';
+  }
   if (state.reads >= LIMIT) {
     return (
       `this would be read ${state.reads + 1} of a watched place (${target}) in this turn with no worker. ` +
@@ -157,7 +191,6 @@ function decide(data, { list = watched(), notesDir } = {}) {
       'line to the session note first.'
     );
   }
-  save(data.session_id, { ...state, reads: state.reads + 1 });
   return '';
 }
 
