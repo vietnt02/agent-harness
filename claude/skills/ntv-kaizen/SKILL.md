@@ -22,7 +22,9 @@ description: "Record a mistake as one file on the Desktop for Viet's next kaizen
    - `## Hướng kaizen`: each fix and the file it belongs in. A fix works unremembered (hook,
      script, safe default, a `knowledge/` fact) or tightens a rule sentence; "be more careful"
      fixes nothing.
-4. Never offer to apply a kaizen; Viet opens a session for that.
+4. Never offer to apply a kaizen; Viet opens a session for that. A defect of the harness itself
+   (hook, rule, skill) met around the mistake goes into the file's `## Hướng kaizen` the same way:
+   no fix, PR or ask to open one in that session.
 
 ## Apply kaizen files (a session where Viet opens them)
 

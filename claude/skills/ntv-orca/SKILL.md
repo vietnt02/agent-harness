@@ -117,7 +117,9 @@ vậy thành một PR/MR để pipeline chạy một lần.
 
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
   lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify).
-- Antigravity ưu tiên hơn codex. Task nhỏ đến trung bình → `gemini-flash`; flash hết quota →
+- Antigravity ưu tiên hơn codex. Chọn theo loại task trước, cỡ task sau: research (đọc nhiều tài
+  liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) → `agy gemini-argon high`, cỡ nào cũng vậy; đọc code
+  có khuôn, làm theo spec rõ, task nhỏ đến trung bình → `gemini-flash`; flash hết quota →
   `gpt-luna`. `gpt-sol` chỉ khi user cho phép trong manifest. Reviewer mặc định
   `agy gemini-argon high`.
 - Không giao task dài cho model context ngắn (`gemini-flash`, `gpt-luna`): chia task nhỏ, mỗi task
@@ -135,7 +137,10 @@ vậy thành một PR/MR để pipeline chạy một lần.
   `AGENTS.md`/`docs/` của repo, không chạy hộ. Ngoại lệ: lệnh ghi production là việc của coordinator.
 - **Session worker là tài sản** (~30–60k token nạp). Việc kế tiếp cụ thể cần đúng context của worker
   đó và tới trong TTL cache (codex 30 phút, Claude 1 giờ) → giao bằng `send --to dispatch:<id>`
-  (nhận ở mọi trạng thái, thành Task mới). Không có → release ngay (`worker-release`; worker trong
+  (nhận ở mọi trạng thái, thành Task mới). Việc gửi qua `send` qua lại **Chọn model** (§ 2) như một
+  lần giao mới: khác loại, hoặc làm task dài ra → worker mới. Worker chat đang chạy giữ tin ở Queued
+  tới hết lượt, CLI không steer được: báo user "worker nhận sau lượt này"; cần đổi hướng ngay →
+  `**Cần bạn:** bấm Steer trên tab <worker>`. Không có việc kế tiếp → release ngay (`worker-release`; worker trong
   worktree mới không tự đóng), gỡ worktree sau khi lưu báo cáo. Đừng release rồi vài phút sau spawn
   lại; cũng đừng giữ "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
