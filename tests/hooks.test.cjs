@@ -430,6 +430,13 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       block(`orca orchestration check --peek; ${cmd(`--spec-file ${no}`)}`, 'the coordinator checking is not the spec');
       block(`${cmd(`--spec-file ${yes}`)}; orca orchestration ${ws} --spec-file ${no} ${flags}`, 'each dispatch is judged');
       block(`orca orchestration task-create --spec 'Rà a.py'`, 'task-create brings a spec too');
+      block(`# Track: w9 ← rà [a.py]\ncd "${tmp}" && D=$(orca orchestration ${ws} --spec-file ${no} ${flags} --json)`, 'a dispatch inside $(…)');
+      block(`T=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a task-create inside backticks');
+      block(cmd(`--spec-file ${no} --task-title x`), '--task-title is not --task');
+      pass(cmd(`--spec "Không push; chạy orca orchestration check --peek sau mỗi 10 lệnh"`), 'a `;` inside the inline spec');
+      pass(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nChạy orca orchestration check --peek trước mỗi commit.\nEOF\n)"`), 'a heredoc spec');
+      block(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nEOF\n)"`), 'a heredoc spec without it');
+      pass(cmd('--spec "$SPEC"'), 'an inline spec in a variable is not judged');
       pass(cmd(`--spec-file ${yes}`), 'spec with it');
       pass(cmd(`--spec "Rà a.py; chạy orca orchestration check --unread --peek sau mỗi 10 lệnh"`), 'inline, other flags between');
       pass(cmd('--task task_1 --retry-of ctx_1'), 'a --task retry runs a Task already judged');

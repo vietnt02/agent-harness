@@ -55,11 +55,17 @@ const WAIT_MS = 1500;
 const POLL_MS = 100;
 
 // A command handing a worker text to act on: a spec, a message, an answer to its `ask`.
-const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
+const TO_WORKER = /(?:^|[;&|({`\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
 // Orca's dispatch brief opens a worker session with this line (as in worker-default-guard.cjs).
 // A simple command that runs `orca orchestration worker-start` (not a mention of it inside a quoted string).
 const STARTS_WORKER = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 const CREATES_TASK = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+task-create\b/;
+// The same command run inside a command substitution: `D=$(orca … worker-start …)`, `` `orca …` ``.
+const SUBST = (verb) => new RegExp(String.raw`(?:\$\(|\`)\s*(?:\w+=\S*\s+)*orca\s+orchestration\s+${verb}\b`);
+// Single-quoted text runs nothing, so a substitution is looked for outside it.
+const runs = (lead, verb) => (seg) => lead.test(seg) || SUBST(verb).test(seg.replace(/'[^']*'/g, "''"));
+const startsWorker = runs(STARTS_WORKER, 'worker-start');
+const createsTask = runs(CREATES_TASK, 'task-create');
 const DISPATCH_LEAD = 'Please carry out this task from my Orca coordinator';
 // A lark-cli shortcut is a read when one segment of its name is a read verb.
 const LARK_READ = new Set(['get', 'list', 'search', 'fetch', 'download', 'preview', 'query', 'read', 'show',
@@ -113,12 +119,15 @@ function memoryPressure() {
 const serialOk = (line, ctx) => /\(serial:\s*\S/.test(line) && (ctx.serial() || ctx.pressure() >= 2);
 
 // The command with heredoc bodies and comment lines dropped (they are not commands), and its
-// `worker-start` segments.
-function workerStarts(command) {
+// `worker-start` segments. Separators inside quotes do not split a segment: they become spaces, or
+// with `keep` stand-in characters that `restore` turns back (a spec's own `;` and line breaks).
+const STAND_IN = { ';': '\u0001', '&': '\u0002', '|': '\u0003', '\n': '\u0004' };
+const restore = (t) => t.replace(/[\u0001-\u0004]/g, (c) => Object.keys(STAND_IN).find((k) => STAND_IN[k] === c));
+function workerStarts(command, keep = false) {
   const cmd = command.replace(/(<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g, '$1')
     .replace(/\\\n/g, ' ').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
-    .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => q.replace(/[;&|\n]/g, ' '));
-  return { cmd, segs: cmd.split(/[;&|\n]/).filter((seg) => STARTS_WORKER.test(seg)) };
+    .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => q.replace(/[;&|\n]/g, (c) => (keep ? STAND_IN[c] : ' ')));
+  return { cmd, segs: cmd.split(/[;&|\n]/).filter(startsWorker) };
 }
 
 const onlyHelp = (segs) => segs.length > 0 && segs.every((seg) => /\s(--help|-h)\b/.test(seg));
@@ -181,11 +190,11 @@ function readsInbox(text) {
 
 // The spec each segment that creates work hands a worker: a `task-create`, or a dispatch that is not
 // `--task` (that one runs a Task whose spec `task-create` already brought). Each item is the spec
-// text, or null when it cannot be read here (`$var` path, `--spec-file -`, unreadable file):
-// then nothing is judged (fail-open).
+// text (a `$(cat <<TAG …)` heredoc read from the command), or null when it cannot be read here
+// (`$var`, `--spec-file -`, unreadable file, another substitution): then nothing is judged (fail-open).
 function newSpecs(command, cwd) {
-  const { segs } = workerStarts(command);
-  const all = workerStarts(command).cmd.split(/[;&|\n]/).filter((seg) => CREATES_TASK.test(seg));
+  const { cmd, segs } = workerStarts(command, true);
+  const all = cmd.split(/[;&|\n]/).filter(createsTask);
   let base = cwd || process.cwd();
   const PATH = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s'")]+))`;
   const pick = (m) => m[1] ?? m[2] ?? m[3];
@@ -196,14 +205,21 @@ function newSpecs(command, cwd) {
     if (!f || f === '-' || f.startsWith('$')) return null;
     try { return fs.readFileSync(path.resolve(base, expandHome(f)), 'utf8'); } catch (_) { return null; }
   };
-  return [...segs.filter((seg) => !/\s--task\b/.test(seg) && !/\s(--help|-h)\b/.test(seg)), ...all].map((seg) => {
+  const heredoc = (tag) => {
+    const m = command.match(new RegExp(String.raw`<<-?\s*(['"]?)${tag}\1[^\n]*\n([\s\S]*?)\n[ \t]*${tag}[ \t]*(?=\n|$)`));
+    return m ? m[2] : null;
+  };
+  return [...segs.filter((seg) => !/\s--task(?:[ =]|$)/.test(seg) && !/\s(--help|-h)\b/.test(seg)), ...all].map((seg) => {
     const file = seg.match(new RegExp(String.raw`--spec-file[ =]${PATH}`));
     if (file) return read(pick(file));
     const inline = seg.match(/--spec[ =](?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/);
     if (!inline) return null;
-    const text = inline[1] ?? inline[2] ?? inline[3];
+    const text = restore(inline[1] ?? inline[2] ?? inline[3]);
+    if (!text.startsWith('$')) return text;
+    const here = text.match(/^\$\(\s*cat\s*<<-?\s*(['"]?)(\w+)\1/);
+    if (here) return heredoc(here[2]);
     const cat = text.match(new RegExp(String.raw`^\$\(\s*(?:cat\s+|<\s*)${PATH}\s*\)$`));
-    return cat ? read(pick(cat)) : text;
+    return cat ? read(pick(cat)) : null;
   });
 }
 
