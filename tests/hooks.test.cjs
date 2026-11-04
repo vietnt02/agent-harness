@@ -272,6 +272,12 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.deepEqual(one('git -c core.sshCommand="ssh -i k" push origin feat')[0].refspecs, ['feat']);
     assert.equal(one('cd sub && git -C "a b" push')[0].dir, path.resolve(base, 'sub', 'a b'));
     assert.deepEqual(one('git push origin --delete old'), []);
+    assert.deepEqual(one('git push origin :old'), [], 'an empty source deletes');
+    assert.deepEqual(one('git push 2>&1 | tail -3'), [{ dir: base, remote: 'origin', refspecs: [] }]);
+    assert.deepEqual(one('git push origin feat > log 2>&1')[0].refspecs, ['feat']);
+    assert.equal(one('git push --repo up')[0].remote, 'up');
+    assert.equal(one('git push --repo=up')[0].remote, 'up');
+    assert.equal(pushAfterPrGuard.redact('https://x-access-token:SECRET@github.com/a/b.git'), 'https://***@github.com/a/b.git');
     assert.deepEqual(one('git status'), []);
   });
 
@@ -279,7 +285,7 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     const states = { merged: [{ id: '#1', state: 'MERGED' }], closed: [{ id: '!2', state: 'CLOSED' }],
       reopened: [{ id: '#3', state: 'MERGED' }, { id: '#4', state: 'OPEN' }], fresh: [] };
     const reviews = (dir, remote, branch) => {
-      if (branch === 'broken') throw new Error('HTTP 401: Bad credentials\nmore');
+      if (branch === 'broken') throw Object.assign(new Error('Command failed: gh pr list'), { stderr: 'warn\nHTTP 401: Bad credentials\n' });
       return states[branch];
     };
     const decide = (c) => pushAfterPrGuard.decide(c, '/r', { reviews, branches: (p) => p.refspecs });
@@ -299,6 +305,10 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.equal(asked, 0);
     assert.equal(pushAfterPrGuard.firstThatWorks(more, (env) => { if (env.GH_TOKEN !== 'b') throw new Error('no'); return 'b'; }), 'b');
     assert.throws(() => pushAfterPrGuard.firstThatWorks(() => [], () => { throw new Error('first'); }), /first/);
+    let tried = 0;
+    const hang = () => { tried += 1; throw Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }); };
+    assert.throws(() => pushAfterPrGuard.firstThatWorks(more, hang), /timed out/);
+    assert.equal(tried, 1, 'a timeout does not try other identities');
   });
 
   await t.test('push-after-pr-guard: voices a pass it could not check', () => {
