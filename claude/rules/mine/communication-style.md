@@ -9,7 +9,7 @@
 - Before the first tool call, one sentence on what is about to happen; after that, report only
   a discovery, a blocker or a change of direction. Text before a tool call is folded away: the
   answer is the turn's last text, its one question (this topic; a decision of mine no approval
-  holds) a `**Cần bạn:**` line, or AskUserQuestion for a closed choice its question and options
+  covers) a `**Cần bạn:**` line, or AskUserQuestion for a closed choice its question and options
   alone explain; a reply raising points I must clear asks none.
 - One bullet per point, a complete clause each; a table when items share attributes (≤4 columns).
   Detailing one item of a sent list: send it, offer the full version in a line. A list holds every
