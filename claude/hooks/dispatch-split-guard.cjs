@@ -56,10 +56,13 @@ const POLL_MS = 100;
 
 // A command handing a worker text to act on: a spec, a message, an answer to its `ask`.
 const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
-// Text that runs nothing: an escaped character, a single-quoted string.
-const inert = (t) => t.replace(/\\[\s\S]/g, '').replace(/'[^']*'/g, "''");
+// Text that runs nothing dropped: an escaped character, a single-quoted string (scanned left to
+// right, so a `'` inside "…" opens none).
+const inert = (t) => t.replace(/\\[\s\S]|'[^']*'|"(?:[^"\\]|\\.)*"/g,
+  (m) => (m[0] === '\\' ? '' : m[0] === "'" ? "''" : m.replace(/\\[\s\S]/g, '')));
+// A backtick dispatch is looked for in the command without heredoc bodies and comments.
 const toWorker = (command) => TO_WORKER.test(command) ||
-  /`\s*(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/.test(inert(command));
+  /`\s*(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/.test(inert(workerStarts(command).cmd));
 // Orca's dispatch brief opens a worker session with this line (as in worker-default-guard.cjs).
 // A simple command that runs `orca orchestration worker-start` (not a mention of it inside a quoted string).
 const STARTS_WORKER = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;

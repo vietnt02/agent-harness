@@ -432,6 +432,8 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       block(`orca orchestration task-create --spec 'Rà a.py'`, 'task-create brings a spec too');
       block(`# Track: w9 ← rà [a.py]\ncd "${tmp}" && D=$(orca orchestration ${ws} --spec-file ${no} ${flags} --json)`, 'a dispatch inside $(…)');
       block(`T=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a task-create inside backticks');
+      block(`git commit -m "don't"; T=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a lone quote inside "…" hides nothing');
+      block(`cat > /tmp/n <<'EOF'\nDon't push.\nEOF\nT=\`orca orchestration task-create --spec 'Rà a.py'\``, 'a quote in a heredoc body hides nothing');
       block(cmd(`--spec-file ${no} --task-title x`), '--task-title is not --task');
       pass(cmd(`--spec "Không push; chạy orca orchestration check --peek sau mỗi 10 lệnh"`), 'a `;` inside the inline spec');
       pass(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nChạy orca orchestration check --peek trước mỗi commit.\nEOF\n)"`), 'a heredoc spec');
