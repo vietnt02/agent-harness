@@ -15,7 +15,7 @@
  * says the message reached the mailbox. A chat worker mid-turn sees it only at its next
  * `check --peek` (the spec asks for one; dispatch-split-guard blocks a spec without it); the CLI
  * cannot interrupt a turn, so an urgent message to a worker stuck in a long command is the
- * coordinator's own `worker-stop` plus `--retry-of`, never an ask to the user.
+ * coordinator's own `worker-stop` plus a new dispatch on the same worktree, never an ask to the user.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -170,9 +170,10 @@ function sendLines(command, show = showState) {
         'chạy lại task (`--retry-of`) hoặc giao worker mới.'];
     }
     return [`${d} (state=${st.state}): \`ok:true\` chỉ là tin đã vào hộp thư. Worker Chat đang trong một lượt chỉ thấy tin ` +
-      'ở lần `orca orchestration check --peek` kế tiếp mà spec đòi; CLI không ngắt được lượt. Gấp mà worker không đọc kịp ' +
-      `(đang chạy lệnh dài) → tự \`orca orchestration worker-stop --dispatch ${d}\` rồi giao lại bằng \`--retry-of\` ` +
-      'kèm nội dung tin; không nhờ user bấm Steer.'];
+      'ở lần `orca orchestration check --peek` kế tiếp, nếu spec của nó có câu kiểm hộp thư; CLI không ngắt được lượt. ' +
+      `Gấp mà \`orca orchestration worker-read --dispatch ${d} --source transcript\` không thấy \`check --peek\` trong vài phút → ` +
+      `tự \`orca orchestration worker-stop --dispatch ${d}\`, rồi giao worker mới bằng \`--spec-file\` gồm spec cũ, nội dung ` +
+      'tin và câu kiểm hộp thư, cùng `--worktree path:` cũ; không nhờ user bấm Steer.'];
   });
 }
 

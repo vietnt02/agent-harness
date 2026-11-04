@@ -147,11 +147,12 @@ vậy thành một PR/MR để pipeline chạy một lần.
   manifest đã duyệt thì hỏi lại, § 2; worker rà chỉ-đọc cho câu hỏi thì không cần). Worker chạy chế
   độ Chat đang trong một lượt giữ tin ở Queued tới hết lượt và CLI không ngắt được lượt (Esc,
   `--interrupt` bị từ chối), nên tin tới worker qua lần `check --peek` kế tiếp mà spec đòi (§ 2).
-  Gấp mà worker không đọc kịp (đang chạy một lệnh dài, spec cũ thiếu câu kiểm hộp thư) → coordinator
-  tự `worker-stop` rồi giao lại bằng `--retry-of` kèm nội dung tin; không nhờ user bấm Steer. Không
-  có việc kế tiếp → release ngay (`worker-release`; worker trong worktree mới không tự đóng), gỡ
-  worktree sau khi lưu báo cáo. Đừng release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi
-  cần".
+  Tin gấp mà `worker-read --source transcript` cho thấy worker chưa `check --peek` trong vài phút
+  (đang chạy một lệnh dài, hoặc spec giao trước khi có câu kiểm hộp thư) → coordinator tự
+  `worker-stop`, rồi `worker-start --spec-file` mới gồm spec cũ, nội dung tin và câu kiểm hộp thư,
+  cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. Không có việc kế tiếp →
+  release ngay (`worker-release`; worker trong worktree mới không tự đóng), gỡ worktree sau khi lưu
+  báo cáo. Đừng release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
   luận. Im lặng, timeout hay `unverifiable` không bao giờ đủ để tự dừng, bỏ hay chạy lại worker
   (guide). Worker còn sống thì nó vẫn là người sửa duy nhất của worktree.

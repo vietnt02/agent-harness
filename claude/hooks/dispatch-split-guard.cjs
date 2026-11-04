@@ -20,9 +20,12 @@
  * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude worker at all needs a
  * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
  * (ntv-orca § 2, Chọn model), and the manifest's model column is written before that rule is in view.
- * A dispatch whose spec never asks the worker to run `orca orchestration check --peek` is blocked,
- * `--retry-of` included: a Chat worker sees a coordinator's `send` only after its turn ends and the CLI
- * cannot interrupt the turn, so the spec's inbox check is the only way a correction lands mid-turn.
+ * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
+ * `orca orchestration check --peek` (a negated mention does not count) is blocked: a Chat worker sees a
+ * coordinator's `send` only after its turn ends and the CLI cannot interrupt the turn, so the spec's
+ * inbox check is the only way a correction lands mid-turn. A `--task` dispatch brings a Task whose
+ * spec `task-create` brought; a spec this hook cannot read (`$var` path, stdin) is not judged.
+ * Only a simple command that runs `worker-start` is a dispatch, not the words inside a quoted string.
  * `worker-start --help` is not a dispatch.
  * A spec or message the coordinator hands a worker (`worker-start`, `task-create`, `send`, `reply`,
  * `dispatch`) that holds a Lark or n8n production write is blocked: a worker only scouts, builds the
@@ -51,10 +54,12 @@ const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
 const POLL_MS = 100;
 
-const DISPATCH = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 // A command handing a worker text to act on: a spec, a message, an answer to its `ask`.
 const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
 // Orca's dispatch brief opens a worker session with this line (as in worker-default-guard.cjs).
+// A simple command that runs `orca orchestration worker-start` (not a mention of it inside a quoted string).
+const STARTS_WORKER = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
+const CREATES_TASK = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+task-create\b/;
 const DISPATCH_LEAD = 'Please carry out this task from my Orca coordinator';
 // A lark-cli shortcut is a read when one segment of its name is a read verb.
 const LARK_READ = new Set(['get', 'list', 'search', 'fetch', 'download', 'preview', 'query', 'read', 'show',
@@ -113,7 +118,7 @@ function workerStarts(command) {
   const cmd = command.replace(/(<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g, '$1')
     .replace(/\\\n/g, ' ').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
     .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => q.replace(/[;&|\n]/g, ' '));
-  return { cmd, segs: cmd.split(/[;&|\n]/).filter((seg) => /\borca\s+orchestration\s+worker-start\b/.test(seg)) };
+  return { cmd, segs: cmd.split(/[;&|\n]/).filter((seg) => STARTS_WORKER.test(seg)) };
 }
 
 const onlyHelp = (segs) => segs.length > 0 && segs.every((seg) => /\s(--help|-h)\b/.test(seg));
@@ -165,8 +170,42 @@ function workerText(command, cwd) {
   return parts.join('\n');
 }
 
-// True when the worker's text asks it to read its inbox mid-turn (`orca orchestration check --peek`).
-const readsInbox = (text) => /\bcheck\s+--peek\b/.test(text);
+// True when the text asks for a mid-turn inbox read: a sentence holding `check … --peek` with no
+// negation before it in that sentence ("đừng chạy … check --peek" does not count).
+function readsInbox(text) {
+  return String(text).split(/[.\n;]+/).some((sentence) => {
+    const at = sentence.search(/\bcheck\b[^.\n;]*--peek\b/);
+    return at >= 0 && !/(?:^|[^\p{L}])(?:đừng|không|chớ|do not|don't|never)(?![\p{L}])/iu.test(sentence.slice(0, at));
+  });
+}
+
+// The spec each segment that creates work hands a worker: a `task-create`, or a dispatch that is not
+// `--task` (that one runs a Task whose spec `task-create` already brought). Each item is the spec
+// text, or null when it cannot be read here (`$var` path, `--spec-file -`, unreadable file):
+// then nothing is judged (fail-open).
+function newSpecs(command, cwd) {
+  const { segs } = workerStarts(command);
+  const all = workerStarts(command).cmd.split(/[;&|\n]/).filter((seg) => CREATES_TASK.test(seg));
+  let base = cwd || process.cwd();
+  const PATH = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s'")]+))`;
+  const pick = (m) => m[1] ?? m[2] ?? m[3];
+  for (const m of command.matchAll(new RegExp(String.raw`(?:^|[;&|\n]\s*)cd\s+${PATH}\s*(?:&&|;)`, 'g'))) {
+    base = path.resolve(base, expandHome(pick(m)));
+  }
+  const read = (f) => {
+    if (!f || f === '-' || f.startsWith('$')) return null;
+    try { return fs.readFileSync(path.resolve(base, expandHome(f)), 'utf8'); } catch (_) { return null; }
+  };
+  return [...segs.filter((seg) => !/\s--task\b/.test(seg) && !/\s(--help|-h)\b/.test(seg)), ...all].map((seg) => {
+    const file = seg.match(new RegExp(String.raw`--spec-file[ =]${PATH}`));
+    if (file) return read(pick(file));
+    const inline = seg.match(/--spec[ =](?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/);
+    if (!inline) return null;
+    const text = inline[1] ?? inline[2] ?? inline[3];
+    const cat = text.match(new RegExp(String.raw`^\$\(\s*(?:cat\s+|<\s*)${PATH}\s*\)$`));
+    return cat ? read(pick(cat)) : text;
+  });
+}
 
 // Lines of the worker's text that run a production write for real.
 function prodWrites(text) {
@@ -330,7 +369,7 @@ function verdict(lines, input, ctx) {
   return null;
 }
 
-module.exports = { readsInbox, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
+module.exports = { readsInbox, newSpecs, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
 if (require.main !== module) return;
 
 let raw = '';
@@ -354,8 +393,15 @@ process.stdin.on('end', () => {
         'worker must not run it. The user asked for this worker to write: add a `# Prod-write: "<their sentence>"` line.\n');
       process.exit(2);
     }
-    if (!DISPATCH.test(command)) process.exit(0);
     const starts = workerStarts(command);
+    if (newSpecs(command, cwd).some((spec) => spec !== null && !readsInbox(spec))) {
+      process.stderr.write('dispatch-split-guard: the spec never asks the worker to read its inbox mid-turn. A Chat worker ' +
+        'sees a `send` only after its turn ends, and the CLI cannot interrupt the turn (ntv-orca § 2, § 3). Add to the spec: ' +
+        '"chạy `orca orchestration check --peek` trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của ' +
+        'coordinator thì làm theo trước, tin đã làm theo thì bỏ qua khi thấy lại".\n');
+      process.exit(2);
+    }
+    if (!starts.segs.length) process.exit(0);
     if (onlyHelp(starts.segs)) process.exit(0);
     const model = unpinnedClaudeModel(command, starts);
     if (model) {
@@ -374,13 +420,6 @@ process.stdin.on('end', () => {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
         'e.g. `--model gemini-3.8-flash --effort high` (ntv-orca § 2, Chọn model); without it agy ' +
         'runs Medium. A model with one level gets exactly that level (`agy models`).\n');
-      process.exit(2);
-    }
-    if (!readsInbox(workerText(command, cwd))) {
-      process.stderr.write('dispatch-split-guard: the spec never asks the worker to read its inbox mid-turn. A Chat worker ' +
-        'sees a `send` only after its turn ends, and the CLI cannot interrupt the turn (ntv-orca § 2, § 3). Add to the spec: ' +
-        '"chạy `orca orchestration check --peek` trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của ' +
-        'coordinator thì làm theo trước, tin đã làm theo thì bỏ qua khi thấy lại".\n');
       process.exit(2);
     }
     if (starts.segs.every((seg) => /\s--retry-of\b/.test(seg))) process.exit(0);

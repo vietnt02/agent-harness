@@ -414,17 +414,38 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       for (const l of miss) assert.equal(dispatchSplitGuard.prodWrites(l).length, 0, l);
     });
 
-    await t.test('a dispatch whose spec never asks for a mid-turn inbox check is blocked', () => {
+    await t.test('a new spec that never asks for a mid-turn inbox check is blocked', () => {
       const ws = 'worker' + '-start';
       const spec = (name, body) => { fs.writeFileSync(path.join(tmp, name), body); return name; };
-      const cmd = (f, extra = '') => `# Track: w9 ← rà [a.py]\ncd "${tmp}" && orca orchestration ${ws} --spec-file ${f} --agent antigravity --model gemini-3.8-flash --effort high ${extra}`;
-      const no = run(cmd(spec('no.md', 'Rà a.py, báo lại.')));
-      assert.equal(no.status, 2);
-      assert.match(no.stderr, /check --peek/);
-      assert.equal(run(cmd(spec('no2.md', 'Rà a.py.'), '--retry-of ctx_1')).status, 2, 'a retry needs it too');
-      const yes = run(cmd(spec('yes.md', 'Rà a.py. Chạy `orca orchestration check --peek` trước mỗi commit.')));
-      assert.equal(yes.status, 0, yes.stderr);
-      assert.equal(run(`orca orchestration ${ws} --help`).status, 0);
+      const flags = '--agent antigravity --model gemini-3.8-flash --effort high';
+      const cmd = (rest) => `# Track: w9 ← rà [a.py]\ncd "${tmp}" && orca orchestration ${ws} ${rest} ${flags}`;
+      const yes = spec('yes.md', 'Rà a.py. Chạy `orca orchestration check --peek` trước mỗi commit.');
+      const no = spec('no.md', 'Rà a.py, báo lại.');
+      const neg = spec('neg.md', 'Rà a.py. Đừng chạy `orca orchestration check --peek`.');
+      const block = (c, why) => { const r = run(c); assert.equal(r.status, 2, why); assert.match(r.stderr, /check --peek/, why); };
+      const pass = (c, why) => { const r = run(c); assert.equal(r.status, 0, `${why}: ${r.stderr}`); };
+      block(cmd(`--spec-file ${no}`), 'spec without it');
+      block(cmd(`--spec-file ${neg}`), 'a negated mention');
+      block(`# nhắc: check --peek\n${cmd(`--spec-file ${no}`)}`, 'a comment in the command is not the spec');
+      block(`orca orchestration check --peek; ${cmd(`--spec-file ${no}`)}`, 'the coordinator checking is not the spec');
+      block(`${cmd(`--spec-file ${yes}`)}; orca orchestration ${ws} --spec-file ${no} ${flags}`, 'each dispatch is judged');
+      block(`orca orchestration task-create --spec 'Rà a.py'`, 'task-create brings a spec too');
+      pass(cmd(`--spec-file ${yes}`), 'spec with it');
+      pass(cmd(`--spec "Rà a.py; chạy orca orchestration check --unread --peek sau mỗi 10 lệnh"`), 'inline, other flags between');
+      pass(cmd('--task task_1 --retry-of ctx_1'), 'a --task retry runs a Task already judged');
+      pass(cmd('--spec-file "$F"'), 'a spec path in a variable is not judged');
+      pass(cmd('--spec-file missing.md'), 'an unreadable spec is not judged');
+      pass(`orca orchestration ${ws} --help`, 'help');
+    });
+
+    await t.test('the words of a dispatch inside a quoted string are not a dispatch', () => {
+      const ws = 'worker' + '-start';
+      for (const c of [`CMD='cd /x && orca orchestration ${ws} --spec-file a.md'; echo "$CMD"`,
+        `python3 -c "print('cd /x && orca orchestration ${ws} --spec-file a.md')"`,
+        `cat > /tmp/s.md <<'EOF'\norca orchestration ${ws} --spec-file a.md\nEOF`]) {
+        const r = run(c);
+        assert.equal(r.status, 0, `${c}: ${r.stderr}`);
+      }
     });
 
     await t.test('send with an inline write is blocked', () => {
@@ -452,7 +473,7 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
     });
 
     await t.test('task-create with only a dry-run passes', () => {
-      const res = run('orca orchestration task-create --spec "lark-cli base +record-batch-update --dry-run --json @a.json"');
+      const res = run('orca orchestration task-create --spec "lark-cli base +record-batch-update --dry-run --json @a.json; chạy orca orchestration check --peek sau mỗi 10 lệnh"');
       assert.equal(res.status, 0, res.stderr);
     });
 
