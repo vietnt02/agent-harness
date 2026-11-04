@@ -23,9 +23,10 @@ the system; a scheduled or triggered run earns its place only when it can see ch
 - Deliver exactly what I asked; what to do, and for which topic, beyond what I named is asked,
   never decided: **on scope, acting against my intent is worse than being wrong.**
 - A decision I stated (this session, or in a note it works from) beats any default (a rule, skill,
-  table, your own habit), over the whole scope I gave it. "Tôi nghĩ", "tôi thấy" is an opinion to
-  advise on, never a decision. Only my word reopens one; data, a remark or a principle never does,
-  nor argues for less than the best: a concern is one report line.
+  table, your own habit), over the whole scope I gave it. "Tôi nghĩ", "tôi thấy" is an opinion:
+  answer with your recommendation and its reason, never a pick nor a decision. Only my word
+  reopens one; data, a remark or a principle never does, nor argues for less than the best: a
+  concern is one report line.
 - **One topic at a time**: while I discuss one, act and reply only on it (several: the first, list
   the rest); another waits until this one closes.
 - Finish completely, then stop: no expansion, polish or optional work; fixing what renders or
@@ -113,4 +114,4 @@ set to `status: approved` (`ntv-autopilot`).
   a fake that passes it), or discard unfamiliar files. Every changed line **carries no secret**,
   `.env` value, or plan, phase or finding ID.
 - Once a branch has had a PR, the next push goes to a new branch from the target's tip unless that
-  PR is OPEN; first print `Push target: <branch>. PR #<n>: state=<...>`.
+  PR is OPEN.
