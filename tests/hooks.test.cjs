@@ -927,3 +927,35 @@ test('worker-start-receipt: a send to a running worker reminds that the message 
   assert.deepEqual(lines('echo "orca orchestration send --to dispatch:ctx_a1"'), []);
   assert.deepEqual(receipt.sendLines('orca orchestration send --to dispatch:ctx_zz', () => { throw new Error('x'); }), []);
 });
+
+test('coordinator-read-guard: parallel PreToolUse processes let only LIMIT reads through', async () => {
+  const guardPath = path.join(HOOKS_DIR, 'coordinator-read-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'coord-par-'));
+  const watchedDir = path.join(tmp, 'w');
+  fs.mkdirSync(watchedDir);
+  const session = `coord-par-${process.pid}-${Date.now()}`;
+  const guard = require(guardPath);
+  guard.decide({ session_id: session, hook_event_name: 'UserPromptSubmit' }, { list: { paths: [watchedDir], words: new Set() } });
+  const start = Date.now() + 400;
+  const script = `
+    const g = require(${JSON.stringify(guardPath)});
+    while (Date.now() < ${start}) {}
+    const why = g.decide({ session_id: ${JSON.stringify(session)}, tool_use_id: 'tu_' + process.argv[1], cwd: ${JSON.stringify(tmp)},
+      tool_name: 'Read', tool_input: { file_path: ${JSON.stringify(watchedDir)} + '/f' + process.argv[1] } },
+      { list: { paths: [${JSON.stringify(watchedDir)}], words: new Set() } });
+    process.stdout.write(why ? 'deny' : 'pass');`;
+  const { spawn } = require('child_process');
+  try {
+    const runs = Array.from({ length: 6 }, (_, i) => new Promise((resolve) => {
+      const c = spawn(process.execPath, ['-e', script, String(i)]);
+      let out = '';
+      c.stdout.on('data', (d) => (out += d));
+      c.on('close', () => resolve(out));
+    }));
+    const got = await Promise.all(runs);
+    assert.equal(got.filter((x) => x === 'pass').length, guard.LIMIT, got.join(','));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(path.join(os.tmpdir(), 'claude-coordinator-reads', session), { recursive: true, force: true });
+  }
+});

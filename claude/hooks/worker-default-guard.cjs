@@ -14,7 +14,7 @@
  * skills and hooks) is judged by where it leads: a fix to the harness belongs to a session the user
  * opened for it, and a harness bug met mid-task goes into a kaizen file, not a PR.
  * PreToolUse(Bash): a git command writing a commit (commit, merge, rebase, cherry-pick, am,
- * revert; in cwd, after `cd <dir>`, or under `-C <dir>`) in the repo ~/.claude/CLAUDE.md links into
+ * revert, pull; in cwd, after `cd <dir>`, or under `-C <dir>`) in the repo ~/.claude/CLAUDE.md links into
  * (same git common dir) needs the same line, since a commit there needs no Edit.
  * Limit: a shell write (sed -i, heredoc) is not seen; `--git-dir`/`GIT_DIR` are not followed.
  * Fails open when git or stdin fails (no repo known: nothing to guard); fails closed when the note
@@ -170,17 +170,22 @@ function harnessRepo(claudeDir = CLAUDE_DIR) {
 }
 
 // git subcommands that write a commit.
-const COMMITS = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'am', 'revert']);
+const COMMITS = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'am', 'revert', 'pull']);
 
 // The folder each commit-writing git command runs in: cwd, a `cd <dir>` before it in the same
 // command, then each `-C <dir>`.
 function commitDirs(command, cwd) {
   const out = [];
-  let base = cwd;
+  const cds = [];
   for (const raw of commands(command)) {
     const words = program(raw);
-    if (words[0] === 'cd' && words[1] && !/^[-$]/.test(words[1])) {
-      base = path.resolve(base, expandHome(words[1]));
+    const scope = raw.scope || '';
+    // A `cd` holds for its own scope and the scopes inside it, not after a subshell closes.
+    let base = cwd;
+    for (const c of cds) if (scope === c.scope || scope.startsWith(`${c.scope}.`)) base = c.dir;
+    if (words[0] === 'cd') {
+      const to = words.slice(1).find((w) => !w.startsWith('-'));
+      if (to && !to.startsWith('$')) cds.push({ scope, dir: path.resolve(base, expandHome(to)) });
       continue;
     }
     if (words[0] !== 'git') continue;

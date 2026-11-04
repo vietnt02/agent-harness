@@ -17,7 +17,8 @@
  * parallel all pass PreToolUse before any PostToolUse, so a fresh pending mark counts; a call
  * another PreToolUse hook denied never gets a PostToolUse, and the next call the model writes
  * comes seconds later, past PENDING_MS, so it is not counted (hooks run in parallel and never see
- * each other's decision). One file per mark: parallel PostToolUse calls lose no update.
+ * each other's decision); a retry within PENDING_MS is counted (known limit). Count and mark run
+ * under a per-turn lock; one file per mark, so parallel PostToolUse calls lose no update.
  * Watched places come from the local list `~/.claude/knowledge/coordinator-reads.txt`, one per
  * line: a path prefix (`~/…` or absolute), or `cmd:<word>` for a command word (`cmd:ssh`). No list:
  * nothing is watched. A Bash call reads a watched place when one of its simple commands names it:
@@ -118,7 +119,8 @@ function readTarget(data, list) {
         let root;
         for (const x of words.slice(i + 1)) {
           if (/^[A-Za-z]:[\\/]/.test(x)) continue; // a Windows drive path, not <rev>:<path>
-          const rev = /^([^:\s@-][^:\s@]*)?:(?:[0-3]:)?(?!\/)(.+)$/.exec(x);
+          if (/^[^:\s@]+@[^:\s{]+:/.test(x)) continue; // user@host:path, not a revision
+          const rev = /^([^:\s-][^:\s]*)?:(?:[0-3]:)?(?!\/)(.+)$/.exec(x);
           if (!rev) continue;
           if (root === undefined) root = gitRoot(dir);
           if (!root) break;
@@ -197,6 +199,22 @@ function markPending(sessionId, key, now) {
   const t = now / 1000;
   fs.utimesSync(file, t, t);
 }
+// Runs `fn` holding the turn's lock (an atomic mkdir); a lock older than 2 s is stale. Not got
+// within 1 s: runs without it (fail-open).
+function withLock(sessionId, fn) {
+  fs.mkdirSync(turnDir(sessionId), { recursive: true });
+  const lock = path.join(turnDir(sessionId), 'lock');
+  const until = Date.now() + 1000;
+  let got = false;
+  while (!got && Date.now() < until) {
+    try { fs.mkdirSync(lock); got = true; } catch {
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > 2000) fs.rmdirSync(lock); } catch { /* gone */ }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3);
+    }
+  }
+  try { return fn(); } finally { if (got) try { fs.rmdirSync(lock); } catch { /* gone */ } }
+}
+
 // Turns the oldest pending mark of this call into a counted one.
 function markRan(sessionId, key) {
   const mine = marks(sessionId).filter(({ f }) => f.startsWith(`p.${key}.`)).sort((a, b) => a.f.localeCompare(b.f, 'en', { numeric: true }));
@@ -234,11 +252,13 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
     if (repo && claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
   }
   if (isWorker(data.transcript_path)) return '';
-  const count = held(sid, now, pendingMs);
-  if (count < LIMIT) {
-    markPending(sid, callKey(data), now);
-    return '';
-  }
+  // Count and mark under one lock: parallel PreToolUse calls are separate processes.
+  const count = withLock(sid, () => {
+    const n = held(sid, now, pendingMs);
+    if (n < LIMIT) markPending(sid, callKey(data), now);
+    return n;
+  });
+  if (count < LIMIT) return '';
   {
     return (
       `this would be read ${count + 1} of a watched place (${target}) in this turn with no worker. ` +
