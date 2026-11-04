@@ -26,8 +26,10 @@ function linkedWorktree(dispatch, show = () => run('orca', ['orchestration', 'wo
   if (!id) throw new Error('worker-show không có `workspace` hay `worker.worktreeId`');
   const dir = id.split('::').pop();
   if (!dir || !fs.existsSync(dir)) return null;
-  const [gitDir, commonDir] = run('git', ['rev-parse', '--absolute-git-dir', '--git-common-dir'], dir).split('\n');
-  return samePath(path.resolve(dir, commonDir), gitDir) ? null : dir;
+  // Both printed by git in one absolute form: a main checkout has the same git dir and common dir
+  // (comparing a resolved relative path failed on Windows short names like RUNNER~1).
+  const [gitDir, commonDir] = run('git', ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], dir).split('\n');
+  return samePath(gitDir, commonDir) ? null : dir;
 }
 
 function openReviews(dir) {
