@@ -294,6 +294,31 @@ test('5. settings already has 27 hooks in shell form: merge adds 0 hooks on any 
   assert.ok(!fs.existsSync(path.join(claudeDir, 'backups')), 'No backup should be created when 0 hooks added');
 });
 
+test('5b. a harness hook installed under an older matcher takes the shared matcher', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const rawShared = fs.readFileSync(path.join(repoDir, 'settings', 'claude-settings.shared.json'), 'utf8');
+  const normHome = process.platform === 'win32' ? home.replace(/\\/g, '/') : home;
+  const normNode = process.platform === 'win32' ? process.execPath.replace(/\\/g, '/') : process.execPath;
+  const old = JSON.parse(rawShared.split('{HOME}').join(normHome).split('{NODE}').join(normNode));
+  const isGuard = (g) => g.hooks.some((h) => /worker-default-guard\.cjs/.test(h.command));
+  const shared = old.hooks.PreToolUse.find(isGuard).matcher;
+  old.hooks.PreToolUse.find(isGuard).matcher = 'Write|Edit|MultiEdit|NotebookEdit';
+  old.hooks.PreToolUse.push({ matcher: 'Read', hooks: [{ type: 'command', command: 'echo mine' }, { type: 'command', command: `"${normNode}" "${normHome}/.claude/hooks/x-user.cjs"` }] });
+  const settingsPath = path.join(claudeDir, 'settings.json');
+  fs.writeFileSync(settingsPath, JSON.stringify(old, null, 2), 'utf8');
+
+  const res = runInstall(home);
+  assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
+  const updated = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  assert.strictEqual(updated.hooks.PreToolUse.find(isGuard).matcher, shared);
+  assert.ok(shared.includes('Bash'));
+  assert.strictEqual(updated.hooks.PreToolUse.filter(isGuard).length, 1, 'no second group for the same hook');
+  assert.strictEqual(updated.hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command === 'echo mine')).matcher, 'Read');
+});
+
 test('6. existing .gemini/config/hooks.json with orca-status: claude-bridge added, orca-status preserved', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));

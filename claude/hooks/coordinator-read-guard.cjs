@@ -6,14 +6,18 @@
  * child repos, the work a read-only worker does on a quota that costs less.
  * - UserPromptSubmit: starts a new turn (resets the count). A turn Orca's wake prompt opens handles a
  *   worker's report, so its reads (the gate: diff, checks) are not counted.
- * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place is denied once the turn has
- *   counted two, unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
+ * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place is denied once the turn
+ *   holds two, unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
  *   one confirming read the skill allows, plus one of slack, since a hook cannot tell a confirm
- *   from the start of a chain.
- * - PostToolUse / PostToolUseFailure (same tools): the call ran, so it counts (and a worker-start
- *   unlocks the turn). Counting here, not at PreToolUse, leaves out a call another PreToolUse hook
- *   denied: hooks run in parallel and never see each other's decision, so a call the project rules
- *   hook stopped was counted as read 1 though it never ran.
+ *   from the start of a chain. A call that passes leaves a pending mark (one file per call).
+ * - PostToolUse / PostToolUseFailure (same tools): the call ran, so its pending mark becomes a
+ *   counted one; the target is the one PreToolUse saw (a command that creates a path is no read).
+ *   A worker-start unlocks the turn only at PostToolUse (it succeeded).
+ * The turn holds its counted marks plus pending marks younger than PENDING_MS. Calls sent in
+ * parallel all pass PreToolUse before any PostToolUse, so a fresh pending mark counts; a call
+ * another PreToolUse hook denied never gets a PostToolUse, and the next call the model writes
+ * comes seconds later, past PENDING_MS, so it is not counted (hooks run in parallel and never see
+ * each other's decision). One file per mark: parallel PostToolUse calls lose no update.
  * Watched places come from the local list `~/.claude/knowledge/coordinator-reads.txt`, one per
  * line: a path prefix (`~/…` or absolute), or `cmd:<word>` for a command word (`cmd:ssh`). No list:
  * nothing is watched. A Bash call reads a watched place when one of its simple commands names it:
@@ -48,6 +52,9 @@ const FREE_GIT = new Set(['merge', 'push', 'pull', 'fetch', 'worktree', 'add', '
 // Orca's wake prompt: the turn handles a worker's report (the gate), not a question.
 const ORCA_WAKE = /orchestration message/i;
 const FREE_SCRIPT = /(^|\/)(watch|ci)\.sh$/;
+// git subcommands whose `<rev>:<path>` arguments read a file's content.
+const REV_READS = new Set(['show', 'cat-file', 'diff', 'grep', 'archive']);
+const PENDING_MS = 5000;
 
 // { paths, words } from the list file; null when there is none.
 function watched(file = LIST) {
@@ -102,13 +109,23 @@ function readTarget(data, list) {
     if (list.words.has(w)) return w;
     if (w === 'git') {
       let dir = cwd;
-      for (let i = 1; i < words.length - 1; i++) if (words[i] === '-C') dir = path.resolve(dir, expandHome(words[i + 1]));
-      for (const x of words.slice(1)) {
-        const rev = /^[^:\s-][^:\s]*:(?!\/\/)(.+)$|^:(?:[0-3]:)?(.+)$/.exec(x);
-        if (!rev) continue;
-        const root = gitRoot(dir);
-        const m = root && named(path.join(root, rev[1] || rev[2]), false);
-        if (m) return m;
+      let i = 1;
+      while (i < words.length && words[i].startsWith('-')) {
+        if (words[i] === '-C') dir = path.resolve(dir, expandHome(words[i + 1] || ''));
+        i += /^-[Cc]$/.test(words[i]) ? 2 : 1;
+      }
+      if (REV_READS.has(words[i])) {
+        let root;
+        for (const x of words.slice(i + 1)) {
+          if (/^[A-Za-z]:[\\/]/.test(x)) continue; // a Windows drive path, not <rev>:<path>
+          const rev = /^([^:\s@-][^:\s@]*)?:(?:[0-3]:)?(?!\/)(.+)$/.exec(x);
+          if (!rev) continue;
+          if (root === undefined) root = gitRoot(dir);
+          if (!root) break;
+          const p = rev[2];
+          const m = named(rev[1] && /^\.\.?\//.test(p) ? path.join(dir, p) : path.join(root, p), false);
+          if (m) return m;
+        }
       }
     }
     for (const x of words.slice(1)) {
@@ -145,31 +162,70 @@ function startsWorker(data) {
   });
 }
 
-function statePath(sessionId) {
-  return path.join(STATE_DIR, `${String(sessionId).replace(/[^\w.-]/g, '_')}.json`);
+const safe = (s) => String(s).replace(/[^\w.-]/g, '_');
+const turnDir = (sessionId) => path.join(STATE_DIR, safe(sessionId));
+function turnState(sessionId) {
+  try { return JSON.parse(fs.readFileSync(path.join(turnDir(sessionId), 'turn.json'), 'utf8')); } catch { return { delegated: false }; }
 }
-function load(sessionId) {
-  try { return JSON.parse(fs.readFileSync(statePath(sessionId), 'utf8')); } catch { return { reads: 0, delegated: false }; }
+function newTurn(sessionId, state) {
+  const dir = turnDir(sessionId);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'marks'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'turn.json'), JSON.stringify(state));
 }
-function save(sessionId, state) {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(statePath(sessionId), JSON.stringify(state));
+// The key of one call: its tool_use_id, else a hash of the call (tests, older payloads).
+function callKey(data) {
+  if (data.tool_use_id) return safe(data.tool_use_id);
+  return require('crypto').createHash('sha1').update(`${data.tool_name}\0${JSON.stringify(data.tool_input || {})}`).digest('hex').slice(0, 16);
+}
+function marks(sessionId) {
+  const dir = path.join(turnDir(sessionId), 'marks');
+  try { return fs.readdirSync(dir).map((f) => ({ f, file: path.join(dir, f) })); } catch { return []; }
+}
+// Counted marks plus pending marks younger than pendingMs.
+function held(sessionId, now, pendingMs) {
+  return marks(sessionId).filter(({ f, file }) => {
+    if (f.startsWith('c.')) return true;
+    try { return now - fs.statSync(file).mtimeMs < pendingMs; } catch { return false; }
+  }).length;
+}
+function markPending(sessionId, key, now) {
+  const dir = path.join(turnDir(sessionId), 'marks');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `p.${key}.${now}.${process.pid}.${Math.random().toString(36).slice(2, 8)}`);
+  fs.writeFileSync(file, '');
+  const t = now / 1000;
+  fs.utimesSync(file, t, t);
+}
+// Turns the oldest pending mark of this call into a counted one.
+function markRan(sessionId, key) {
+  const mine = marks(sessionId).filter(({ f }) => f.startsWith(`p.${key}.`)).sort((a, b) => a.f.localeCompare(b.f, 'en', { numeric: true }));
+  for (const { f, file } of mine) {
+    try { fs.renameSync(file, path.join(path.dirname(file), `c.${f.slice(2)}`)); return; } catch { /* taken by a parallel call */ }
+  }
 }
 
-// Why this call is blocked, or ''. A UserPromptSubmit or PostToolUse* event updates the turn's state.
-function decide(data, { list = watched(), notesDir } = {}) {
+// Why this call is blocked, or ''. Every event updates the turn's state.
+function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs = PENDING_MS } = {}) {
   if (!data.session_id) return '';
-  if (data.hook_event_name === 'UserPromptSubmit') {
-    save(data.session_id, { reads: 0, delegated: ORCA_WAKE.test(String(data.prompt || '')) });
+  const sid = data.session_id;
+  const event = String(data.hook_event_name || 'PreToolUse');
+  if (event === 'UserPromptSubmit') {
+    newTurn(sid, { delegated: ORCA_WAKE.test(String(data.prompt || '')) });
     return '';
   }
   if (!list || data.agent_id) return '';
-  const state = load(data.session_id);
-  const ran = /^PostToolUse/.test(String(data.hook_event_name || ''));
-  if (startsWorker(data)) {
-    if (ran) save(data.session_id, { ...state, delegated: true });
+  if (/^PostToolUse/.test(event)) {
+    if (startsWorker(data)) {
+      if (event === 'PostToolUse') {
+        fs.mkdirSync(turnDir(sid), { recursive: true });
+        fs.writeFileSync(path.join(turnDir(sid), 'turn.json'), JSON.stringify({ ...turnState(sid), delegated: true }));
+      }
+    } else markRan(sid, callKey(data));
     return '';
   }
+  const state = turnState(sid);
+  if (startsWorker(data)) return '';
   if (state.delegated || readsInstructions(data)) return '';
   const target = readTarget(data, list);
   if (!target) return '';
@@ -178,20 +234,20 @@ function decide(data, { list = watched(), notesDir } = {}) {
     if (repo && claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
   }
   if (isWorker(data.transcript_path)) return '';
-  if (ran) {
-    save(data.session_id, { ...state, reads: state.reads + 1 });
+  const count = held(sid, now, pendingMs);
+  if (count < LIMIT) {
+    markPending(sid, callKey(data), now);
     return '';
   }
-  if (state.reads >= LIMIT) {
+  {
     return (
-      `this would be read ${state.reads + 1} of a watched place (${target}) in this turn with no worker. ` +
+      `this would be read ${count + 1} of a watched place (${target}) in this turn with no worker. ` +
       'The coordinator answers from what it has or one confirming read; a chain of reads goes to a ' +
       'read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): dispatch one now (no manifest: the ' +
       'question opens a block for it) and tell the user it is checking. If the user named Claude for this repo, add the `Người làm: Claude — <repo> — "<their sentence>"` ' +
       'line to the session note first.'
     );
   }
-  return '';
 }
 
 module.exports = { decide, readTarget, watched, LIMIT };

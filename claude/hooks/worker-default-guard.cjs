@@ -13,9 +13,10 @@
  * parent. A path under ~/.claude that symlinks into a repo (the harness repo holding the rules,
  * skills and hooks) is judged by where it leads: a fix to the harness belongs to a session the user
  * opened for it, and a harness bug met mid-task goes into a kaizen file, not a PR.
- * PreToolUse(Bash): `git commit` (cwd, or `-C <dir>`) in the repo ~/.claude/CLAUDE.md links into
- * needs the same line, since a commit there needs no Edit (a shell write lands first).
- * Limit: a shell write (sed -i, heredoc) is not seen; a commit after `cd <dir> &&` is judged by cwd.
+ * PreToolUse(Bash): a git command writing a commit (commit, merge, rebase, cherry-pick, am,
+ * revert; in cwd, after `cd <dir>`, or under `-C <dir>`) in the repo ~/.claude/CLAUDE.md links into
+ * (same git common dir) needs the same line, since a commit there needs no Edit.
+ * Limit: a shell write (sed -i, heredoc) is not seen; `--git-dir`/`GIT_DIR` are not followed.
  * Fails open when git or stdin fails (no repo known: nothing to guard); fails closed when the note
  * or transcript cannot be read (no evidence: the block message says how to add it).
  */
@@ -73,7 +74,9 @@ function repoOf(file) {
   if (!root) return null;
   const names = new Set([path.basename(root)]);
   if (common && path.basename(common) === '.git') names.add(path.basename(path.dirname(common)));
-  return { root, names };
+  let commonReal = common;
+  try { commonReal = fs.realpathSync(common); } catch { /* keep as printed */ }
+  return { root, names, common: commonReal };
 }
 
 // The texts of the transcript's user prompts (not tool results, not meta lines), in order.
@@ -166,19 +169,28 @@ function harnessRepo(claudeDir = CLAUDE_DIR) {
   return inside(real, fs.realpathSync(claudeDir)) ? null : repoOf(real);
 }
 
-// The folder each `git commit` in the command runs in (cwd, then each `-C <dir>`).
+// git subcommands that write a commit.
+const COMMITS = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'am', 'revert']);
+
+// The folder each commit-writing git command runs in: cwd, a `cd <dir>` before it in the same
+// command, then each `-C <dir>`.
 function commitDirs(command, cwd) {
   const out = [];
+  let base = cwd;
   for (const raw of commands(command)) {
     const words = program(raw);
+    if (words[0] === 'cd' && words[1] && !/^[-$]/.test(words[1])) {
+      base = path.resolve(base, expandHome(words[1]));
+      continue;
+    }
     if (words[0] !== 'git') continue;
-    let dir = cwd;
+    let dir = base;
     let i = 1;
     while (i < words.length && words[i].startsWith('-')) {
       if (words[i] === '-C') dir = path.resolve(dir, expandHome(words[i + 1] || ''));
       i += /^-[Cc]$/.test(words[i]) ? 2 : 1;
     }
-    if (words[i] === 'commit' && !words.includes('--help')) out.push(dir);
+    if (COMMITS.has(words[i]) && !words.includes('--help')) out.push(dir);
   }
   return out;
 }
@@ -190,7 +202,7 @@ function commitProblem(data, notesDir, claudeDir) {
   if (!harness) return '';
   for (const dir of dirs) {
     const repo = repoOf(path.join(dir, '_'));
-    if (!repo || ![...repo.names].some((n) => harness.names.has(n))) continue;
+    if (!repo || repo.common !== harness.common) continue;
     if (claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
     if (isWorker(data.transcript_path)) return '';
     return blockMessage(`committing in ${repo.root}`, repo);

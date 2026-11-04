@@ -150,13 +150,26 @@ function sendTargets(command) {
   return [...new Set([...command.matchAll(/--to[\s=]+["']?dispatch:(ctx_[0-9a-f]+)/g)].map((m) => m[1]))];
 }
 
-// One reminder per addressed worker still running; `state` reads its worker-show state.
-function sendLines(command, state = (d) => JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', d, '--json'])).result.state) {
+// { state, exited } of a dispatch from `worker-show --full`: Orca does not say whether the agent
+// is mid-turn (`projection.stage.activity` stays "unknown"), only whether its session exited.
+function showState(d) {
+  const r = JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', d, '--json', '--full'])).result;
+  const exited = r.projection?.liveness?.verdict === 'exited' || r.observation?.status === 'exited';
+  return { state: r.worker?.state, exited };
+}
+
+// One reminder per addressed worker not finished; `show` reads its state.
+function sendLines(command, show = showState) {
   return sendTargets(command).flatMap((d) => {
     let st;
-    try { st = state(d); } catch (_) { return []; }
-    return DONE.has(st) ? [] : [`${d} (state=${st}): \`ok:true\` chỉ là tin đã vào hộp thư. Worker chat đang chạy giữ tin ở ` +
-      'Queued tới hết lượt hiện tại, CLI không steer được: báo user "worker nhận sau lượt này"; cần đổi hướng ngay thì ' +
+    try { st = show(d); } catch (_) { return []; }
+    if (DONE.has(st.state)) return [];
+    if (st.exited) {
+      return [`${d} (state=${st.state}): session của worker đã thoát, tin sẽ không tới. Đừng báo user là worker đã nhận; ` +
+        'chạy lại task (`--retry-of`) hoặc giao worker mới.'];
+    }
+    return [`${d} (state=${st.state}): \`ok:true\` chỉ là tin đã vào hộp thư. Nếu worker Chat đang trong một lượt, tin nằm ` +
+      'Queued tới hết lượt đó, CLI không steer được: báo user "worker nhận sau lượt này"; cần đổi hướng ngay thì ' +
       '`**Cần bạn:** bấm Steer trên tab worker`.'];
   });
 }

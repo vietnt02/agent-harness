@@ -499,8 +499,11 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
   const session = () => `coord-test-${process.pid}-${n}`;
   // A call that passes PreToolUse runs, so PostToolUse counts it; `pre` alone is a call another
   // PreToolUse hook denied (it never runs, no PostToolUse).
-  const pre = (tool_name, tool_input, extra = {}) =>
-    guard.decide({ session_id: session(), transcript_path: transcript, cwd: path.join(tmp, 'umb'), tool_name, tool_input, ...extra }, { list, notesDir });
+  // Each call is 10 s after the last (the model writes one call after another), unless `at` pins it.
+  let clock = 0;
+  const pre = (tool_name, tool_input, extra = {}, at) =>
+    guard.decide({ session_id: session(), transcript_path: transcript, cwd: path.join(tmp, 'umb'), tool_name, tool_input, ...extra },
+      { list, notesDir, now: at ?? (clock += 10000) });
   const call = (tool_name, tool_input, extra = {}) => {
     const why = pre(tool_name, tool_input, extra);
     if (!why) pre(tool_name, tool_input, { ...extra, hook_event_name: 'PostToolUse' });
@@ -522,6 +525,39 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.equal(call('Bash', { command: `cat "${sh(repos)}/app/x"` }), '');
       assert.equal(call('Bash', { command: `cat "${sh(repos)}/app/y"` }), '');
       assert.match(call('Bash', { command: `cat "${sh(repos)}/app/z"` }), /read 3 of a watched place/);
+    });
+
+    await t.test('reads sent in parallel count while pending: the third is denied', () => {
+      turn();
+      const at = (clock += 10000);
+      const ids = ['a', 'b', 'c', 'd'].map((x) => ({ tool_use_id: `tu_${x}` }));
+      const got = ['a', 'b', 'c', 'd'].map((x, i) => pre('Read', { file_path: path.join(repos, 'app', x) }, ids[i], at + i));
+      assert.deepEqual(got.map(Boolean), [false, false, true, true]);
+      for (const i of [0, 1]) pre('Read', { file_path: path.join(repos, 'app', 'ab'[i]) }, { ...ids[i], hook_event_name: 'PostToolUse' });
+      assert.notEqual(call('Read', { file_path: path.join(repos, 'app', 'e') }), '');
+    });
+
+    await t.test('a failed worker-start does not unlock the turn', () => {
+      turn();
+      const ws = 'orca orchestration worker-start --spec-file bad.md --worktree path:/x';
+      pre('Bash', { command: ws });
+      pre('Bash', { command: ws }, { hook_event_name: 'PostToolUseFailure' });
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      call('Bash', { command: `cat "${sh(repos)}/app/b"` });
+      assert.notEqual(call('Bash', { command: `cat "${sh(repos)}/app/c"` }), '');
+    });
+
+    await t.test('a command that creates a path is not counted when it ran', () => {
+      turn();
+      const inRepo = { cwd: path.join(repos, 'app') };
+      const made = { 'mkdir newdir': () => fs.mkdirSync(path.join(repos, 'app', 'newdir')), 'touch newfile': () => fs.writeFileSync(path.join(repos, 'app', 'newfile'), '') };
+      for (const [c, make] of Object.entries(made)) {
+        assert.equal(pre('Bash', { command: c }, inRepo), '');
+        make();
+        pre('Bash', { command: c }, { ...inRepo, hook_event_name: 'PostToolUse' });
+      }
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      assert.equal(call('Bash', { command: `cat "${sh(repos)}/app/b"` }), '');
     });
 
     await t.test('a failed call (PostToolUseFailure) still counts: it ran', () => {
@@ -551,7 +587,11 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.notEqual(call('Bash', { command: 'git show origin/main:a/b.sql' }, { cwd: repo }), '');
       turn();
       for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'git show HEAD:README.md' }, { cwd: tmp }), '');
-      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'git clone https://x.example/r.git' }, { cwd: repo }), '');
+      for (const c of ['git clone https://x.example/r.git', 'git clone git@github.com:org/r.git /tmp/elsewhere',
+        'git remote add up git@gitlab.com:grp/r.git', 'git ls-remote git@github.com:org/r.git', 'git config remote.origin.url git@host:o/r',
+        'git -c user.name=a:b status', 'git log --oneline --grep fix:bug', 'git show :/fix message']) {
+        assert.equal(call('Bash', { command: c }, { cwd: repo }), '', c);
+      }
     });
 
     await t.test('a Read of a file in a repo the note claims passes; unclaimed it is counted', () => {
@@ -838,6 +878,12 @@ test('worker-default-guard: a ~/.claude path is judged by where it leads; harnes
       assert.match(bash(`git add -A && git -C "${harness}" commit -m x`), /committing in/);
       for (const c of ['git status', 'echo git commit', `git -C "${harness}" log -1`, 'git commit --help']) assert.equal(bash(c, harness), '', c);
       assert.equal(bash('git commit -qm x', other), '');
+      assert.match(bash(`cd "${harness}" && git commit -m x`), /committing in/);
+      for (const c of ['git merge origin/main', 'git rebase origin/main', 'git cherry-pick abc', 'git revert HEAD']) assert.match(bash(c, harness), /committing in/, c);
+      const twin = path.join(tmp, 'elsewhere', 'agent-harness');
+      fs.mkdirSync(twin, { recursive: true });
+      execFileSync('git', ['init', '-q', twin]);
+      assert.equal(bash('git commit -qm x', twin), '', 'another repo with the same folder name');
       claim(true);
       assert.equal(bash('git commit -qm x', harness), '');
     });
@@ -871,8 +917,9 @@ test('worktree-after-release: reads the worktree from either worker-show shape, 
 
 test('worker-start-receipt: a send to a running worker reminds that the message is queued', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
-  const states = { ctx_a1: 'running', ctx_b2: 'succeeded', ctx_c3: 'ready' };
+  const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
   const lines = (c) => receipt.sendLines(c, (d) => states[d]);
+  assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
   assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Queued.*Steer/);
   assert.match(lines('orca orchestration send --to=dispatch:ctx_c3 --subject x')[0], /state=ready/);
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --subject x'), []);
