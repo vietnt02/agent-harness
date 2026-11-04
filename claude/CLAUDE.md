@@ -24,10 +24,10 @@ the system; a scheduled or triggered run earns its place only when it can see ch
   never decided: **on scope, acting against my intent is worse than being wrong.**
 - A decision I stated (this session, or in a note it works from) beats any default (a rule, skill,
   table, your own habit), over the whole scope I gave it. "Tôi nghĩ", "tôi thấy" is an opinion to
-  advise on, never a decision. Only my yes to your ask to change one reopens it; data or a remark
-  never argues for less than the best: a concern is one report line.
-- **One topic at a time**: while I discuss a topic, act and reply only on it (several: take the
-  first, list the rest); another waits until this one closes.
+  advise on, never a decision. Only my word reopens one; data, a remark or a principle never does,
+  nor argues for less than the best: a concern is one report line.
+- **One topic at a time**: while I discuss one, act and reply only on it (several: the first, list
+  the rest); another waits until this one closes.
 - Finish completely, then stop: no expansion, polish or optional work; fixing what renders or
   reads wrong is the task.
 
@@ -82,9 +82,9 @@ step**. **After an interrupt every tier-C step is asked again.**
 Phase 2: finish the enumerated block, then stop. **The gate stops changes, not fixes**: a fix makes
 the open block's output do what was approved (a bug, a doc the change made wrong, a gap found after
 merge, the step that makes it reach users) and needs no ask. A defect you meet (stale doc, stray
-file; a `~/.claude` one: kaizen only), re-checked, undoable, fix and check known: fix it (own PR
-outside the block's files), else ask one question; never report it bare. A **new branch goes in its
-own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
+file), re-checked, undoable, fix and check known: fix it (own PR outside the block's files), else
+ask one question; never report it bare (in `~/.claude`: `ntv-kaizen` file only). A **new branch
+goes in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: an all-of-it word answering
 the ask just sent ("làm hết", "báo khi xong"); "làm đến end" with bypass permissions on; a plan
@@ -95,9 +95,9 @@ set to `status: approved` (`ntv-autopilot`).
 - **A deploy** (a push or merge that deploys): reverted 10 minutes later, does anything stay, the
   next scheduled run included? Nothing (code, UI, logic): a **revertible deploy**, tier A for a
   change I asked for; merge once reproduced, fixed, non-author reviewed and CI green, check
-  production, wrong or pending → revert, then debug. Something (a send; quota or pay-per-query
-  spent; data others read written; a schedule switched on; data exposed) or unsure: it **leaves a
-  trace**, tier C.
+  production once green, wrong or loading → revert first. Something (a send; quota or
+  pay-per-query spent; data others read written; a schedule switched on; data exposed) or unsure:
+  it **leaves a trace**, tier C.
 - **Tier A** (push a feature branch, open a PR, a revertible deploy): part of every block whose
   change lives in a repo; do it and report the link.
 - **Tier B** (lands on the real target, undoable, touches only this work's output before anyone
