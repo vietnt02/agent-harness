@@ -468,3 +468,25 @@ test('10. HARNESS_PLATFORM=win32 generates quoted node and script paths in hooks
   }
 });
 
+
+test('.gitattributes keeps checkouts LF when core.autocrlf=true', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-test-eol-'));
+  try {
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(dir, 'no-global-config'), GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...args) => {
+      const res = child_process.spawnSync('git', ['-c', 'core.autocrlf=true', ...args], { cwd: dir, encoding: 'utf8', env });
+      assert.strictEqual(res.status, 0, `git ${args.join(' ')} failed: ${res.stderr}`);
+    };
+    git('init', '-q');
+    fs.copyFileSync(path.join(repoDir, '.gitattributes'), path.join(dir, '.gitattributes'));
+    const file = path.join(dir, 'rule.md');
+    const text = 'line one\nline two\n';
+    fs.writeFileSync(file, text);
+    git('add', '-A');
+    fs.rmSync(file);
+    git('checkout-index', '-f', '--all');
+    assert.strictEqual(fs.readFileSync(file, 'utf8'), text);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
