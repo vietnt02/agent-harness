@@ -26,6 +26,10 @@ const os = require('os');
 const { orcaDataDir, samePath, toSlash } = require('./lib/platform.cjs');
 
 const GUIDE = path.join(os.homedir(), '.claude', 'skills', 'ntv-orca');
+// A dispatch the command really runs (not the words inside a quoted string or a heredoc): the
+// parser dispatch-split-guard judges with.
+const { workerStarts } = require('./dispatch-split-guard.cjs');
+const dispatches = (command) => workerStarts(command).segs.length > 0;
 const DISPATCH = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 const HELP = /\bworker-start\b[^;&|\n]*\s(?:--help|-h)\b/;
 const ID = /\b(term|ctx|task|run|wtr)_[0-9a-f-]+/g;
@@ -177,7 +181,7 @@ function sendLines(command, show = showState) {
   });
 }
 
-module.exports = { DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, acpHomes };
+module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, acpHomes };
 if (require.main !== module) return;
 
 let raw = '';
@@ -187,7 +191,7 @@ process.stdin.on('end', () => {
     const { hook_event_name: event, tool_name: tool, tool_input: input = {}, tool_response: resp = {}, error } = JSON.parse(raw);
     const command = input.command || '';
     if (tool !== 'Bash') process.exit(0);
-    if (event !== 'PostToolUseFailure' && !DISPATCH.test(command)) {
+    if (event !== 'PostToolUseFailure' && !dispatches(command)) {
       const sent = sendLines(command);
       if (sent.length) {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse',
@@ -195,7 +199,7 @@ process.stdin.on('end', () => {
       }
       process.exit(0);
     }
-    if (!DISPATCH.test(command) || HELP.test(command)) process.exit(0);
+    if (!dispatches(command) || HELP.test(command)) process.exit(0);
     const output = event === 'PostToolUseFailure'
       ? String(error || '')
       : typeof resp === 'string' ? resp : `${resp.stdout || ''}\n${resp.stderr || ''}`;
