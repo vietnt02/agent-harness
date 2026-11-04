@@ -437,6 +437,9 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       pass(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nChạy orca orchestration check --peek trước mỗi commit.\nEOF\n)"`), 'a heredoc spec');
       block(cmd(`--spec "$(cat <<'EOF'\nRà a.py.\nEOF\n)"`), 'a heredoc spec without it');
       pass(cmd('--spec "$SPEC"'), 'an inline spec in a variable is not judged');
+      const two = (a, b) => `${cmd(`--spec "$(cat <<'EOF'\n${a}\nEOF\n)"`)}\norca orchestration ${ws} --spec "$(cat <<'EOF'\n${b}\nEOF\n)" ${flags}`;
+      block(two('Chạy orca orchestration check --peek.', 'Rà b.py.'), 'each heredoc spec is read from its own body');
+      pass(`cat > /tmp/x <<'EOF'\nnotes\nEOF\n${cmd(`--spec "$(cat <<'EOF'\nChạy orca orchestration check --peek.\nEOF\n)"`)}`, 'an earlier heredoc is not the spec');
       pass(cmd(`--spec-file ${yes}`), 'spec with it');
       pass(cmd(`--spec "Rà a.py; chạy orca orchestration check --unread --peek sau mỗi 10 lệnh"`), 'inline, other flags between');
       pass(cmd('--task task_1 --retry-of ctx_1'), 'a --task retry runs a Task already judged');
@@ -447,7 +450,10 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
 
     await t.test('the words of a dispatch inside a quoted string are not a dispatch', () => {
       const ws = 'worker' + '-start';
-      for (const c of [`CMD='cd /x && orca orchestration ${ws} --spec-file a.md'; echo "$CMD"`,
+      for (const c of [`git commit -m "docs: mô tả \\\`orca orchestration ${ws}\\\` trong skill"`,
+        `orca orchestration send --to w1 --message "ví dụ: D=\\$(orca orchestration ${ws} --spec-file a.md)"`,
+        `gh pr create --body 'Docs: \`orca orchestration send\` rồi lark-cli base +record-update'`,
+        `CMD='cd /x && orca orchestration ${ws} --spec-file a.md'; echo "$CMD"`,
         `python3 -c "print('cd /x && orca orchestration ${ws} --spec-file a.md')"`,
         `cat > /tmp/s.md <<'EOF'\norca orchestration ${ws} --spec-file a.md\nEOF`]) {
         const r = run(c);
