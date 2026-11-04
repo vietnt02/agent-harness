@@ -734,3 +734,11 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('worktree-after-release reads the worktree path from worker-show', () => {
+  const { workspaceDir } = worktreeAfterRelease;
+  assert.strictEqual(workspaceDir({ workspace: 'c3ae90a0::/Users/a/repos/worktrees/x-review' }), '/Users/a/repos/worktrees/x-review');
+  assert.strictEqual(workspaceDir({ worker: { worktreeId: 'id::/tmp/old-shape' } }), '/tmp/old-shape');
+  assert.strictEqual(workspaceDir({}), '');
+  assert.strictEqual(workspaceDir(undefined), '');
+});

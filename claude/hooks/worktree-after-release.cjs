@@ -15,9 +15,15 @@ const run = (cmd, args, cwd) =>
 
 // Path the dispatch ran in, when it is a linked worktree; null for a main checkout, which
 // workers also reuse and which must never be removed.
+// Orca names the worktree `result.workspace` ("<repo-id>::<path>"); older builds used
+// `result.worker.worktreeId`. Reading only the old field made this hook silent.
+function workspaceDir(result) {
+  const id = (result && (result.workspace || (result.worker && result.worker.worktreeId))) || '';
+  return id.split('::').pop();
+}
+
 function linkedWorktree(dispatch) {
-  const { worker } = JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', dispatch, '--json'])).result;
-  const dir = (worker.worktreeId || '').split('::').pop();
+  const dir = workspaceDir(JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', dispatch, '--json'])).result);
   if (!dir || !fs.existsSync(dir)) return null;
   const [gitDir, commonDir] = run('git', ['rev-parse', '--absolute-git-dir', '--git-common-dir'], dir).split('\n');
   return samePath(path.resolve(dir, commonDir), gitDir) ? null : dir;
@@ -53,7 +59,7 @@ function describe(dispatch) {
     : `${dispatch}: gỡ worktree ${dir}: ${rm}`;
 }
 
-module.exports = { linkedWorktree, describe, openReviews };
+module.exports = { workspaceDir, linkedWorktree, describe, openReviews };
 if (require.main !== module) return;
 
 let raw = '';
