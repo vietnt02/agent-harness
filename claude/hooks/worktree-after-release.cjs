@@ -8,7 +8,6 @@
  */
 const { execFileSync } = require('child_process');
 const fs = require('fs');
-const path = require('path');
 const { samePath } = require('./lib/platform.cjs');
 
 const run = (cmd, args, cwd) =>
