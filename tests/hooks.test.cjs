@@ -263,6 +263,55 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     const e2 = pushAfterPrGuard.expand('~\\code', base);
     assert.ok(platform.samePath(e2, path.resolve(os.homedir(), 'code')));
   });
+
+  await t.test('push-after-pr-guard: reads remote and branches past flag values', () => {
+    const base = path.resolve('/r');
+    const one = (c) => pushAfterPrGuard.findPushes(c, base);
+    assert.deepEqual(one('git push -o ci.skip origin feat'), [{ dir: base, remote: 'origin', refspecs: ['feat'] }]);
+    assert.deepEqual(one('git push --push-option ci.skip up a:b'), [{ dir: base, remote: 'up', refspecs: ['a:b'] }]);
+    assert.deepEqual(one('git -c core.sshCommand="ssh -i k" push origin feat')[0].refspecs, ['feat']);
+    assert.equal(one('cd sub && git -C "a b" push')[0].dir, path.resolve(base, 'sub', 'a b'));
+    assert.deepEqual(one('git push origin --delete old'), []);
+    assert.deepEqual(one('git status'), []);
+  });
+
+  await t.test('push-after-pr-guard: blocks a merged or closed branch, voices what it could not read', () => {
+    const states = { merged: [{ id: '#1', state: 'MERGED' }], closed: [{ id: '!2', state: 'CLOSED' }],
+      reopened: [{ id: '#3', state: 'MERGED' }, { id: '#4', state: 'OPEN' }], fresh: [] };
+    const reviews = (dir, remote, branch) => {
+      if (branch === 'broken') throw new Error('HTTP 401: Bad credentials\nmore');
+      return states[branch];
+    };
+    const decide = (c) => pushAfterPrGuard.decide(c, '/r', { reviews, branches: (p) => p.refspecs });
+    assert.match(decide('git push origin merged').block, /"merged" already had #1 MERGED/);
+    assert.match(decide('git push origin closed').block, /!2 CLOSED/);
+    assert.deepEqual(decide('git push origin reopened'), { blind: [] }, 'an open PR on the branch lets it through');
+    assert.deepEqual(decide('git push origin fresh'), { blind: [] }, 'no PR yet');
+    assert.deepEqual(decide('git push origin broken'), { blind: ['"broken" (origin): HTTP 401: Bad credentials'] });
+    const failing = pushAfterPrGuard.decide('git push', '/r', { reviews, branches: () => { throw new Error('not a git repo'); } });
+    assert.match(failing.blind[0], /not a git repo/);
+  });
+
+  await t.test('push-after-pr-guard: tries the other identities only after the shell one fails', () => {
+    let asked = 0;
+    const more = () => { asked += 1; return [{ GH_TOKEN: 'a' }, { GH_TOKEN: 'b' }]; };
+    assert.equal(pushAfterPrGuard.firstThatWorks(more, () => 'ok'), 'ok');
+    assert.equal(asked, 0);
+    assert.equal(pushAfterPrGuard.firstThatWorks(more, (env) => { if (env.GH_TOKEN !== 'b') throw new Error('no'); return 'b'; }), 'b');
+    assert.throws(() => pushAfterPrGuard.firstThatWorks(() => [], () => { throw new Error('first'); }), /first/);
+  });
+
+  await t.test('push-after-pr-guard: voices a pass it could not check', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'papg-'));
+    execFileSync('git', ['init', '-q', '-b', 'feat', repo]);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/nobody-here/none.git']);
+    const r = spawnSync(process.execPath, [path.join(HOOKS_DIR, 'push-after-pr-guard.cjs')], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push origin feat' }, cwd: repo }),
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /không đọc được PR\/MR của "feat"/);
+  });
 });
 
 // ---------------------------------------------------------------------------
