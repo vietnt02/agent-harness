@@ -1,6 +1,6 @@
 ---
 name: ntv-kaizen
-description: "Record a mistake as one file on the Desktop for Viet's next kaizen session. Use it yourself, without asking, when you (1) break a sentence of ~/.claude/CLAUDE.md, ~/.claude/rules/mine/*.md or a file they point to (watch.sh --help…), (2) Viet corrects you a second time on the same matter this session, (3) a mistake had a real consequence (a tier B/C action done wrong, Viet had to interrupt, block or undo), or (4) you meet a defect of the harness itself (hook, rule, skill). Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
+description: "Record a mistake as one file on the Desktop for Viet's next kaizen session. Use it yourself, without asking, outside a kaizen session, when you (1) break a sentence of ~/.claude/CLAUDE.md, ~/.claude/rules/mine/*.md or a file they point to (watch.sh --help…), (2) Viet corrects you a second time on the same matter this session, (3) a mistake had a real consequence (a tier B/C action done wrong, Viet had to interrupt, block or undo), or (4) you meet a defect of the harness itself (hook, rule, skill). Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
 ---
 
 # /ntv-kaizen
@@ -23,8 +23,11 @@ description: "Record a mistake as one file on the Desktop for Viet's next kaizen
      script, safe default, a `knowledge/` fact) or tightens a rule sentence; "be more careful"
      fixes nothing.
 4. Never offer to apply a kaizen; Viet opens a session for that. A defect of the harness itself
-   (hook, rule, skill) met during any work, a mistake of yours or not, is a kaizen file the same
+   (hook, rule, skill) met during other work, a mistake of yours or not, is a kaizen file the same
    way (`## Rule đã phạm`: "lỗi của harness"): no fix, PR or ask to open one in that session.
+5. In a kaizen session no file is written: a harness defect or a mistake of yours met there is
+   fixed in that session, with no ask, once the topic at hand closes (Viet opened the session
+   for this; a new file costs him another session).
 
 ## Apply kaizen files (a session where Viet opens them)
 

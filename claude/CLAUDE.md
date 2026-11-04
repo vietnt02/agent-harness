@@ -84,7 +84,7 @@ Phase 2: finish the enumerated block, then stop. **The gate stops changes, not f
 the open block's output do what was approved (a bug, a doc the change made wrong, a gap found after
 merge, the step that makes it reach users) and needs no ask. A defect you meet (stale doc, stray
 file), re-checked, undoable, fix and check known: fix it (own PR outside the block's files), else
-ask one question; never report it bare (in `~/.claude`: `ntv-kaizen` file only). A **new branch
+ask one question; never report it bare (in `~/.claude`: per `ntv-kaizen`). A **new branch
 goes in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: an all-of-it word answering
