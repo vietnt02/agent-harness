@@ -319,9 +319,10 @@ test('macOS/Linux behavior unchanged compared to origin/main or baseline', async
       }
     });
 
-    // Case B: worker-default-guard with file inside .claude (exempt)
+    // Case B: worker-default-guard with a real file inside .claude (exempt). Not CLAUDE.md: it may
+    // symlink into the harness repo, which is judged by where it leads.
     await t.test('worker-default-guard POSIX payload behavior', () => {
-      const claudeFile = path.join(os.homedir(), '.claude', 'CLAUDE.md');
+      const claudeFile = path.join(os.homedir(), '.claude', 'session-notes', 'compat-test.md');
       const payload = {
         tool_name: 'Write',
         tool_input: { file_path: claudeFile, content: 'test' },
@@ -496,8 +497,18 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
   fs.mkdirSync(notesDir);
   let n = 0;
   const session = () => `coord-test-${process.pid}-${n}`;
-  const call = (tool_name, tool_input, extra = {}) =>
-    guard.decide({ session_id: session(), transcript_path: transcript, cwd: path.join(tmp, 'umb'), tool_name, tool_input, ...extra }, { list, notesDir });
+  // A call that passes PreToolUse runs, so PostToolUse counts it; `pre` alone is a call another
+  // PreToolUse hook denied (it never runs, no PostToolUse).
+  // Each call is 10 s after the last (the model writes one call after another), unless `at` pins it.
+  let clock = 0;
+  const pre = (tool_name, tool_input, extra = {}, at) =>
+    guard.decide({ session_id: session(), transcript_path: transcript, cwd: path.join(tmp, 'umb'), tool_name, tool_input, ...extra },
+      { list, notesDir, now: at ?? (clock += 10000) });
+  const call = (tool_name, tool_input, extra = {}) => {
+    const why = pre(tool_name, tool_input, extra);
+    if (!why) pre(tool_name, tool_input, { ...extra, hook_event_name: 'PostToolUse' });
+    return why;
+  };
   const turn = () => { n++; guard.decide({ session_id: session(), hook_event_name: 'UserPromptSubmit' }, { list }); };
 
   try {
@@ -506,6 +517,98 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.equal(call('Bash', { command: 'git -C repos/app grep -n foo' }), '');
       assert.equal(call('Read', { file_path: path.join(repos, 'app', 'a.sql') }), '');
       assert.match(call('Grep', { pattern: 'x', path: 'repos/app' }), /read 3 of a watched place/);
+    });
+
+    await t.test('a call another hook denied (no PostToolUse) is not counted', () => {
+      turn();
+      assert.equal(pre('Bash', { command: `git -C "${sh(repos)}/app" grep -n foo` }), '');
+      assert.equal(call('Bash', { command: `cat "${sh(repos)}/app/x"` }), '');
+      assert.equal(call('Bash', { command: `cat "${sh(repos)}/app/y"` }), '');
+      assert.match(call('Bash', { command: `cat "${sh(repos)}/app/z"` }), /read 3 of a watched place/);
+    });
+
+    await t.test('reads sent in parallel count while pending: the third is denied', () => {
+      turn();
+      const at = (clock += 10000);
+      const ids = ['a', 'b', 'c', 'd'].map((x) => ({ tool_use_id: `tu_${x}` }));
+      const got = ['a', 'b', 'c', 'd'].map((x, i) => pre('Read', { file_path: path.join(repos, 'app', x) }, ids[i], at + i));
+      assert.deepEqual(got.map(Boolean), [false, false, true, true]);
+      for (const i of [0, 1]) pre('Read', { file_path: path.join(repos, 'app', 'ab'[i]) }, { ...ids[i], hook_event_name: 'PostToolUse' });
+      assert.notEqual(call('Read', { file_path: path.join(repos, 'app', 'e') }), '');
+    });
+
+    await t.test('a failed worker-start does not unlock the turn', () => {
+      turn();
+      const ws = 'orca orchestration worker-start --spec-file bad.md --worktree path:/x';
+      pre('Bash', { command: ws });
+      pre('Bash', { command: ws }, { hook_event_name: 'PostToolUseFailure' });
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      call('Bash', { command: `cat "${sh(repos)}/app/b"` });
+      assert.notEqual(call('Bash', { command: `cat "${sh(repos)}/app/c"` }), '');
+    });
+
+    await t.test('a command that creates a path is not counted when it ran', () => {
+      turn();
+      const inRepo = { cwd: path.join(repos, 'app') };
+      const made = { 'mkdir newdir': () => fs.mkdirSync(path.join(repos, 'app', 'newdir')), 'touch newfile': () => fs.writeFileSync(path.join(repos, 'app', 'newfile'), '') };
+      for (const [c, make] of Object.entries(made)) {
+        assert.equal(pre('Bash', { command: c }, inRepo), '');
+        make();
+        pre('Bash', { command: c }, { ...inRepo, hook_event_name: 'PostToolUse' });
+      }
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      assert.equal(call('Bash', { command: `cat "${sh(repos)}/app/b"` }), '');
+    });
+
+    await t.test('a failed call (PostToolUseFailure) still counts: it ran', () => {
+      turn();
+      for (const c of [`cat "${sh(repos)}/app/nope1"`, `cat "${sh(repos)}/app/nope2"`]) {
+        assert.equal(pre('Bash', { command: c }), '');
+        pre('Bash', { command: c }, { hook_event_name: 'PostToolUseFailure' });
+      }
+      assert.notEqual(pre('Bash', { command: `cat "${sh(repos)}/app/nope3"` }), '');
+    });
+
+    await t.test('a worker-start another hook denied does not unlock the turn', () => {
+      turn();
+      pre('Bash', { command: 'orca orchestration worker-start --spec-file s.md --worktree path:/x' });
+      call('Bash', { command: `cat "${sh(repos)}/app/a"` });
+      call('Bash', { command: `cat "${sh(repos)}/app/b"` });
+      assert.notEqual(call('Bash', { command: `cat "${sh(repos)}/app/c"` }), '');
+    });
+
+    await t.test('git <rev>:<path> reads the path from the repo of -C or cwd', () => {
+      turn();
+      const repo = path.join(repos, 'gitrepo');
+      fs.mkdirSync(repo, { recursive: true });
+      execFileSync('git', ['init', '-q', repo]);
+      call('Bash', { command: `git -C "${sh(repo)}" show :2:README.md` }, { cwd: tmp });
+      call('Bash', { command: 'git show HEAD:README.md' }, { cwd: repo });
+      assert.notEqual(call('Bash', { command: 'git show origin/main:a/b.sql' }, { cwd: repo }), '');
+      turn();
+      for (let i = 0; i < 3; i++) assert.equal(call('Bash', { command: 'git show HEAD:README.md' }, { cwd: tmp }), '');
+      for (const c of ['git clone https://x.example/r.git', 'git clone git@github.com:org/r.git /tmp/elsewhere',
+        'git remote add up git@gitlab.com:grp/r.git', 'git ls-remote git@github.com:org/r.git', 'git config remote.origin.url git@host:o/r',
+        'git -c user.name=a:b status', 'git log --oneline --grep fix:bug', 'git show :/fix message']) {
+        assert.equal(call('Bash', { command: c }, { cwd: repo }), '', c);
+      }
+    });
+
+    await t.test('a Read of a file in a repo the note claims passes; unclaimed it is counted', () => {
+      const repo = path.join(repos, 'claimed');
+      fs.mkdirSync(repo, { recursive: true });
+      execFileSync('git', ['init', '-q', repo]);
+      fs.writeFileSync(path.join(repo, 'README.md'), 'x');
+      turn();
+      const note = path.join(notesDir, 'd', 'n.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'ok merge tuần tự đi nhé' } })}\n`);
+      fs.writeFileSync(note, `---\nsession: ${session()}\nstatus: open\n---\n## Đang có hiệu lực\n- Người làm: Claude — claimed — "ok merge tuần tự đi"\n`);
+      for (let i = 0; i < 3; i++) assert.equal(call('Read', { file_path: path.join(repo, 'README.md') }), '');
+      fs.rmSync(note);
+      call('Read', { file_path: path.join(repo, 'README.md') });
+      call('Read', { file_path: path.join(repo, 'README.md') });
+      assert.notEqual(call('Read', { file_path: path.join(repo, 'README.md') }), '');
     });
 
     await t.test('a new turn starts the count again', () => {
@@ -732,5 +835,127 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
     });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('worker-default-guard: a ~/.claude path is judged by where it leads; harness commits need the line', async (t) => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wdg-harness-')));
+  const harness = path.join(tmp, 'agent-harness');
+  const other = path.join(tmp, 'other-repo');
+  const claudeDir = path.join(tmp, 'home', '.claude');
+  for (const r of [harness, other]) {
+    fs.mkdirSync(path.join(r, 'claude', 'hooks'), { recursive: true });
+    execFileSync('git', ['init', '-q', r]);
+  }
+  fs.writeFileSync(path.join(harness, 'claude', 'CLAUDE.md'), 'rules');
+  fs.writeFileSync(path.join(harness, 'claude', 'hooks', 'h.cjs'), 'x');
+  fs.mkdirSync(path.join(claudeDir, 'hooks'), { recursive: true });
+  fs.mkdirSync(path.join(claudeDir, 'session-notes'), { recursive: true });
+  fs.symlinkSync(path.join(harness, 'claude', 'CLAUDE.md'), path.join(claudeDir, 'CLAUDE.md'));
+  fs.symlinkSync(path.join(harness, 'claude', 'hooks', 'h.cjs'), path.join(claudeDir, 'hooks', 'h.cjs'));
+  const notesDir = path.join(tmp, 'notes');
+  fs.mkdirSync(path.join(notesDir, 'd'), { recursive: true });
+  const transcript = path.join(tmp, 't.jsonl');
+  fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'có, làm cả nhé, sửa hook đi' } })}\n`);
+  const note = path.join(notesDir, 'd', 'n.md');
+  const claim = (on) => fs.writeFileSync(note, `---\nsession: s1\nstatus: open\n---\n## Đang có hiệu lực\n` +
+    (on ? '- Người làm: Claude — agent-harness — "có, làm cả nhé"\n' : '- nothing\n'));
+  const edit = (file) => workerDefaultGuard.problem({ session_id: 's1', transcript_path: transcript, cwd: tmp, tool_name: 'Edit', tool_input: { file_path: file } }, notesDir, claudeDir);
+  const bash = (command, cwd = tmp) => workerDefaultGuard.problem({ session_id: 's1', transcript_path: transcript, cwd, tool_name: 'Bash', tool_input: { command } }, notesDir, claudeDir);
+  try {
+    await t.test('a real file of ~/.claude passes; a symlink into the harness needs the line', () => {
+      claim(false);
+      assert.equal(edit(path.join(claudeDir, 'session-notes', 'x.md')), '');
+      assert.match(edit(path.join(claudeDir, 'hooks', 'h.cjs')), /kaizen/);
+      assert.match(edit(path.join(claudeDir, 'CLAUDE.md')), /agent-harness/);
+      claim(true);
+      assert.equal(edit(path.join(claudeDir, 'hooks', 'h.cjs')), '');
+    });
+    await t.test('git commit in the harness needs the line; elsewhere it is not judged', () => {
+      claim(false);
+      assert.match(bash('git commit -qm x', harness), /committing in/);
+      assert.match(bash(`git -C "${harness}" commit -qm x`), /committing in/);
+      assert.match(bash(`git add -A && git -C "${harness}" commit -m x`), /committing in/);
+      for (const c of ['git status', 'echo git commit', `git -C "${harness}" log -1`, 'git commit --help']) assert.equal(bash(c, harness), '', c);
+      assert.equal(bash('git commit -qm x', other), '');
+      assert.match(bash(`cd "${harness}" && git commit -m x`), /committing in/);
+      for (const c of ['git merge origin/main', 'git rebase origin/main', 'git cherry-pick abc', 'git revert HEAD']) assert.match(bash(c, harness), /committing in/, c);
+      const twin = path.join(tmp, 'elsewhere', 'agent-harness');
+      fs.mkdirSync(twin, { recursive: true });
+      execFileSync('git', ['init', '-q', twin]);
+      assert.equal(bash('git commit -qm x', twin), '', 'another repo with the same folder name');
+      claim(true);
+      assert.equal(bash('git commit -qm x', harness), '');
+    });
+    await t.test('no harness (CLAUDE.md a plain file): nothing to judge', () => {
+      claim(false);
+      fs.rmSync(path.join(claudeDir, 'CLAUDE.md'));
+      fs.writeFileSync(path.join(claudeDir, 'CLAUDE.md'), 'plain');
+      assert.equal(bash('git commit -qm x', harness), '');
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('worktree-after-release: reads the worktree from either worker-show shape, and says when it cannot', () => {
+  const show = (result) => () => JSON.stringify({ ok: true, result });
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'war-')));
+  try {
+    execFileSync('git', ['init', '-q', path.join(tmp, 'main')]);
+    execFileSync('git', ['-C', path.join(tmp, 'main'), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--allow-empty']);
+    const wt = path.join(tmp, 'wt');
+    execFileSync('git', ['-C', path.join(tmp, 'main'), 'worktree', 'add', '-q', wt]);
+    assert.equal(worktreeAfterRelease.linkedWorktree('ctx_1', show({ workspace: `id::${wt}` })), wt);
+    assert.equal(worktreeAfterRelease.linkedWorktree('ctx_1', show({ worker: { worktreeId: `id::${wt}` } })), wt);
+    assert.equal(worktreeAfterRelease.linkedWorktree('ctx_1', show({ workspace: `id::${path.join(tmp, 'main')}` })), null);
+    assert.throws(() => worktreeAfterRelease.linkedWorktree('ctx_1', show({ state: 'succeeded' })), /workspace/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('worker-start-receipt: a send to a running worker reminds that the message is queued', () => {
+  const receipt = require('../claude/hooks/worker-start-receipt.cjs');
+  const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
+  const lines = (c) => receipt.sendLines(c, (d) => states[d]);
+  assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
+  assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Queued.*Steer/);
+  assert.match(lines('orca orchestration send --to=dispatch:ctx_c3 --subject x')[0], /state=ready/);
+  assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --subject x'), []);
+  assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);
+  assert.deepEqual(lines('echo "orca orchestration send --to dispatch:ctx_a1"'), []);
+  assert.deepEqual(receipt.sendLines('orca orchestration send --to dispatch:ctx_zz', () => { throw new Error('x'); }), []);
+});
+
+test('coordinator-read-guard: parallel PreToolUse processes let only LIMIT reads through', async () => {
+  const guardPath = path.join(HOOKS_DIR, 'coordinator-read-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'coord-par-'));
+  const watchedDir = path.join(tmp, 'w');
+  fs.mkdirSync(watchedDir);
+  const session = `coord-par-${process.pid}-${Date.now()}`;
+  const guard = require(guardPath);
+  guard.decide({ session_id: session, hook_event_name: 'UserPromptSubmit' }, { list: { paths: [watchedDir], words: new Set() } });
+  const start = Date.now() + 400;
+  const script = `
+    const g = require(${JSON.stringify(guardPath)});
+    while (Date.now() < ${start}) {}
+    const why = g.decide({ session_id: ${JSON.stringify(session)}, tool_use_id: 'tu_' + process.argv[1], cwd: ${JSON.stringify(tmp)},
+      tool_name: 'Read', tool_input: { file_path: ${JSON.stringify(watchedDir)} + '/f' + process.argv[1] } },
+      { list: { paths: [${JSON.stringify(watchedDir)}], words: new Set() } });
+    process.stdout.write(why ? 'deny' : 'pass');`;
+  const { spawn } = require('child_process');
+  try {
+    const runs = Array.from({ length: 6 }, (_, i) => new Promise((resolve) => {
+      const c = spawn(process.execPath, ['-e', script, String(i)]);
+      let out = '';
+      c.stdout.on('data', (d) => (out += d));
+      c.on('close', () => resolve(out));
+    }));
+    const got = await Promise.all(runs);
+    assert.equal(got.filter((x) => x === 'pass').length, guard.LIMIT, got.join(','));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(path.join(os.tmpdir(), 'claude-coordinator-reads', session), { recursive: true, force: true });
   }
 });

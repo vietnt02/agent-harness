@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * worker-default-guard.cjs - PreToolUse(Write|Edit|MultiEdit|NotebookEdit): execution goes to Orca
+ * worker-default-guard.cjs - PreToolUse(Write|Edit|MultiEdit|NotebookEdit|Bash): execution goes to Orca
  * workers (CLAUDE.md § Delegation); Claude edits a repo itself only in the cases ntv-implement
  * § Who works lists, and says which first. An edit to a file inside a git repo outside ~/.claude
  * is blocked until this session's note (rules/mine/session-notes.md) holds, under
@@ -8,9 +8,15 @@
  * (its folder, or its main checkout's folder for a linked worktree), where the evidence is a
  * quoted sentence found in one of the user's messages, or a value change written with `→`.
  * Passes: an Orca worker session (its first prompt opens with Orca's dispatch brief), a file
- * outside any git repo (scratchpad, Desktop), ~/.claude itself, a `.md` under the repo's `plans/`
- * or `knowledge/` (specs and docs a coordinator writes). A subagent is checked like its parent.
- * Limit: a shell write (sed -i, heredoc) is not seen.
+ * outside any git repo (scratchpad, Desktop), a file of ~/.claude itself, a `.md` under the repo's
+ * `plans/` or `knowledge/` (specs and docs a coordinator writes). A subagent is checked like its
+ * parent. A path under ~/.claude that symlinks into a repo (the harness repo holding the rules,
+ * skills and hooks) is judged by where it leads: a fix to the harness belongs to a session the user
+ * opened for it, and a harness bug met mid-task goes into a kaizen file, not a PR.
+ * PreToolUse(Bash): a git command writing a commit (commit, merge, rebase, cherry-pick, am,
+ * revert, pull; in cwd, after `cd <dir>`, or under `-C <dir>`) in the repo ~/.claude/CLAUDE.md links into
+ * (same git common dir) needs the same line, since a commit there needs no Edit.
+ * Limit: a shell write (sed -i, heredoc) is not seen; `--git-dir`/`GIT_DIR` are not followed.
  * Fails open when git or stdin fails (no repo known: nothing to guard); fails closed when the note
  * or transcript cannot be read (no evidence: the block message says how to add it).
  */
@@ -19,6 +25,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { expandHome, toSlash, samePath } = require('./lib/platform.cjs');
+const { commands, program } = require('./lib/shell-words.cjs');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const NOTES_DIR = path.join(CLAUDE_DIR, 'session-notes');
@@ -47,12 +54,14 @@ function inside(file, dir) {
 }
 const clean = (s) => s.normalize('NFC').replace(/\r\n?/g, '\n');
 
+const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+
 // { root, names } for the repo holding `file`: names are its folder and, for a linked worktree,
-// the main checkout's folder. null when none. The file may not exist yet: start at the nearest
-// existing parent.
+// the main checkout's folder. null when none. The file may not exist yet, or be a directory's
+// path + `/_`: start at the nearest existing directory above it.
 function repoOf(file) {
   let dir = path.dirname(file);
-  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  while (!isDir(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
   let out;
   try {
     out = execFileSync('git', ['-C', dir, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'], {
@@ -65,7 +74,9 @@ function repoOf(file) {
   if (!root) return null;
   const names = new Set([path.basename(root)]);
   if (common && path.basename(common) === '.git') names.add(path.basename(path.dirname(common)));
-  return { root, names };
+  let commonReal = common;
+  try { commonReal = fs.realpathSync(common); } catch { /* keep as printed */ }
+  return { root, names, common: commonReal };
 }
 
 // The texts of the transcript's user prompts (not tool results, not meta lines), in order.
@@ -151,30 +162,94 @@ function claimed(lines, repo, transcript) {
   return false;
 }
 
+// The repo ~/.claude/CLAUDE.md links into (the harness), or null when it is a plain file.
+function harnessRepo(claudeDir = CLAUDE_DIR) {
+  let real;
+  try { real = fs.realpathSync(path.join(claudeDir, 'CLAUDE.md')); } catch { return null; }
+  return inside(real, fs.realpathSync(claudeDir)) ? null : repoOf(real);
+}
+
+// git subcommands that write a commit.
+const COMMITS = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'am', 'revert', 'pull']);
+
+// The folder each commit-writing git command runs in: cwd, a `cd <dir>` before it in the same
+// command, then each `-C <dir>`.
+function commitDirs(command, cwd) {
+  const out = [];
+  const cds = [];
+  for (const raw of commands(command)) {
+    const words = program(raw);
+    const scope = raw.scope || '';
+    // A `cd` holds for its own scope and the scopes inside it, not after a subshell closes.
+    let base = cwd;
+    for (const c of cds) if (scope === c.scope || scope.startsWith(`${c.scope}.`)) base = c.dir;
+    if (words[0] === 'cd') {
+      const to = words.slice(1).find((w) => !w.startsWith('-'));
+      if (to && !to.startsWith('$')) cds.push({ scope, dir: path.resolve(base, expandHome(to)) });
+      continue;
+    }
+    if (words[0] !== 'git') continue;
+    let dir = base;
+    let i = 1;
+    while (i < words.length && words[i].startsWith('-')) {
+      if (words[i] === '-C') dir = path.resolve(dir, expandHome(words[i + 1] || ''));
+      i += /^-[Cc]$/.test(words[i]) ? 2 : 1;
+    }
+    if (COMMITS.has(words[i]) && !words.includes('--help')) out.push(dir);
+  }
+  return out;
+}
+
+// Why this `git commit` is blocked, or ''.
+function commitProblem(data, notesDir, claudeDir) {
+  const dirs = commitDirs(String(data.tool_input?.command || ''), data.cwd || process.cwd());
+  const harness = dirs.length ? harnessRepo(claudeDir) : null;
+  if (!harness) return '';
+  for (const dir of dirs) {
+    const repo = repoOf(path.join(dir, '_'));
+    if (!repo || repo.common !== harness.common) continue;
+    if (claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
+    if (isWorker(data.transcript_path)) return '';
+    return blockMessage(`committing in ${repo.root}`, repo);
+  }
+  return '';
+}
+
+function blockMessage(what, repo) {
+  const name = [...repo.names].pop();
+  return (
+    `${what}: execution goes to Orca workers (CLAUDE.md § Delegation; ntv-orca). ` +
+    'Claude edits a repo itself only for a change to an existing value with no new logic, or work the user ' +
+    'named Claude for (ntv-implement § Who works); a harness bug met during other work goes into a kaizen ' +
+    'file (ntv-kaizen), not a fix. If one holds, first add under `## Đang có hiệu lực` of ' +
+    `this session's note: \`- Người làm: Claude — ${name} — "<the user's exact sentence naming Claude>"\` or ` +
+    `\`- Người làm: Claude — ${name} — <file>: <key> <old>→<new>\`. Otherwise dispatch a worker.`
+  );
+}
+
 // Why this edit is blocked, or '' when it passes.
-function problem(data, notesDir = NOTES_DIR) {
+function problem(data, notesDir = NOTES_DIR, claudeDir = CLAUDE_DIR) {
+  if (!data.session_id) return '';
+  if (data.tool_name === 'Bash') return commitProblem(data, notesDir, claudeDir);
   const input = data.tool_input || {};
   const target = input.file_path || input.notebook_path;
-  if (!target || !data.session_id) return '';
-  const file = path.resolve(data.cwd || process.cwd(), expandHome(target));
-  if (inside(file, CLAUDE_DIR)) return '';
+  if (!target) return '';
+  let file = path.resolve(data.cwd || process.cwd(), expandHome(target));
+  if (inside(file, claudeDir)) {
+    const real = fs.existsSync(file) ? fs.realpathSync(file) : realPath(file);
+    if (inside(real, fs.realpathSync(claudeDir))) return '';
+    file = real;
+  }
   const repo = repoOf(file);
   if (!repo) return '';
   const rel = toSlash(path.relative(fs.realpathSync(repo.root), realPath(file)));
   if (/^(plans|knowledge)\//.test(rel) && rel.endsWith('.md')) return '';
   if (claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
   if (isWorker(data.transcript_path)) return '';
-  const name = [...repo.names].pop();
-  return (
-    `editing ${file} in ${repo.root}: execution goes to Orca workers (CLAUDE.md § Delegation; ntv-orca). ` +
-    'Claude edits a repo itself only for a change to an existing value with no new logic, or work the user ' +
-    'named Claude for (ntv-implement § Who works). If one holds, first add under `## Đang có hiệu lực` of ' +
-    `this session's note: \`- Người làm: Claude — ${name} — "<the user's exact sentence naming Claude>"\` or ` +
-    `\`- Người làm: Claude — ${name} — <file>: <key> <old>→<new>\`. Otherwise dispatch a worker.`
-  );
+  return blockMessage(`editing ${file} in ${repo.root}`, repo);
 }
 
-module.exports = { problem, inside, realPath, repoOf, claimed, isWorker, liveLines, userTexts };
+module.exports = { problem, commitDirs, harnessRepo, inside, realPath, repoOf, claimed, isWorker, liveLines, userTexts };
 if (require.main !== module) return;
 
 let raw = '';

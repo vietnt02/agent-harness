@@ -220,6 +220,7 @@ function main() {
 
   const sharedHooks = sharedClaudeObj.hooks || {};
   let claudeCommandsAdded = 0;
+  let claudeMatchersUpdated = 0;
 
   if (!currentClaudeSettings.hooks || typeof currentClaudeSettings.hooks !== 'object' || Array.isArray(currentClaudeSettings.hooks)) {
     currentClaudeSettings.hooks = {};
@@ -233,11 +234,15 @@ function main() {
     const currentGroups = currentClaudeSettings.hooks[event];
 
     const existingHookKeys = new Set();
+    const groupOfKey = new Map();
     for (const g of currentGroups) {
       if (g && Array.isArray(g.hooks)) {
         for (const h of g.hooks) {
           const k = getHookKey(h, isWin);
-          if (k) existingHookKeys.add(k);
+          if (k) {
+            existingHookKeys.add(k);
+            if (!groupOfKey.has(k)) groupOfKey.set(k, g);
+          }
         }
       }
     }
@@ -248,6 +253,14 @@ function main() {
 
       for (const h of sHooks) {
         const k = getHookKey(h, isWin);
+        // A harness hook already installed alone in its group, under another matcher (the shared
+        // file widened or narrowed it): take the shared matcher. A group the user shares with
+        // other hooks is left alone.
+        const had = k && groupOfKey.get(k);
+        if (had && had.hooks.length === 1 && sGroup.matcher !== undefined && had.matcher !== sGroup.matcher) {
+          had.matcher = sGroup.matcher;
+          claudeMatchersUpdated++;
+        }
         if (k && !existingHookKeys.has(k)) {
           let hookToAdd;
           if (isWin) {
@@ -287,7 +300,7 @@ function main() {
     }
   }
 
-  if (claudeCommandsAdded > 0) {
+  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0) {
     if (!dryRun) {
       if (claudeFileExisted) {
         const backupTarget = path.join(backupDir, '.claude', 'settings.json');
@@ -350,7 +363,7 @@ function main() {
   }
 
   // --- 3. Summary ---
-  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh.`);
+  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh, cập nhật matcher ${claudeMatchersUpdated} lệnh.`);
   console.log(`Agy hooks: ${agyStatus}.`);
 }
 
