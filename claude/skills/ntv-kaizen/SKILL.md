@@ -1,15 +1,15 @@
 ---
 name: ntv-kaizen
-description: "Record a mistake as one file on the Desktop for Viet's next kaizen session. Use it yourself, without asking, when you (1) break a sentence of ~/.claude/CLAUDE.md, ~/.claude/rules/mine/*.md or a file they point to (watch.sh --help…), (2) Viet corrects you a second time on the same matter this session, or (3) a mistake had a real consequence (a tier B/C action done wrong, Viet had to interrupt, block or undo). Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
+description: "Record a mistake as one file on the Desktop for Viet's next kaizen session. Use it yourself, without asking, when you (1) break a sentence of ~/.claude/CLAUDE.md, ~/.claude/rules/mine/*.md or a file they point to (watch.sh --help…), (2) Viet corrects you a second time on the same matter this session, (3) a mistake had a real consequence (a tier B/C action done wrong, Viet had to interrupt, block or undo), or (4) you meet a defect of the harness itself (hook, rule, skill). Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
 ---
 
 # /ntv-kaizen
 
 ## Record a mistake
 
-1. Outside the three triggers in the description, a mistake is one line in the final report,
+1. Outside the four triggers in the description, a mistake is one line in the final report,
    no file. A slip you undid in the same turn, before Viet saw it, is no mistake.
-2. A kaizen file never settles a mistake: first fix its output in this turn (redo the check,
+2. A kaizen file never settles a mistake: first fix the task's output (never the harness) in this turn (redo the check,
    correct the answer), then name it in the report at full severity, with no mitigating fact,
    and return to the topic Viet is on.
 3. Before writing, `ls ~/Desktop/kaizen-*`: the same failure pattern already has a file → add a
@@ -22,7 +22,9 @@ description: "Record a mistake as one file on the Desktop for Viet's next kaizen
    - `## Hướng kaizen`: each fix and the file it belongs in. A fix works unremembered (hook,
      script, safe default, a `knowledge/` fact) or tightens a rule sentence; "be more careful"
      fixes nothing.
-4. Never offer to apply a kaizen; Viet opens a session for that.
+4. Never offer to apply a kaizen; Viet opens a session for that. A defect of the harness itself
+   (hook, rule, skill) met during any work, a mistake of yours or not, is a kaizen file the same
+   way (`## Rule đã phạm`: "lỗi của harness"): no fix, PR or ask to open one in that session.
 
 ## Apply kaizen files (a session where Viet opens them)
 
