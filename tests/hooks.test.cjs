@@ -1023,6 +1023,15 @@ test('worktree-after-release: reads the worktree from either worker-show shape, 
   }
 });
 
+test('worker-start-receipt: only a dispatch the command runs is read back', () => {
+  const receipt = require('../claude/hooks/worker-start-receipt.cjs');
+  const ws = 'worker' + '-start';
+  assert.equal(receipt.dispatches(`D=$(orca orchestration ${ws} --spec-file s.md --json)`), true);
+  assert.equal(receipt.dispatches(`cd /x && orca orchestration ${ws} --spec-file s.md`), true);
+  assert.equal(receipt.dispatches(`printf '%s' '{"command":"D=$(orca orchestration ${ws} --spec-file s.md)"}' | node h.cjs`), false);
+  assert.equal(receipt.dispatches(`git commit -m "docs: \\\`orca orchestration ${ws}\\\`"`), false);
+});
+
 test('worker-start-receipt: a send to a running worker reminds that the message is queued', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
