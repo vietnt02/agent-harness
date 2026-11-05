@@ -1,0 +1,2 @@
+# Rule budgets count characters: a CR added on checkout would push rule files over budget.
+* text=auto eol=lf
