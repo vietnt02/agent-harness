@@ -18,7 +18,7 @@
  * A claude worker whose `--model` is not a bare alias (opus, sonnet, fable, haiku) is blocked unless the
  * command holds a `# Model: user chỉ định <bản>` line: a full id outside Orca's catalog drops the
  * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude or codex worker at all
- * needs that `# Model: user chỉ định <bản>` line, `--retry-of` exempt: workers are Gemini through
+ * needs that `# Model: user chỉ định <bản>` line (a retry naming one too): workers are Gemini through
  * antigravity unless the user names another (ntv-orca § 2, Chọn model); a rule naming only what a
  * worker is not let the coordinator copy the codex example of the orchestration skill.
  * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
@@ -162,13 +162,14 @@ function unpinnedClaudeModel(command, { segs }) {
   return null;
 }
 
-// The agent of a `worker-start --agent claude|codex` segment, not a retry, when the command has no
-// `# Model: user chỉ định <bản>` line; else ''.
+// The agent of a `worker-start --agent claude|codex` segment when the command has no
+// `# Model: user chỉ định <bản>` line; else ''. A retry that names one of them is judged too: a
+// retry with no `--agent` keeps the agent the user already took.
 function unnamedNonGemini(command, { segs }) {
-  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command)) return '';
+  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command.normalize('NFC'))) return '';
   for (const seg of segs) {
-    const m = seg.match(/--agent[ =]['"]?(claude|codex)\b/);
-    if (m && !/--retry-of\b/.test(seg)) return m[1];
+    const m = seg.match(/--agent(?:\s+|=)['"]?(claude|codex)\b/);
+    if (m) return m[1];
   }
   return '';
 }

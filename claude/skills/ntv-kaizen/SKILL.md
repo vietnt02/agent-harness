@@ -24,7 +24,7 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
    entry there. Otherwise write `~/Desktop/kaizen-<yymmdd>-<slug>.md` (Vietnamese):
    - `# <one-line title>`, then `Phiên: <task> (session <id>)`.
    - `## Chuyện đã xảy ra`: timed steps, Viet's words quoted, and what it cost him (time, rework,
-     a decision made on a wrong answer).
+     a decision made on a wrong answer). A secret the transcript shows is written `[redacted]`.
    - `## Rule đã phạm`: the exact sentence and its file, or "rule còn thiếu".
    - `## Mẫu lỗi chung`: the mechanism, and why no check caught it.
    - `## Hướng kaizen`: each fix and the file it belongs in. A fix works unremembered (hook,

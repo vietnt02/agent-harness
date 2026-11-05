@@ -224,24 +224,33 @@ function markRan(sessionId, key) {
   }
 }
 
+// ssh options that take a value: the host is the first operand after them.
+const SSH_VALUE = /^-[BbcDEeFIiJLlmOoPpQRSWw]$/;
+
 // True when a `Người làm: Claude — <place> — "<the user's sentence>"` line of the session note covers
-// this read. <place> is `*` (the whole session), the repo or a folder on the read path, or, for a
-// watched command word, the word itself or one of its operands (`ssh web1 …`: `ssh`, `web1`).
-function claimedTarget(target, data, notesDir) {
+// this read; only a quote of the user counts here, never a `→` value line. <place> is `*` (the whole
+// session), the repo or a folder below the watched prefix on the read path, or, for a watched
+// command word, the word itself or its first operand (`ssh -i k deploy@web1 …`: `ssh`, `web1`).
+function claimedTarget(target, data, list, notesDir) {
   const names = new Set(['*']);
   if (path.isAbsolute(target)) {
     const repo = repoOf(path.join(target, '_'));
     if (repo) for (const n of repo.names) names.add(n);
-    for (const seg of target.split(/[\\/]/)) if (seg) names.add(seg);
+    const root = list.paths.find((w) => inside(target, w));
+    if (root) for (const seg of path.relative(root, target).split(/[\\/]/)) if (seg && seg !== '..') names.add(seg);
   } else {
     names.add(target);
     for (const raw of commands((data.tool_input || {}).command)) {
       const words = program(raw);
       if (words[0] !== target) continue;
-      for (const x of words.slice(1)) if (!x.startsWith('-')) names.add(x.replace(/^[^@\s]*@/, '').split(':')[0]);
+      for (let i = 1; i < words.length; i++) {
+        if (words[i].startsWith('-')) { if (SSH_VALUE.test(words[i])) i++; continue; }
+        names.add(words[i].replace(/^[^@\s]*@/, '').split(':')[0]);
+        break;
+      }
     }
   }
-  return claimed(liveLines(data.session_id, notesDir), { names }, data.transcript_path);
+  return claimed(liveLines(data.session_id, notesDir), { names }, data.transcript_path, { quoteOnly: true });
 }
 
 // Why this call is blocked, or ''. Every event updates the turn's state.
@@ -268,7 +277,7 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
   if (state.delegated || readsInstructions(data)) return '';
   const target = readTarget(data, list);
   if (!target) return '';
-  if (claimedTarget(target, data, notesDir)) return '';
+  if (claimedTarget(target, data, list, notesDir)) return '';
   if (isWorker(data.transcript_path)) return '';
   // Count and mark under one lock: parallel PreToolUse calls are separate processes.
   const count = withLock(sid, () => {
