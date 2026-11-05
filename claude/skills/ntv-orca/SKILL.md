@@ -87,8 +87,8 @@ chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
 - gửi kế hoạch qua `ask` trước khi sửa, kèm output thô của query chạy trên toàn bộ dữ liệu;
 - kiểm hộp thư giữa lượt: chạy `orca orchestration check --peek` trước mỗi commit, trước một lệnh
   dài, và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo tin đó trước, tin đã làm
-  theo thì bỏ qua khi thấy lại (`--peek` không đánh dấu đã đọc; worker Chat không tự nhận tin `send`
-  tới giữa lượt, tin nằm Queued tới hết lượt);
+  theo thì bỏ qua khi thấy lại (`--peek` không đánh dấu đã đọc; worker Chat có nhận tin `send` giữa
+  lượt hay không tuỳ bản Orca, xem `~/.claude/knowledge/orca.md`);
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;
@@ -122,11 +122,12 @@ vậy thành một PR/MR để pipeline chạy một lần.
 
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
   lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify).
-- Antigravity ưu tiên hơn codex. Chọn theo loại task trước, cỡ task sau: research (đọc nhiều tài
-  liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) → `agy gemini-argon high`, cỡ nào cũng vậy; đọc code
-  có khuôn, làm theo spec rõ, task nhỏ đến trung bình → `gemini-flash`; flash hết quota →
-  `gpt-luna`. `gpt-sol` chỉ khi user cho phép trong manifest. Reviewer mặc định
-  `agy gemini-argon high`.
+- Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định, ghi dòng
+  `# Model: user chỉ định <bản>` trong lệnh (`dispatch-split-guard` chặn khi thiếu). Chọn theo loại
+  task trước, cỡ task sau: research (đọc nhiều tài liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) hay
+  task phức tạp → `agy gemini-argon high`, cỡ nào cũng vậy; đọc code có khuôn, làm theo spec rõ,
+  task nhanh, nhỏ đến trung bình → `gemini-flash`; flash hết quota → `gemini-argon`. Reviewer mặc
+  định `agy gemini-argon high`.
 - Không giao task dài cho model context ngắn (`gemini-flash`, `gpt-luna`): chia task nhỏ, mỗi task
   một worker mới, commit + push mỗi nhóm việc ≤ 30 phút.
 - Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter. Slug: agy `agy models`;
@@ -144,10 +145,10 @@ vậy thành một PR/MR để pipeline chạy một lần.
   đó và tới trong TTL cache (codex 30 phút, Claude 1 giờ) → giao bằng `send --to dispatch:<id>`
   (thành Task mới). Việc định gửi bằng `send` phải xét lại **Chọn model** (§ 2) như một lần giao
   mới: khác loại task, hoặc làm task vượt mức § 2 cho model context ngắn → worker mới (ngoài
-  manifest đã duyệt thì hỏi lại, § 2; worker rà chỉ-đọc cho câu hỏi thì không cần). Worker chạy chế
-  độ Chat đang trong một lượt giữ tin ở Queued tới hết lượt và CLI không ngắt được lượt (Esc,
-  `--interrupt` bị từ chối), nên tin tới worker qua lần `check --peek` kế tiếp mà spec đòi (§ 2).
-  Tin gấp mà `worker-read --source transcript` cho thấy worker chưa `check --peek` trong vài phút
+  manifest đã duyệt thì hỏi lại, § 2; worker rà chỉ-đọc cho câu hỏi thì không cần). Tin `send` tới
+  worker Chat đang trong lượt: ngắt lượt đó hay nằm Queued tới lần `check --peek` kế tiếp mà spec
+  đòi (§ 2) là tuỳ bản Orca (`~/.claude/knowledge/orca.md`); khung chat của worker cho thấy lượt
+  mới, `worker-read --source transcript` thì không. Tin gấp mà worker không làm theo trong vài phút
   (đang chạy một lệnh dài, hoặc spec giao trước khi có câu kiểm hộp thư) → coordinator tự
   `worker-stop`, rồi `worker-start --spec-file` mới gồm spec cũ, nội dung tin và câu kiểm hộp thư,
   cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. Không có việc kế tiếp →

@@ -2,7 +2,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
@@ -76,6 +76,15 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/answer-first.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|MultiEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/secret-file-guard.cjs\""
           }
         ]
       },

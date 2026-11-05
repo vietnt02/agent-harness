@@ -719,6 +719,21 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.notEqual(call('Read', { file_path: path.join(repo, 'README.md') }), '');
     });
 
+    await t.test('a Người làm line opens ssh by the command, its host, a list or `*`; a wrong quote or place does not', () => {
+      const note = path.join(notesDir, 'd', 'n.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'ssh vào web1 rồi tự check nhé' } })}\n`);
+      const threeReads = (place, quote = 'ssh vào web1 rồi tự check') => {
+        turn();
+        fs.writeFileSync(note, `---\nsession: ${session()}\nstatus: open\n---\n## Đang có hiệu lực\n- Người làm: Claude — ${place} — "${quote}"\n`);
+        return [1, 2, 3].map((i) => call('Bash', { command: `ssh deploy@web1:22 docker logs app --tail ${i}` }));
+      };
+      for (const place of ['ssh', 'web1', 'repo_a, web1', '*']) assert.deepEqual(threeReads(place), ['', '', ''], place);
+      assert.notEqual(threeReads('web2')[2], '');
+      assert.notEqual(threeReads('ssh', 'câu này không có trong phiên')[2], '');
+      fs.rmSync(note);
+    });
+
     await t.test('a new turn starts the count again', () => {
       turn();
       assert.equal(call('Bash', { command: 'cat repos/app/x' }), '');
@@ -1032,7 +1047,19 @@ test('worker-start-receipt: only a dispatch the command runs is read back', () =
   assert.equal(receipt.dispatches(`git commit -m "docs: \\\`orca orchestration ${ws}\\\`"`), false);
 });
 
-test('worker-start-receipt: a send to a running worker reminds that the message is queued', () => {
+test('dispatch-split-guard: a codex or claude worker needs the user\'s pick; Gemini and retries pass', () => {
+  const g = dispatchSplitGuard;
+  const ws = 'orca orchestration ' + 'worker' + '-start --spec-file s.md';
+  const pick = (c) => g.unnamedNonGemini(c, g.workerStarts(c));
+  assert.equal(pick(`${ws} --agent codex --model gpt-luna`), 'codex');
+  assert.equal(pick(`${ws} --agent=claude --model sonnet`), 'claude');
+  assert.equal(pick(`# Model: tác vụ phức tạp\n${ws} --agent codex --model gpt-sol`), 'codex');
+  assert.equal(pick(`# Model: user chỉ định gpt-sol\n${ws} --agent codex --model gpt-sol`), '');
+  assert.equal(pick(`${ws} --agent antigravity --model gemini-3.8-flash --effort high`), '');
+  assert.equal(pick(`${ws} --agent codex --retry-of ctx_1`), '');
+});
+
+test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
   const lines = (c) => receipt.sendLines(c, (d) => states[d]);
@@ -1075,5 +1102,85 @@ test('coordinator-read-guard: parallel PreToolUse processes let only LIMIT reads
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(path.join(os.tmpdir(), 'claude-coordinator-reads', session), { recursive: true, force: true });
+  }
+});
+
+test('secret-file-guard: a dotenv used without printing passes; printing it or a key is denied', () => {
+  const guard = require('../claude/hooks/secret-file-guard.cjs');
+  // A stand-in for AgentKit's checkPrivacy: flags every secret-looking path it is shown.
+  const checker = {
+    checkPrivacy: ({ toolInput }) => {
+      const text = toolInput.command || toolInput.file_path || '';
+      const paths = (text.match(/[^\s"'=<>]*(\.env[\w.]*|id_ed25519|\.pem)\b/g) || []).filter((p) => !/\.example$/.test(p));
+      return paths.length ? { blocked: true, accesses: paths.map((filePath) => ({ filePath })) } : { blocked: false };
+    },
+  };
+  const userTexts = () => ['cho đọc file env nhé'];
+  for (const opts of [{ checker, userTexts }, { checker: null, userTexts }]) {
+    const run = (tool_name, x) =>
+      guard.decide({ tool_name, tool_input: tool_name === 'Bash' ? { command: x } : { file_path: x }, transcript_path: '/t' }, opts);
+    for (const cmd of [
+      'source .env && psql -c "select 1"',
+      'set -a; . ./.env; set +a; node app.js',
+      'docker compose --env-file .env up -d',
+      'node --env-file=.env x.js',
+      'test -f .env && ls -la .env',
+      'grep -q DB_URL .env',
+      'grep -c KEY .env',
+      'cut -d= -f1 .env',
+      'echo "A=1" >> .env',
+      'wc -l local.env',
+      'cp .env.example .env',
+      'cat .env # secret-ok: "cho đọc file env nhé"',
+      'ls -la',
+    ]) assert.equal(run('Bash', cmd), '', cmd);
+    for (const cmd of [
+      'cat .env',
+      'grep DB_URL .env',
+      'cat .env | wc -l',
+      'sort < .env',
+      'cut -f2 -d= .env',
+      'cat .env # secret-ok: "không ai nói câu này"',
+      'cat k/server.pem',
+    ]) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
+    assert.match(run('Read', '.env'), /secret-file-guard/);
+    assert.match(run('Edit', '.env'), /secret-file-guard/);
+    assert.equal(run('Write', '.env'), '');
+    assert.equal(run('Read', 'src/app.js'), '');
+  }
+  // A command the checker cannot read stays denied, with its reason.
+  const opaque = { checkPrivacy: () => ({ blocked: true, uninspectable: true, accesses: [], reason: 'eval of a variable' }) };
+  assert.match(guard.decide({ tool_name: 'Bash', tool_input: { command: 'eval "$X"' } }, { checker: opaque, userTexts }), /eval of a variable/);
+});
+
+test('session-notes: the edit that closes this session\'s note orders the kaizen summary', () => {
+  const notes = require('../claude/hooks/session-notes.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'note-close-'));
+  const file = path.join(tmp, 'n.md');
+  const own = [{ file }];
+  const body = (status) => `---\nsession: s1\nstatus: ${status}\nscope: x\n---\n`;
+  const edit = (tool_name, tool_input) => notes.closedNote({ tool_name, tool_input: { file_path: file, ...tool_input } }, own);
+  try {
+    fs.writeFileSync(file, body('done'));
+    assert.equal(edit('Edit', { old_string: 'status: open', new_string: 'status: done' }), file);
+    assert.equal(edit('Write', { content: body('done') }), file);
+    assert.equal(edit('MultiEdit', { edits: [{ old_string: 'a', new_string: 'b' }, { old_string: 'status: open', new_string: 'status: done' }] }), file);
+    // Not a close: another edit of a done note, another file, or the file on disk still open.
+    assert.equal(edit('Edit', { old_string: 'status: done\nscope: x', new_string: 'status: done\nscope: y' }), '');
+    assert.equal(notes.closedNote({ tool_name: 'Edit', tool_input: { file_path: path.join(tmp, 'other.md'), old_string: 'status: open', new_string: 'status: done' } }, own), '');
+    fs.writeFileSync(file, body('open'));
+    assert.equal(edit('Edit', { old_string: 'status: open', new_string: 'status: done' }), '');
+    assert.match(notes.kaizenReminder(file, '/p/s1.jsonl'), /\/p\/s1\.jsonl, not your memory/);
+    // A note this session wrote without its id on the session: line is named; its own note or a done one is not.
+    const write = (f) => ({ tool_name: 'Write', tool_input: { file_path: f } });
+    const other = path.join(tmp, 'other.md');
+    fs.writeFileSync(other, body('open').replace('s1', 'current'));
+    assert.equal(notes.strayNote(write(other), own, tmp), other);
+    assert.equal(notes.strayNote(write(file), own, tmp), '');
+    fs.writeFileSync(other, body('done'));
+    assert.equal(notes.strayNote(write(other), own, tmp), '');
+    assert.equal(notes.strayNote(write(path.join(os.tmpdir(), 'elsewhere.md')), own, tmp), '');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

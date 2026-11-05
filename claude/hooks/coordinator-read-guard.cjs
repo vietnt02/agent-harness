@@ -32,9 +32,10 @@
  * Not counted either: a whole-file Read (no limit/offset) of the one file a project rules hook
  * makes Claude read before touching a checkout (`readsInstructions`): counting it left the two
  * hooks with no allowed path.
- * Passes: an Orca worker session, a subagent (`agent_id`), and a repo the session note names in a
- * `Người làm: Claude — <repo> — <evidence>` line (worker-default-guard's check: the user named
- * Claude for that repo, so reading it is Claude's work).
+ * Passes: an Orca worker session, a subagent (`agent_id`), and a read the session note covers with a
+ * `Người làm: Claude — <place> — <evidence>` line (claimedTarget, worker-default-guard's check: the
+ * user named Claude for it, so reading it is Claude's work); <place> is a repo or folder on the read
+ * path, a watched command word or its operand (`ssh`, a host), or `*` for the whole session.
  * Fails open on any error.
  */
 const fs = require('fs');
@@ -223,6 +224,26 @@ function markRan(sessionId, key) {
   }
 }
 
+// True when a `Người làm: Claude — <place> — "<the user's sentence>"` line of the session note covers
+// this read. <place> is `*` (the whole session), the repo or a folder on the read path, or, for a
+// watched command word, the word itself or one of its operands (`ssh web1 …`: `ssh`, `web1`).
+function claimedTarget(target, data, notesDir) {
+  const names = new Set(['*']);
+  if (path.isAbsolute(target)) {
+    const repo = repoOf(path.join(target, '_'));
+    if (repo) for (const n of repo.names) names.add(n);
+    for (const seg of target.split(/[\\/]/)) if (seg) names.add(seg);
+  } else {
+    names.add(target);
+    for (const raw of commands((data.tool_input || {}).command)) {
+      const words = program(raw);
+      if (words[0] !== target) continue;
+      for (const x of words.slice(1)) if (!x.startsWith('-')) names.add(x.replace(/^[^@\s]*@/, '').split(':')[0]);
+    }
+  }
+  return claimed(liveLines(data.session_id, notesDir), { names }, data.transcript_path);
+}
+
 // Why this call is blocked, or ''. Every event updates the turn's state.
 function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs = PENDING_MS } = {}) {
   if (!data.session_id) return '';
@@ -247,10 +268,7 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
   if (state.delegated || readsInstructions(data)) return '';
   const target = readTarget(data, list);
   if (!target) return '';
-  if (path.isAbsolute(target)) {
-    const repo = repoOf(path.join(target, '_'));
-    if (repo && claimed(liveLines(data.session_id, notesDir), repo, data.transcript_path)) return '';
-  }
+  if (claimedTarget(target, data, notesDir)) return '';
   if (isWorker(data.transcript_path)) return '';
   // Count and mark under one lock: parallel PreToolUse calls are separate processes.
   const count = withLock(sid, () => {
@@ -264,8 +282,9 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
       `this would be read ${count + 1} of a watched place (${target}) in this turn with no worker. ` +
       'The coordinator answers from what it has or one confirming read; a chain of reads goes to a ' +
       'read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): dispatch one now (no manifest: the ' +
-      'question opens a block for it) and tell the user it is checking. If the user named Claude for this repo, add the `Người làm: Claude — <repo> — "<their sentence>"` ' +
-      'line to the session note first.'
+      'question opens a block for it) and tell the user it is checking. If the user named Claude for this work, add ' +
+      '`Người làm: Claude — <place> — "<their sentence>"` under `## Đang có hiệu lực` of the session note first: <place> is the repo, ' +
+      'the command or host (`ssh`, a host name), several comma-separated, or `*` when they named Claude for the whole session.'
     );
   }
 }

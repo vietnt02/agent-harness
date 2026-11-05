@@ -17,13 +17,14 @@
  * Medium, not the High ntv-orca § 2 (Chọn model) requires. `--terminal` reuses a running agy.
  * A claude worker whose `--model` is not a bare alias (opus, sonnet, fable, haiku) is blocked unless the
  * command holds a `# Model: user chỉ định <bản>` line: a full id outside Orca's catalog drops the
- * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude worker at all needs a
- * `# Model: <lý do>` line, `--retry-of` exempt: a medium task goes to gemini-flash, then gpt-luna
- * (ntv-orca § 2, Chọn model), and the manifest's model column is written before that rule is in view.
+ * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude or codex worker at all
+ * needs that `# Model: user chỉ định <bản>` line, `--retry-of` exempt: workers are Gemini through
+ * antigravity unless the user names another (ntv-orca § 2, Chọn model); a rule naming only what a
+ * worker is not let the coordinator copy the codex example of the orchestration skill.
  * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
- * `orca orchestration check --peek` (a negated mention does not count) is blocked: a Chat worker sees a
- * coordinator's `send` only after its turn ends and the CLI cannot interrupt the turn, so the spec's
- * inbox check is the only way a correction lands mid-turn. A `--task` dispatch brings a Task whose
+ * `orca orchestration check --peek` (a negated mention does not count) is blocked: before Orca 1.4.249
+ * a Chat worker saw a coordinator's `send` only after its turn ended, and on another agent or version
+ * it may still, so the spec's inbox check is what makes a correction land mid-turn everywhere. A `--task` dispatch brings a Task whose
  * spec `task-create` brought; a spec this hook cannot read (`$var` path, stdin) is not judged.
  * Only a simple command that runs `worker-start` is a dispatch, not the words inside a quoted string.
  * `worker-start --help` is not a dispatch.
@@ -161,10 +162,15 @@ function unpinnedClaudeModel(command, { segs }) {
   return null;
 }
 
-// A `worker-start --agent claude` segment, not a retry, with no `# Model: <lý do>` line in the command.
-function claudeWithoutReason(command, { segs }) {
-  if (/^\s*#\s*Model:\s*\S/m.test(command)) return false;
-  return segs.some((seg) => /--agent[ =]['"]?claude\b/.test(seg) && !/--retry-of\b/.test(seg));
+// The agent of a `worker-start --agent claude|codex` segment, not a retry, when the command has no
+// `# Model: user chỉ định <bản>` line; else ''.
+function unnamedNonGemini(command, { segs }) {
+  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command)) return '';
+  for (const seg of segs) {
+    const m = seg.match(/--agent[ =]['"]?(claude|codex)\b/);
+    if (m && !/--retry-of\b/.test(seg)) return m[1];
+  }
+  return '';
 }
 
 // Text a worker will receive from this command: the command itself (comment lines of this hook's
@@ -390,7 +396,7 @@ function verdict(lines, input, ctx) {
   return null;
 }
 
-module.exports = { readsInbox, newSpecs, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
+module.exports = { unnamedNonGemini, readsInbox, newSpecs, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
 if (require.main !== module) return;
 
 let raw = '';
@@ -417,7 +423,7 @@ process.stdin.on('end', () => {
     const starts = workerStarts(command);
     if (newSpecs(command, cwd).some((spec) => spec !== null && !readsInbox(spec))) {
       process.stderr.write('dispatch-split-guard: the spec never asks the worker to read its inbox mid-turn. A Chat worker ' +
-        'sees a `send` only after its turn ends, and the CLI cannot interrupt the turn (ntv-orca § 2, § 3). Add to the spec: ' +
+        'gets a `send` mid-turn or only at its next `check --peek` depending on the Orca version (ntv-orca § 2, § 3). Add to the spec: ' +
         '"chạy `orca orchestration check --peek` trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của ' +
         'coordinator thì làm theo trước, tin đã làm theo thì bỏ qua khi thấy lại".\n');
       process.exit(2);
@@ -431,10 +437,11 @@ process.stdin.on('end', () => {
         '`Approve for me` mode. A version the user named: add a `# Model: user chỉ định <bản>` line.\n');
       process.exit(2);
     }
-    if (claudeWithoutReason(command, starts)) {
-      process.stderr.write('dispatch-split-guard: a claude worker needs a `# Model: <lý do>` line in the command. ' +
-        'A medium task goes to `gemini-flash`, and to `gpt-luna` only when flash is out of quota (ntv-orca § 2, Chọn model); ' +
-        'claude only when its column pick wins or the user named it.\n');
+    const agent = unnamedNonGemini(command, starts);
+    if (agent) {
+      process.stderr.write(`dispatch-split-guard: a ${agent} worker needs the user's pick on a \`# Model: user chỉ định <bản>\` ` +
+        'line. Workers are Gemini: `--agent antigravity --model gemini-argon --effort high` for a complex or research task, ' +
+        '`gemini-3.8-flash` for a quick one (ntv-orca § 2, Chọn model).\n');
       process.exit(2);
     }
     if (missingEffort(starts)) {

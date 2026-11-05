@@ -148,7 +148,9 @@ function claimed(lines, repo, transcript) {
     const m = line.match(ROLE_RE);
     if (!m) continue;
     const [name, ...rest] = m[1].split(/\s+[—–-]\s+/);
-    if (!repo.names.has(toSlash(name.trim().replace(/^`|`$/g, '')).replace(/\/$/, '').split('/').pop())) continue;
+    // One line may name several places, comma-separated (`repo_a, ssh`).
+    const names = name.split(',').map((n) => toSlash(n.trim().replace(/^`|`$/g, '')).replace(/\/$/, '').split('/').pop());
+    if (!names.some((n) => repo.names.has(n))) continue;
     const evidence = rest.join(' — ');
     const q = evidence.match(QUOTE_RE);
     if (q) {

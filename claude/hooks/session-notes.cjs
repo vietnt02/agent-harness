@@ -15,6 +15,8 @@
  *   `## Đang có hiệu lực` only if it approves, limits or decides; otherwise write nothing". The
  *   words also match a bare "ok", so the reminder never orders a write by itself.
  *   PostToolUse Bash with a note: a PR/MR merge/close/create or git push gets "rewrite the stale lines".
+ *   PostToolUse Edit|Write|MultiEdit that turns this session's note to `status: done`: the order to
+ *   sum up the session's kaizen from its transcript (closedNote, kaizenReminder).
  * Always exits 0: a broken note never blocks a session.
  */
 
@@ -92,7 +94,55 @@ function readNote(file) {
   return { text, head };
 }
 
-module.exports = { overCapView, readNote, cutLines };
+// The edit that turns one of this session's notes to `status: done` ends its work: that is when
+// kaizen is summed up (skills/ntv-kaizen), from the transcript rather than memory. Returns the note
+// file, or ''. Fires only on the edit that writes `status: done` (an Edit whose old text lacked
+// it, or a Write), and only when the file on disk now says done.
+const DONE_RE = /^status:\s*done\s*$/m;
+function closedNote(data, own) {
+  const tool = data.tool_name || '';
+  const input = data.tool_input || {};
+  if (!/^(Edit|Write|MultiEdit)$/.test(tool) || !input.file_path) return '';
+  const target = path.resolve(input.file_path);
+  const note = own.find((n) => path.resolve(n.file) === target);
+  if (!note) return '';
+  const edits = tool === 'MultiEdit' ? input.edits || [] : [input];
+  const wrote = edits.some((e) =>
+    tool === 'Write' ? DONE_RE.test(e.content || '') : DONE_RE.test(e.new_string || '') && !DONE_RE.test(e.old_string || '')
+  );
+  if (!wrote) return '';
+  try {
+    return readNote(note.file).head.status === 'done' ? note.file : '';
+  } catch {
+    return '';
+  }
+}
+
+function kaizenReminder(file, transcript) {
+  return (
+    `The session note ${file} is now \`status: done\`: before the final report, sum up this session's kaizen ` +
+    '(skills/ntv-kaizen § Record a mistake). Read the transcript' +
+    (transcript ? ` ${transcript}` : ' (the session .jsonl)') +
+    ', not your memory: every correction from Viet, every mistake you caught and fixed yourself (a secret printed, ' +
+    'a wrong dispatch, a claim later found wrong) and every harness defect met (a hook, rule or skill that misfired). ' +
+    'In a kaizen session fix them there instead (ntv-kaizen step 5). The report says how many files were written, or that the transcript held none.'
+  );
+}
+
+// An open note under ROOT this call wrote whose `session:` line lacks this session's id, or ''.
+function strayNote(data, own, root = ROOT) {
+  const f = (data.tool_input || {}).file_path;
+  if (!f || !/^(Edit|Write|MultiEdit)$/.test(data.tool_name || '') || !f.endsWith('.md')) return '';
+  const file = path.resolve(f);
+  if (!file.startsWith(path.resolve(root) + path.sep) || own.some((n) => path.resolve(n.file) === file)) return '';
+  try {
+    return readNote(file).head.status === 'done' ? '' : file;
+  } catch {
+    return '';
+  }
+}
+
+module.exports = { overCapView, readNote, cutLines, closedNote, kaizenReminder, strayNote };
 if (require.main !== module) return;
 
 try {
@@ -155,6 +205,17 @@ try {
           'rewrite "## Đang làm" and fold the closed topic into one "## Đã xong" line. An opinion, question or acknowledgement: write nothing.'
       );
     }
+    const closed = data.hook_event_name === 'PostToolUse' && closedNote(data, own);
+    if (closed) {
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext: kaizenReminder(closed, data.transcript_path),
+          },
+        })
+      );
+    }
     if (data.hook_event_name === 'PostToolUse' && STATE_RE.test(dropHeredocs((data.tool_input || {}).command || ''))) {
       console.log(
         JSON.stringify({
@@ -165,6 +226,20 @@ try {
         })
       );
     }
+  }
+
+  // A note written in this session whose `session:` line lacks this id is invisible to every hook
+  // that reads the note (approvals, `Người làm` lines): say so right after the write.
+  const stray = data.hook_event_name === 'PostToolUse' && id && strayNote(data, own);
+  if (stray) {
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: `The note ${stray} has no "${id}" on its session: line, so no hook reads its approvals or \`Người làm\` lines in this session. Put this id there (append it to take the note over).`,
+        },
+      })
+    );
   }
 
   if (id && own.length === 0 && data.hook_event_name === 'UserPromptSubmit' && DECISION_RE.test(data.prompt || '')) {
