@@ -88,7 +88,8 @@ ask one question; never report it bare (in `~/.claude`: per `ntv-kaizen`). A **n
 goes in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: an all-of-it word answering
-the ask just sent ("làm hết", "báo khi xong"); "làm đến end" with bypass permissions on; a plan
+the ask just sent ("làm hết", "báo khi xong"), over the whole scope I set, not only what that ask
+named; "làm đến end" with bypass permissions on; a plan
 set to `status: approved` (`ntv-autopilot`).
 
 ## Irreversible actions

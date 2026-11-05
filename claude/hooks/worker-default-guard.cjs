@@ -79,7 +79,7 @@ function repoOf(file) {
   return { root, names, common: commonReal };
 }
 
-// The texts of the transcript's user prompts (not tool results, not meta lines), in order.
+// The texts of the transcript's user prompts (not tool results, meta lines or notifications), in order.
 function userTexts(transcript, maxBytes = Infinity) {
   let raw = '';
   try {
@@ -98,6 +98,11 @@ function userTexts(transcript, maxBytes = Infinity) {
     let d;
     try { d = JSON.parse(line); } catch { continue; }
     if (d.type !== 'user' || d.isMeta || !d.message) continue;
+    // A task notification or a message from another session is typed into the transcript as a user
+    // entry, with `origin.kind` other than `human`: its text is Claude's or an agent's, never Viet's.
+    if (d.origin && typeof d.origin === 'object' && d.origin.kind && d.origin.kind !== 'human') continue;
+    if (d.isCompactSummary) continue; // Claude wrote it
+
     const c = d.message.content;
     const text = typeof c === 'string' ? c
       : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text || '').join('\n') : '';
@@ -142,13 +147,15 @@ function liveLines(sessionId, notesDir = NOTES_DIR) {
 }
 
 // True when one role line names this repo with evidence that holds.
-function claimed(lines, repo, transcript) {
+function claimed(lines, repo, transcript, { quoteOnly = false } = {}) {
   let texts = null;
   for (const line of lines) {
     const m = line.match(ROLE_RE);
     if (!m) continue;
     const [name, ...rest] = m[1].split(/\s+[—–-]\s+/);
-    if (!repo.names.has(toSlash(name.trim().replace(/^`|`$/g, '')).replace(/\/$/, '').split('/').pop())) continue;
+    // One line may name several places, comma-separated (`repo_a, ssh`).
+    const names = name.split(',').map((n) => toSlash(n.trim().replace(/^`|`$/g, '')).replace(/\/$/, '').split('/').pop());
+    if (!names.some((n) => repo.names.has(n))) continue;
     const evidence = rest.join(' — ');
     const q = evidence.match(QUOTE_RE);
     if (q) {
@@ -157,7 +164,7 @@ function claimed(lines, repo, transcript) {
       if (texts.some((t) => t.includes(quote))) return true;
       continue;
     }
-    if (VALUE_RE.test(evidence)) return true;
+    if (!quoteOnly && VALUE_RE.test(evidence)) return true;
   }
   return false;
 }

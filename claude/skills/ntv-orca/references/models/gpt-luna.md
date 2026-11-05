@@ -10,7 +10,7 @@ source: 2 phiên (13 commit, 3 PR) + kinh nghiệm user
 
 # gpt-luna
 
-Dự phòng task nhỏ–vừa khi `gemini-flash` hết quota (`SKILL.md` § 2). Spawn: `--agent codex --model <slug> --effort max` (`~/.codex/models_cache.json`).
+Chỉ dùng khi user chỉ định (`SKILL.md` § 2). Spawn: `--agent codex --model <slug> --effort max` (`~/.codex/models_cache.json`).
 
 ## Giao gì / Không giao gì
 

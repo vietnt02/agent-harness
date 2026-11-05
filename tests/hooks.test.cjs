@@ -719,6 +719,30 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       assert.notEqual(call('Read', { file_path: path.join(repo, 'README.md') }), '');
     });
 
+    await t.test('a Người làm line opens ssh by the command, its host, a list or `*`; a wrong quote or place does not', () => {
+      const note = path.join(notesDir, 'd', 'n.md');
+      fs.mkdirSync(path.dirname(note), { recursive: true });
+      fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'ssh vào web1 rồi tự check nhé' } })}\n`);
+      const threeReads = (place, quote = 'ssh vào web1 rồi tự check') => {
+        turn();
+        fs.writeFileSync(note, `---\nsession: ${session()}\nstatus: open\n---\n## Đang có hiệu lực\n- Người làm: Claude — ${place} — "${quote}"\n`);
+        return [1, 2, 3].map((i) => call('Bash', { command: `ssh deploy@web1:22 docker logs app --tail ${i}` }));
+      };
+      for (const place of ['ssh', 'web1', 'repo_a, web1', '*']) assert.deepEqual(threeReads(place), ['', '', ''], place);
+      assert.notEqual(threeReads('web2')[2], '');
+      assert.notEqual(threeReads('ssh', 'câu này không có trong phiên')[2], '');
+      assert.notEqual(threeReads('docker', 'ssh vào web1 rồi tự check')[2], '', 'only the host operand counts');
+      // A `→` value line is no quote: it never opens a read, `*` included.
+      turn();
+      fs.writeFileSync(note, `---\nsession: ${session()}\nstatus: open\n---\n## Đang có hiệu lực\n- Người làm: Claude — * — Viet → Claude\n`);
+      assert.notEqual([1, 2, 3].map((i) => call('Bash', { command: `ssh web1 uptime ${i}` }))[2], '');
+      // ssh option values are not the host.
+      turn();
+      fs.writeFileSync(note, `---\nsession: ${session()}\nstatus: open\n---\n## Đang có hiệu lực\n- Người làm: Claude — key — "ssh vào web1 rồi tự check"\n`);
+      assert.notEqual([1, 2, 3].map((i) => call('Bash', { command: `ssh -i key -p 22 web1 uptime ${i}` }))[2], '');
+      fs.rmSync(note);
+    });
+
     await t.test('a new turn starts the count again', () => {
       turn();
       assert.equal(call('Bash', { command: 'cat repos/app/x' }), '');
@@ -1032,7 +1056,22 @@ test('worker-start-receipt: only a dispatch the command runs is read back', () =
   assert.equal(receipt.dispatches(`git commit -m "docs: \\\`orca orchestration ${ws}\\\`"`), false);
 });
 
-test('worker-start-receipt: a send to a running worker reminds that the message is queued', () => {
+test('dispatch-split-guard: a codex or claude worker needs the user\'s pick; Gemini and a plain retry pass', () => {
+  const g = dispatchSplitGuard;
+  const ws = 'orca orchestration ' + 'worker' + '-start --spec-file s.md';
+  const pick = (c) => g.unnamedNonGemini(c, g.workerStarts(c));
+  assert.equal(pick(`${ws} --agent codex --model gpt-luna`), 'codex');
+  assert.equal(pick(`${ws} --agent=claude --model sonnet`), 'claude');
+  assert.equal(pick(`# Model: tác vụ phức tạp\n${ws} --agent codex --model gpt-sol`), 'codex');
+  assert.equal(pick(`# Model: user chỉ định gpt-sol\n${ws} --agent codex --model gpt-sol`), '');
+  assert.equal(pick(`${ws} --agent antigravity --model gemini-3.8-flash --effort high`), '');
+  assert.equal(pick(`${ws} --agent codex --retry-of ctx_1`), 'codex', 'a retry that switches agent');
+  assert.equal(pick('orca orchestration worker-start --retry-of ctx_1'), '');
+  assert.equal(pick(`${ws} --agent  codex`), 'codex', 'two spaces');
+  assert.equal(pick(`# Model: user chỉ định gpt-sol`.normalize('NFD') + `\n${ws} --agent codex`), '', 'NFD');
+});
+
+test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
   const lines = (c) => receipt.sendLines(c, (d) => states[d]);
@@ -1075,5 +1114,101 @@ test('coordinator-read-guard: parallel PreToolUse processes let only LIMIT reads
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(path.join(os.tmpdir(), 'claude-coordinator-reads', session), { recursive: true, force: true });
+  }
+});
+
+test('secret-file-guard: a dotenv used without printing passes; printing it or a key is denied', () => {
+  const guard = require('../claude/hooks/secret-file-guard.cjs');
+  const E = '.e' + 'nv';
+  // A stand-in for AgentKit's checkPrivacy: flags every secret-looking path it is shown.
+  const checker = {
+    checkPrivacy: ({ toolInput }) => {
+      const text = toolInput.command || toolInput.file_path || '';
+      const paths = (text.match(/[^\s"'<>]*(\.env[\w.]*|id_ed25519|\.pem)\b/g) || []).filter((p) => !/\.example$/.test(p));
+      return paths.length ? { blocked: true, accesses: paths.map((filePath) => ({ filePath })) } : { blocked: false };
+    },
+  };
+  const userTexts = () => ['cho đọc file env nhé', 'ok'];
+  const run = (tool_name, x, opts = { checker, userTexts }) =>
+    guard.decide({ tool_name, tool_input: tool_name === 'Bash' ? { command: x } : { file_path: x }, transcript_path: '/t' }, opts);
+  for (const cmd of [
+    `source ${E} && psql -c "select 1"`, `set -a; . ./${E}; set +a; node app.js`, `docker compose --env-file ${E} up -d`,
+    `node --env-file=${E} x.js`, `test -f ${E} && ls -la ${E}`, `grep -q DB_URL ${E}`, `grep -c KEY ${E}`, `grep --count K ${E}`,
+    `grep -L K ${E}`, `echo "A=1" >> ${E}`, `echo A=1 >${E}`, `wc -l local${E}`, `cp ${E}.example ${E}`, `ln -s ../${E} ${E}`,
+    `git ls-files ${E}`, `diff -q ${E} b`, `cmp -s ${E} b`, `sha256sum ${E}`,
+    `docker compose -p myproj --env-file ${E} up -d`, `git -C repo ls-files ${E}`, `source ${E} && make | tail -5`,
+    `cat ${E} # secret-ok: "cho đọc file env nhé"`, 'ls -la',
+  ]) assert.equal(run('Bash', cmd), '', cmd);
+  for (const cmd of [
+    `cat ${E}`, `cat<${E}`, `sort < ${E}`, `cat ${E}>out.txt`, `cat ${E} | wc -l`, `f=${E}; cat $f`,
+    `grep DB_URL ${E}`, `grep -esecret ${E}`, `grep -- -c ${E}`, `cut -d= -f1 ${E}`, `cut -d= -f1 --complement ${E}`,
+    `cp ${E} /dev/stdout`, `ln -s ${E} n.txt`, `wc --files0-from=${E}`, `set -x; source ${E}`, `bash -x -c "source ${E}"`,
+    `bash -c "cat ${E}"`, `docker compose --env-file ${E} config`, `node --env-file=${E} -p process.env`,
+    `docker run --env-file ${E} alpine env`, `git diff ${E}`,
+    `cat <>${E}`, `cp ${E} ${E}.example`, `docker compose --env-file ${E} convert`, `uv run --env-file ${E} python -c x`,
+    `cat $(ls ${E})`, `ls ${E} | xargs cat`, `set -e -x; source ${E}`, `set -v; source ${E}`, `bash -o xtrace -c "source ${E}"`,
+    `grep -e -c ${E}`,
+    `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`, 'cat k/server.pem',
+  ]) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
+  assert.match(run('Read', E), /secret-file-guard/);
+  assert.match(run('Edit', E), /secret-file-guard/);
+  assert.equal(run('Write', E), '');
+  assert.equal(run('Read', 'src/app.js'), '');
+  // No checker, or one that throws: fail closed, even a quiet use is denied, and the reason says why.
+  for (const broken of [null, { checkPrivacy: () => { throw new Error('moved'); } }]) {
+    assert.match(run('Bash', `source ${E}`, { checker: broken, userTexts }), /did not load or failed/);
+    assert.equal(run('Bash', `cat ${E} # secret-ok: "cho đọc file env nhé"`, { checker: broken, userTexts }), '');
+    assert.equal(run('Bash', 'ls -la', { checker: broken, userTexts }), '');
+  }
+  // A command the checker cannot read stays denied, with its reason.
+  const opaque = { checkPrivacy: () => ({ blocked: true, uninspectable: true, accesses: [], reason: 'eval of a variable' }) };
+  assert.match(run('Bash', 'eval "$X"', { checker: opaque, userTexts }), /eval of a variable/);
+});
+
+test('worker-default-guard: userTexts skips entries no human typed (task notifications, other sessions)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'user-texts-'));
+  const t = path.join(tmp, 't.jsonl');
+  const line = (content, origin) => JSON.stringify({ type: 'user', message: { role: 'user', content }, ...(origin ? { origin } : {}) });
+  try {
+    fs.writeFileSync(t, [line('câu của Viet'), line('gõ tay', { kind: 'human' }), line('Agent finished: chạy xong', { kind: 'task-notification' })].join('\n'));
+    assert.deepEqual(workerDefaultGuard.userTexts(t), ['câu của Viet', 'gõ tay']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('session-notes: once every note of the session is done, the kaizen summary is ordered once', () => {
+  const notes = require('../claude/hooks/session-notes.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'note-close-'));
+  const marks = path.join(tmp, 'marks');
+  const file = path.join(tmp, 'n.md');
+  const second = path.join(tmp, 'm.md');
+  const body = (status, eol = '\n') => ['---', 'session: s1', `status: ${status}`, 'scope: x', '---', ''].join(eol);
+  try {
+    fs.writeFileSync(file, body('open'));
+    assert.deepEqual(notes.closedNote([{ file }], 's1', marks), []);
+    // Closed however it was written: CRLF and a quoted value read as done.
+    fs.writeFileSync(file, body('"done"', '\r\n'));
+    fs.writeFileSync(second, body('open'));
+    assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [], 'one note still open');
+    fs.writeFileSync(second, body('done # wrapped up'));
+    assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [file, second].sort());
+    assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [], 'only once per session');
+    assert.deepEqual(notes.closedNote([{ file }], 's2', marks), [file], 'another session has its own mark');
+    assert.match(notes.kaizenReminder([file], '/p/s1.jsonl'), /\/p\/s1\.jsonl, not your memory/);
+    // A note this session wrote without its id on the session: line is named; its own note, a done
+    // one, a file with no front matter or one outside the notes folder is not.
+    const write = (f) => ({ tool_name: 'Write', tool_input: { file_path: f } });
+    const other = path.join(tmp, 'other.md');
+    fs.writeFileSync(other, body('open').replace('s1', 'current'));
+    assert.equal(notes.strayNote(write(other), [{ file }], tmp), other);
+    assert.equal(notes.strayNote(write(file), [{ file }], tmp), '');
+    fs.writeFileSync(other, body('done'));
+    assert.equal(notes.strayNote(write(other), [{ file }], tmp), '');
+    fs.writeFileSync(other, '# just a heading\n');
+    assert.equal(notes.strayNote(write(other), [{ file }], tmp), '');
+    assert.equal(notes.strayNote(write(path.join(os.tmpdir(), 'elsewhere.md')), [{ file }], tmp), '');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
