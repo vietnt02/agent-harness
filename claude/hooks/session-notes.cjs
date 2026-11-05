@@ -90,7 +90,11 @@ function readNote(file) {
   const m = text.replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---/);
   for (const line of m ? m[1].split('\n') : []) {
     const i = line.indexOf(':');
-    if (i > 0) head[line.slice(0, i).trim()] = line.slice(i + 1).replace(/\s+#.*$/, '').trim().replace(/^(["'])(.*)\1$/, '$2');
+    if (i <= 0) continue;
+    const key = line.slice(0, i).trim();
+    // Only `status:` drops a trailing comment: `scope: review PR #18` keeps its `#`.
+    const value = key === 'status' ? line.slice(i + 1).replace(/\s+#.*$/, '') : line.slice(i + 1);
+    head[key] = value.trim().replace(/^(["'])(.*)\1$/, '$2');
   }
   return { text, head, front: Boolean(m) };
 }
@@ -100,8 +104,8 @@ const sessionIds = (head) => (head.session || '').split(/[\s,[\]"']+/).filter(Bo
 
 // The session's work ends when every note it owns says `status: done`, however that was written
 // (Edit, Write, a Bash `sed`): kaizen is summed up then (skills/ntv-kaizen), from the transcript
-// rather than memory. Returns the closed note files the first time this holds in a session, else
-// []; a mark file per session keeps it to once.
+// rather than memory. Returns the closed note files the first time this holds for that set of notes,
+// else []; a mark per session and note set keeps it to once (a new topic's note closing reminds again).
 const MARK_DIR = path.join(os.tmpdir(), 'claude-kaizen-reminded');
 function closedNote(own, id, markDir = MARK_DIR) {
   if (!id || !own.length) return [];
@@ -113,11 +117,17 @@ function closedNote(own, id, markDir = MARK_DIR) {
     }
   });
   if (!notes.every((n) => n.done)) return [];
-  const mark = path.join(markDir, id.replace(/[^\w-]/g, '_'));
-  if (fs.existsSync(mark)) return [];
-  fs.mkdirSync(markDir, { recursive: true });
-  fs.writeFileSync(mark, '');
-  return notes.map((n) => n.file);
+  const files = notes.map((n) => n.file).sort();
+  const key = require('crypto').createHash('sha1').update(`${id}\n${files.join('\n')}`).digest('hex');
+  const mark = path.join(markDir, key);
+  try {
+    if (fs.existsSync(mark)) return [];
+    fs.mkdirSync(markDir, { recursive: true });
+    fs.writeFileSync(mark, '');
+  } catch {
+    // no mark: remind anyway, a second reminder costs less than none
+  }
+  return files;
 }
 
 function kaizenReminder(files, transcript) {

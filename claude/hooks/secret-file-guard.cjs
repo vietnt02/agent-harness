@@ -42,7 +42,12 @@ const SECRETISH = /(^|[\s/"'=<>])(\.env(\.[\w.-]+)?|[\w.-]+\.env|id_(rsa|dsa|ecd
 const QUIET = new Set(['source', '.', 'test', '[', 'ls', 'stat', 'chmod', 'touch', 'rm', 'sha256sum', 'shasum', 'md5', 'md5sum']);
 const COPY = new Set(['cp', 'mv', 'ln']);
 const GIT_QUIET = new Set(['check-ignore', 'ls-files', 'rm']);
-const PRINTS = /^(config|env|printenv|set|export|-p|-e|-pe|--print|--eval)$|process\.env/;
+// `--env-file` passes only for a program that runs a service or a script file, never one asked to
+// print or to run an inline script: `docker compose … <one of these>`, `node --env-file=<f> <file>`.
+const COMPOSE_QUIET = new Set(['up', 'down', 'stop', 'start', 'restart', 'pull', 'build', 'ps', 'rm', 'create']);
+const NODE_PRINTS = /^(-p|-e|-pe|--print|--eval|-i|--interactive)$/;
+// Shell options that echo what the shell reads or runs.
+const ECHOES = /(^|[\s;&|(])set\s+(\S+\s+)*?(-[a-z]*[xv]|-o\s+(xtrace|verbose))\b|SHELLOPTS=|(^|[\s;&|(])(\S*\/)?(ba|z|da|k)?sh\s+(\S+\s+)*?(-[a-z]*[xv][a-z]*|-o\s+(xtrace|verbose))(\s|$)/;
 const APPROVAL = /#\s*secret-ok:\s*"([^"\n]{8,})"/;
 
 // The file a word names: `--env-file=.env` and `f=.env` name `.env`.
@@ -93,9 +98,13 @@ function grepQuiet(args) {
     if (a === '--') return false;
     if (/^--(quiet|silent|count|files-with(out)?-match(es)?)$/.test(a)) return true;
     if (/^--/.test(a) || !/^-[A-Za-z]/.test(a)) continue;
-    for (const c of a.slice(1)) {
-      if ('qclL'.includes(c)) return true;
-      if (c === 'e' || c === 'f') break; // the rest of the word, or the next word, is a pattern
+    const letters = a.slice(1);
+    for (let k = 0; k < letters.length; k++) {
+      if ('qclL'.includes(letters[k])) return true;
+      if (letters[k] === 'e' || letters[k] === 'f') {
+        if (k === letters.length - 1) i++; // `-e <pattern>`: the next word is the pattern
+        break; // `-e<pattern>`: the rest of this word is
+      }
     }
   }
   return false;
@@ -114,13 +123,14 @@ function quietCommand(words, raw) {
     if (/[<>]/.test(w) && !/^\d*[<>]+&?$/.test(w)) {
       // Inside one word: a dotenv only after `>` is written to; before `>` (`.env>x`) or after `<` it is read.
       const ps = pieces(w);
-      for (let k = 0; k < ps.length; k += 2) if (plainDotenv(ps[k]) && !(k > 0 && />/.test(ps[k - 1]))) return false;
+      // `<>` opens the file for reading too.
+      for (let k = 0; k < ps.length; k += 2) if (plainDotenv(ps[k]) && !(k > 0 && /^\d*>{1,2}&?$/.test(ps[k - 1]))) return false;
       continue;
     }
     if (!isDotenv(w)) continue;
     if (/^--env-file=/.test(w) || prev === '--env-file') {
-      if (args.some((a) => PRINTS.test(a))) return false;
-      continue;
+      if (envFileQuiet(name, args)) continue;
+      return false;
     }
     if (/^\d*>{1,2}$/.test(prev)) continue; // `> .env`: written to, not read
     if (QUIET.has(name)) continue;
@@ -128,19 +138,65 @@ function quietCommand(words, raw) {
     if (name === 'grep' && grepQuiet(args)) continue;
     if (name === 'cmp' && args.includes('-s')) continue;
     if (name === 'diff' && args.some((a) => /^(-q|--brief)$/.test(a))) continue;
-    if (name === 'git' && GIT_QUIET.has(args.find((a) => !a.startsWith('-')))) continue;
-    if (COPY.has(name) && args.filter((a) => !a.startsWith('-')).every(envLike)) continue;
+    if (name === 'git' && GIT_QUIET.has(gitSubcommand(args))) continue;
+    if (COPY.has(name) && copyQuiet(args)) continue;
     return false;
   }
   return true;
 }
 
+// `docker compose [opts] <service verb>` or `node [opts] --env-file=<f> <script file>`.
+function envFileQuiet(name, args) {
+  if (name === 'docker' && args[0] === 'compose') return COMPOSE_QUIET.has(operandAfterOptions(args.slice(1)));
+  if (name === 'node') {
+    const ops = args.filter((a) => !a.startsWith('-'));
+    return !args.some((a) => NODE_PRINTS.test(a)) && ops.length > 0 && /\.(c|m)?js$|\.ts$/.test(ops[0]);
+  }
+  return false;
+}
+
+// The first word that is neither an option nor the value of one (`-p proj --env-file f up`: `up`).
+function operandAfterOptions(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') return args[i + 1] || '';
+    if (/^--[\w-]+=/.test(a)) continue;
+    if (/^-/.test(a)) { if (!/^--?(d|detach|build|wait|no-deps|force-recreate|remove-orphans|quiet-pull|pull)$/.test(a)) i++; continue; }
+    return a;
+  }
+  return '';
+}
+
+// `git [-C dir] [-c k=v] <subcommand>`.
+function gitSubcommand(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (/^-[Cc]$/.test(args[i])) { i++; continue; }
+    if (!args[i].startsWith('-')) return args[i];
+  }
+  return '';
+}
+
+// A copy or link that only lays a dotenv down from its template or another dotenv path
+// (`cp .env.example .env`, `ln -s ../.env .env`): the destination is a dotenv, never a template
+// or another file a later read would not be guarded on.
+function copyQuiet(args) {
+  const ops = args.filter((a) => !a.startsWith('-'));
+  if (ops.length !== 2) return false;
+  return envLike(ops[0]) && plainDotenv(ops[1]);
+}
+
 // True when every simple command naming a dotenv uses it without printing its values.
 function quietUse(command) {
-  if (/(^|[\s;&|])set\s+(-[a-z]*x|-o\s+xtrace)/.test(command) || /(^|[\s;&|(])(ba|z)?sh\s+-[a-z]*x/.test(command)) {
-    if (commands(command).some((ws) => ws.some(isDotenv))) return false; // xtrace echoes each assignment
-  }
-  for (const words of commands(command)) {
+  const all = commands(command);
+  const names = all.some((ws) => ws.some(isDotenv)) || /\.env\b/i.test(command);
+  if (!names) return true;
+  // xtrace or verbose echo what a sourced dotenv sets.
+  if (ECHOES.test(command)) return false;
+  // A quiet program still prints the file's name: `cat $(ls .env)`, `ls .env | xargs cat` turn it
+  // back into a read. A plain pipe is judged per command (`cat .env | wc` fails at `cat`).
+  if (/\bxargs\b/.test(command)) return false;
+  for (const sub of command.match(/\$\([^)]*\)|`[^`]*`|<\([^)]*\)/g) || []) if (/\.env\b/i.test(sub)) return false;
+  for (const words of all) {
     const inner = innerScript(program(words));
     if (inner !== null) {
       // `bash -c '<s>'`, `eval <s>`: the script is judged as a command; `-x` echoes it.

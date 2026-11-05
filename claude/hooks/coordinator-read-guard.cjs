@@ -244,7 +244,7 @@ function claimedTarget(target, data, list, notesDir) {
       const words = program(raw);
       if (words[0] !== target) continue;
       for (let i = 1; i < words.length; i++) {
-        if (words[i].startsWith('-')) { if (SSH_VALUE.test(words[i])) i++; continue; }
+        if (words[i].startsWith('-')) { if (target === 'ssh' && SSH_VALUE.test(words[i])) i++; continue; }
         names.add(words[i].replace(/^[^@\s]*@/, '').split(':')[0]);
         break;
       }

@@ -1136,6 +1136,7 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `node --env-file=${E} x.js`, `test -f ${E} && ls -la ${E}`, `grep -q DB_URL ${E}`, `grep -c KEY ${E}`, `grep --count K ${E}`,
     `grep -L K ${E}`, `echo "A=1" >> ${E}`, `echo A=1 >${E}`, `wc -l local${E}`, `cp ${E}.example ${E}`, `ln -s ../${E} ${E}`,
     `git ls-files ${E}`, `diff -q ${E} b`, `cmp -s ${E} b`, `sha256sum ${E}`,
+    `docker compose -p myproj --env-file ${E} up -d`, `git -C repo ls-files ${E}`, `source ${E} && make | tail -5`,
     `cat ${E} # secret-ok: "cho đọc file env nhé"`, 'ls -la',
   ]) assert.equal(run('Bash', cmd), '', cmd);
   for (const cmd of [
@@ -1144,6 +1145,9 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `cp ${E} /dev/stdout`, `ln -s ${E} n.txt`, `wc --files0-from=${E}`, `set -x; source ${E}`, `bash -x -c "source ${E}"`,
     `bash -c "cat ${E}"`, `docker compose --env-file ${E} config`, `node --env-file=${E} -p process.env`,
     `docker run --env-file ${E} alpine env`, `git diff ${E}`,
+    `cat <>${E}`, `cp ${E} ${E}.example`, `docker compose --env-file ${E} convert`, `uv run --env-file ${E} python -c x`,
+    `cat $(ls ${E})`, `ls ${E} | xargs cat`, `set -e -x; source ${E}`, `set -v; source ${E}`, `bash -o xtrace -c "source ${E}"`,
+    `grep -e -c ${E}`,
     `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`, 'cat k/server.pem',
   ]) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   assert.match(run('Read', E), /secret-file-guard/);
@@ -1188,7 +1192,7 @@ test('session-notes: once every note of the session is done, the kaizen summary 
     fs.writeFileSync(second, body('open'));
     assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [], 'one note still open');
     fs.writeFileSync(second, body('done # wrapped up'));
-    assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [file, second]);
+    assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [file, second].sort());
     assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [], 'only once per session');
     assert.deepEqual(notes.closedNote([{ file }], 's2', marks), [file], 'another session has its own mark');
     assert.match(notes.kaizenReminder([file], '/p/s1.jsonl'), /\/p\/s1\.jsonl, not your memory/);

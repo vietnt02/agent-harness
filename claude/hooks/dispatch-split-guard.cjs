@@ -153,9 +153,9 @@ function missingEffort({ cmd, segs }) {
 // The `--model` of a `worker-start --agent claude` segment that is not a bare alias, unless the
 // command names the user's pick on a `# Model: user chỉ định <bản>` line. A `$var` is not judged.
 function unpinnedClaudeModel(command, { segs }) {
-  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command)) return null;
+  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command.normalize('NFC'))) return null;
   for (const seg of segs) {
-    if (!/--agent[ =]['"]?claude\b/.test(seg)) continue;
+    if (!/--agent(?:\s+|=)['"]?claude\b/.test(seg)) continue;
     const m = seg.match(/--model[ =]['"]?([^\s'"]+)/);
     if (m && !m[1].startsWith('$') && !BARE_CLAUDE.test(m[1])) return m[1];
   }

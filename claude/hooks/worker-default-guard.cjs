@@ -101,6 +101,8 @@ function userTexts(transcript, maxBytes = Infinity) {
     // A task notification or a message from another session is typed into the transcript as a user
     // entry, with `origin.kind` other than `human`: its text is Claude's or an agent's, never Viet's.
     if (d.origin && typeof d.origin === 'object' && d.origin.kind && d.origin.kind !== 'human') continue;
+    if (d.isCompactSummary) continue; // Claude wrote it
+
     const c = d.message.content;
     const text = typeof c === 'string' ? c
       : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text || '').join('\n') : '';
