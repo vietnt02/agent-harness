@@ -24,9 +24,9 @@ description: "How Claude does execution work itself: before Claude itself edits 
   a reader comparing against a mirror that syncs later is paused, or both sides are written together.
 - Before the first edit in a repo, the session note's `## Đang có hiệu lực` holds one line per
   repo: `Người làm: Claude — <repo folder> — "<Viet's sentence naming Claude>"` or `— <file>:
-  <key> <old>→<new>`. `hooks/worker-default-guard.cjs` blocks Edit/Write into a git repo outside
-  `~/.claude` (`.md` under `plans/`, `knowledge/` pass) until a line names that repo and its
-  quote is in one of Viet's messages or it shows `→`; an Orca worker session is exempt.
+  <key> <old>→<new>`. `hooks/worker-default-guard.cjs` reminds once per repo, on Edit/Write into a
+  git repo outside `~/.claude` (`.md` under `plans/`, `knowledge/` pass), while no line names that
+  repo with a quote from one of Viet's messages or a `→`; an Orca worker session is exempt.
 
 ## Change
 

@@ -75,3 +75,7 @@ Repo này chủ động loại trừ các thành phần mang tính nội bộ ho
   node ~/.gemini/config/bridge-fixtures/run.cjs
   ```
   Riêng ca umbrella yêu cầu file cấu hình `~/.gemini/config/bridge-fixtures/local.json` chứa `{"napHook": "<đường dẫn>"}`.
+  Bridge ghi dạng khoá (không ghi giá trị) của mỗi payload thật vào `~/.gemini/config/bridge-fixtures/seen-shapes.json`;
+  `run.cjs` chỉ ghi `tested-versions.json` khi mọi payload thấy được từ lúc cài bản agy hiện tại có dạng mà
+  `payloads.json` phát lại (exit 3: chưa thấy payload nào của bản mới). Hook `worker-start-receipt` tự chạy
+  `run.cjs` khi agy đổi bản và chỉ báo khi FAIL.

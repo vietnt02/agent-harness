@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * watch-guard.cjs - PreToolUse(Bash): block a background command that loops, or a foreground
- * one that polls (`while/until … do … sleep`), inline or in a script file it runs, unless
- * it goes through ~/.claude/scripts/watch.sh, whose allowlist exits on anything unexpected
- * instead of waiting on it silently (skills/ntv-implement).
- * Also blocks, in the foreground, what locks the session while the user cannot type: an explicit
+ * watch-guard.cjs - PreToolUse(Bash): a background command that loops, or a foreground one that
+ * polls (`while/until … do … sleep`), inline or in a script file it runs, not through
+ * ~/.claude/scripts/watch.sh (whose allowlist exits on anything unexpected instead of waiting on it
+ * silently, skills/ntv-implement) is blocked once with the reminder; the same command run again
+ * passes (lib/block-once.cjs).
+ * Always blocks, in the foreground, what locks the session while the user cannot type: an explicit
  * `timeout` over 120000 ms, or remote calls (ssh, docker exec, gh/glab api, airflow) inside a loop.
  * An omitted timeout is the harness default (120000 ms) and passes.
  * `# watch-exempt: <reason>` in the command or the script lets a legitimate loop through.
@@ -65,7 +66,7 @@ let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 process.stdin.on('end', () => {
   try {
-    const { tool_name: tool, tool_input: input = {}, cwd } = JSON.parse(raw);
+    const { tool_name: tool, tool_input: input = {}, cwd, session_id: sessionId } = JSON.parse(raw);
     const command = input.command || '';
     if (tool !== 'Bash') process.exit(0);
     const bg = !!input.run_in_background;
@@ -89,13 +90,15 @@ process.stdin.on('end', () => {
       process.exit(2);
     }
     if (!sources.some((s) => pattern.test(s))) process.exit(0);
+    const { firstTime, AGAIN } = require('./lib/block-once.cjs');
+    if (!firstTime(sessionId, 'watch-guard', command)) process.exit(0);
     process.stderr.write(
       (bg ? 'watch-guard: background loops go through ~/.claude/scripts/watch.sh (see --help): '
         : 'watch-guard: a foreground `while/until … sleep` poll has no deadline of its own. ' +
           'Bound it (`for i in $(seq 1 N)`) or go through ~/.claude/scripts/watch.sh (see --help): ') +
       'run it with --once in the foreground, then the same command in the background. ' +
       'A loop that is not waiting on external state: add `# watch-exempt: <reason>`. ' +
-      'A wait watch.sh cannot express is a kaizen: see the end of watch.sh --help.\n'
+      'A wait watch.sh cannot express is a kaizen: see the end of watch.sh --help.' + AGAIN + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open: malformed hook input */ }

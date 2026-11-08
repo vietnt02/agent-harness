@@ -7,8 +7,14 @@
  * A new version can change the payload itself; this only replays the shapes in payloads.json. When
  * a version changes, capture a fresh payload of each kind (a hook that appends stdin to a file) and
  * compare its keys with payloads.json before trusting a green run.
- * Exit 0 when every case passes, 1 otherwise; a pass records the agy versions in tested-versions.json,
- * which worker-start-receipt compares with the installed ones. Otherwise writes only under a temp dir.
+ * The bridge records the key shape of every real payload in seen-shapes.json (keys only). A green run
+ * records the installed agy versions in tested-versions.json (which worker-start-receipt compares with
+ * the installed ones) only when payloads seen since those versions were installed all have a shape
+ * payloads.json replays: a green replay of old shapes says nothing about a new version.
+ * Exit 0: every case passes and the versions are recorded. 1: a case fails, or the installed agy sent a
+ * shape payloads.json lacks (capture it and add it). 3: cases pass, but no payload has been seen since
+ * the installed versions arrived, so nothing is recorded yet (the next agy run settles it).
+ * Otherwise writes only under a temp dir.
  */
 const { spawnSync } = require('child_process');
 const fs = require('fs');
@@ -85,7 +91,7 @@ function payload(mode, convo, toolCall, extra = {}) {
 
 function bridge(p, tmp) {
   const r = spawnSync('node', [BRIDGE, 'PreToolUse'], {
-    input: JSON.stringify(p), encoding: 'utf8', timeout: 20000, env: { ...process.env, TMPDIR: tmp },
+    input: JSON.stringify(p), encoding: 'utf8', timeout: 20000, env: { ...process.env, TMPDIR: tmp, BRIDGE_FIXTURE: '1' },
   });
   if (r.error || r.status !== 0) return `crash (${r.error ? r.error.message : `exit ${r.status}`})`;
   try { return JSON.parse(r.stdout || '{}').decision || 'allow'; } catch (_) { return 'unparsable output'; }
@@ -197,7 +203,41 @@ for (const mode of ['cli', 'chat']) {
 
 fs.rmSync(root, { recursive: true, force: true });
 console.log(failed ? `${failed} case(s) failed` : 'all cases passed');
-if (!failed && require.main === module) {
-  fs.writeFileSync(STAMP, JSON.stringify({ ...versions(), at: new Date().toISOString() }, null, 2) + '\n');
+
+// Same as payloadShape in ../claude-hook-bridge.cjs.
+function payloadShape(p) {
+  const keys = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).sort().join(',') : '');
+  return `${keys(p)}|${keys(p && p.toolCall)}`;
 }
-process.exit(failed ? 1 : 0);
+// When the installed agy arrived: the newest of the CLI binary and Orca's chat runtime folders.
+function installedAt() {
+  const times = [];
+  try {
+    const bin = spawnSync('which', ['agy'], { encoding: 'utf8', timeout: 5000 }).stdout.trim();
+    if (bin) times.push(fs.statSync(fs.realpathSync(bin)).mtimeMs);
+  } catch (_) { /* no CLI */ }
+  try {
+    for (const d of fs.readdirSync(RUNTIMES)) if (!d.startsWith('.')) times.push(fs.statSync(path.join(RUNTIMES, d)).mtimeMs);
+  } catch (_) { /* no runtime */ }
+  return times.length ? Math.max(...times) : 0;
+}
+let code = failed ? 1 : 0;
+if (!failed && require.main === module) {
+  const known = new Set(['cli', 'chat'].map((m) => payloadShape(TEMPLATES[m])));
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(path.join(LOCAL_DIR, 'seen-shapes.json'), 'utf8')); } catch (_) { /* none yet */ }
+  const since = installedAt();
+  const recent = Object.entries(seen).filter(([, t]) => t >= since).map(([k]) => k);
+  const unknown = recent.filter((k) => !known.has(k));
+  if (unknown.length) {
+    console.log(`FAIL  the installed agy sent payload shapes payloads.json does not replay:\n${unknown.map((k) => `  ${k}`).join('\n')}\n` +
+      `  replayed: ${[...known].join(' ; ')}\n  capture one of each and add it to payloads.json`);
+    code = 1;
+  } else if (!recent.length) {
+    console.log('WAIT  no agy payload seen since the installed versions arrived; versions not recorded yet');
+    code = 3;
+  } else {
+    fs.writeFileSync(STAMP, JSON.stringify({ ...versions(), at: new Date().toISOString() }, null, 2) + '\n');
+  }
+}
+process.exit(code);

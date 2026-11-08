@@ -387,7 +387,33 @@ function normalizeArgs(args) {
   return out;
 }
 
+// The key set of a hook payload (top level, then toolCall's own keys), the part a new agy version can
+// change under the guards. Same function in bridge-fixtures/run.cjs, which compares what was seen.
+function payloadShape(payload) {
+  const keys = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).sort().join(',') : '');
+  return `${keys(payload)}|${keys(payload && payload.toolCall)}`;
+}
+
+// Records each payload shape this machine's agy sends (keys only, never values) with when it was last
+// seen, so run.cjs can tell whether the installed agy still sends the shapes the fixtures replay.
+// Written only for a new shape or one last seen over an hour ago. Fixture runs (BRIDGE_FIXTURE) skip it.
+const SHAPES_FILE = path.join(os.homedir(), '.gemini', 'config', 'bridge-fixtures', 'seen-shapes.json');
+function recordShape(payload) {
+  if (process.env.BRIDGE_FIXTURE) return;
+  try {
+    const shape = payloadShape(payload);
+    let seen = {};
+    try { seen = JSON.parse(fs.readFileSync(SHAPES_FILE, 'utf8')); } catch (_) { /* first one */ }
+    const now = Date.now();
+    if (seen[shape] && now - seen[shape] < 60 * 60 * 1000) return;
+    seen[shape] = now;
+    fs.mkdirSync(path.dirname(SHAPES_FILE), { recursive: true });
+    fs.writeFileSync(SHAPES_FILE, JSON.stringify(seen, null, 2) + '\n');
+  } catch (_) { /* a record lost costs one later check, never a guard */ }
+}
+
 function handlePreToolUse(payload) {
+  recordShape(payload);
   const toolCall = payload.toolCall || {};
   const agyTool = toolCall.name || '';
   const args = normalizeArgs(toolCall.args);

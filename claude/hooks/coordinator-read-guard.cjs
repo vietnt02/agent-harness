@@ -6,8 +6,10 @@
  * child repos, the work a read-only worker does on a quota that costs less.
  * - UserPromptSubmit: starts a new turn (resets the count). A turn Orca's wake prompt opens handles a
  *   worker's report, so its reads (the gate: diff, checks) are not counted.
- * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place is denied once the turn
- *   holds two, unless the turn already ran `orca orchestration worker-start`. Two reads pass: the
+ * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place once the turn holds two,
+ *   unless the turn already ran `orca orchestration worker-start`, gets a nudge back as context, once per
+ *   turn: the read still runs (a read costs quota, not output), the model is reminded a chain of reads
+ *   belongs to a worker. Two reads pass quietly: the
  *   one confirming read the skill allows, plus one of slack, since a hook cannot tell a confirm
  *   from the start of a chain. A call that passes leaves a pending mark (one file per call).
  * - PostToolUse / PostToolUseFailure (same tools): the call ran, so its pending mark becomes a
@@ -288,27 +290,41 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
   if (count < LIMIT) return '';
   {
     return (
-      `this would be read ${count + 1} of a watched place (${target}) in this turn with no worker. ` +
-      'The coordinator answers from what it has or one confirming read; a chain of reads goes to a ' +
-      'read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): dispatch one now (no manifest: the ' +
-      'question opens a block for it) and tell the user it is checking. If the user named Claude for this work, add ' +
+      `this is read ${count + 1} of a watched place (${target}) in this turn with no worker; it runs. ` +
+      'A chain of reads is cheaper on a read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): if more ' +
+      'are coming, dispatch one (no manifest: the question opens a block for it) and tell the user it is ' +
+      'checking. Said once this turn. If the user named Claude for this work, add ' +
       '`Người làm: Claude — <place> — "<their sentence>"` under `## Đang có hiệu lực` of the session note first: <place> is the repo, ' +
       'the command or host (`ssh`, a host name), several comma-separated, or `*` when they named Claude for the whole session.'
     );
   }
 }
 
-module.exports = { decide, readTarget, watched, LIMIT };
+// True the first time this turn is nudged; remembers it in the turn's state.
+function firstNudge(sessionId) {
+  if (!sessionId) return true;
+  const state = turnState(sessionId);
+  if (state.nudged) return false;
+  try {
+    fs.mkdirSync(turnDir(sessionId), { recursive: true });
+    fs.writeFileSync(path.join(turnDir(sessionId), 'turn.json'), JSON.stringify({ ...state, nudged: true }));
+  } catch { /* nudged again next call: still only a note */ }
+  return true;
+}
+
+module.exports = { decide, readTarget, watched, firstNudge, LIMIT };
 if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 process.stdin.on('end', () => {
   try {
-    const why = decide(JSON.parse(raw));
-    if (why) {
-      process.stderr.write(`coordinator-read-guard: ${why}\n`);
-      process.exit(2);
+    const data = JSON.parse(raw);
+    const why = decide(data);
+    if (why && firstNudge(data.session_id)) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `coordinator-read-guard: ${why}` },
+      }));
     }
   } catch (_) { /* fail-open */ }
   process.exit(0);

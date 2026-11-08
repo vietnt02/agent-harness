@@ -7,9 +7,10 @@
  * A session note is capped per section and per line, and limited to four `## ` sections (lib/session-note-cap.cjs):
  * it is current state, rewritten, never a log (rules/mine/session-notes.md); an older note gets the four
  * sections the first time it is edited. Edits that shrink an over-budget file are allowed.
- * PostToolUse(Bash): a shell write (sed -i, heredoc) is not seen before it runs, so after every
- * Bash call a rule file over budget is reported back to be cut, whichever command left it there,
- * and so is a session note that call just wrote past a cap or with a section outside the four.
+ * PostToolUse(Bash): a shell write (sed -i, heredoc) is not seen before it runs, so after a Bash
+ * call a rule file over budget that was written in the last 10 minutes, or a session note of this
+ * session written past a cap or with a section outside the four, is noted back as context, once per
+ * version of the file: a nudge, never a blocking error, and silent in a session that touched no rule.
  */
 const fs = require('fs');
 const os = require('os');
@@ -36,6 +37,41 @@ const SECTIONS_TEXT = NOTE_SECTIONS.map((x) => `## ${x}`).join(', ');
 // The longest a Bash call may run (10 min): a note written anywhere in it is still "just written".
 const NOTE_FRESH_MS = 10 * 60 * 1000;
 
+// True the first time this session is told about this version (mtime) of a file; remembers it.
+function firstTold(sessionId, file, mtime) {
+  const seen = path.join(os.tmpdir(), 'claude-rules-budget', `${String(sessionId).replace(/[^\w-]/g, '_')}.json`);
+  let told = {};
+  try { told = JSON.parse(fs.readFileSync(seen, 'utf8')); } catch { /* first time */ }
+  if (told[file] === mtime) return false;
+  told[file] = mtime;
+  try {
+    fs.mkdirSync(path.dirname(seen), { recursive: true });
+    fs.writeFileSync(seen, JSON.stringify(told));
+  } catch { /* told again next time: still only a note */ }
+  return true;
+}
+
+// Rule files over budget written in the last NOTE_FRESH_MS, each version told once per session, as
+// "name n/budget"; the joint total is told when one of them is fresh. A file another session left
+// over budget long ago is not this session's business.
+function freshOverBudget(sessionId, now = Date.now()) {
+  const files = ruleFiles().map((f) => {
+    let mtime = 0;
+    try { mtime = fs.statSync(f).mtimeMs; } catch { /* missing */ }
+    return { f, n: read(f).length, mtime, budget: CHAR_BUDGETS[f] ?? NEW_MINE_FILE_CHARS };
+  });
+  const fresh = files.filter((x) => x.mtime && now - x.mtime <= NOTE_FRESH_MS);
+  if (!fresh.length) return [];
+  const total = files.reduce((n, x) => n + x.n, 0);
+  const over = fresh.filter((x) => x.n > x.budget || total > TOTAL_CHARS);
+  if (!sessionId) return [];
+  const told = over.filter((x) => firstTold(sessionId, x.f, x.mtime));
+  if (!told.length) return [];
+  const out = told.filter((x) => x.n > x.budget).map((x) => `${path.basename(x.f)} ${x.n}/${x.budget}`);
+  if (total > TOTAL_CHARS) out.push(`CLAUDE.md + rules/mine ${total}/${TOTAL_CHARS}`);
+  return out;
+}
+
 // This session's notes written in the last NOTE_FRESH_MS that pass a cap or hold a section outside
 // NOTE_SECTIONS, as "name: <cap passed>" / "name: section ## X".
 // Another session's note is its own business: it is reported in that session's Bash calls.
@@ -58,14 +94,7 @@ function longFreshNotes(sessionId, now = Date.now()) {
       const over = overCaps(text);
       const stray = strayHeadings(text.slice(head.length));
       if (!over.length && !stray.length) continue;
-      // Said once per version of the note: the same mtime is not reported again.
-      const seen = path.join(os.tmpdir(), 'claude-rules-budget', `${sessionId.replace(/[^\w-]/g, '_')}.json`);
-      let told = {};
-      try { told = JSON.parse(fs.readFileSync(seen, 'utf8')); } catch { /* first time */ }
-      if (told[file] === mtime) continue;
-      told[file] = mtime;
-      fs.mkdirSync(path.dirname(seen), { recursive: true });
-      fs.writeFileSync(seen, JSON.stringify(told));
+      if (!firstTold(sessionId, file, mtime)) continue;
       out.push(over.length ? `${file}: ${over.map((v) => v.msg).join('; ')}` : `${file}: section ## ${stray.join(', ## ')}`);
     }
   }
@@ -121,7 +150,7 @@ function problem(file, current, after) {
   return null;
 }
 
-module.exports = { problem, isMine, isNote, ruleFiles, CHAR_BUDGETS, TOTAL_CHARS };
+module.exports = { problem, isMine, isNote, ruleFiles, freshOverBudget, CHAR_BUDGETS, TOTAL_CHARS };
 if (require.main !== module) return;
 
 let raw = '';
@@ -130,21 +159,20 @@ process.stdin.on('end', () => {
   try {
     const { tool_name: tool, tool_input: input = {}, hook_event_name: event } = JSON.parse(raw);
     if (event === 'PostToolUse' && tool === 'Bash') {
-      const over = ruleFiles().map((f) => [f, read(f).length]).filter(([f, n]) => n > (CHAR_BUDGETS[f] ?? NEW_MINE_FILE_CHARS))
-        .map(([f, n]) => `${path.basename(f)} ${n}/${CHAR_BUDGETS[f] ?? NEW_MINE_FILE_CHARS}`);
-      const total = ruleFiles().reduce((n, f) => n + read(f).length, 0);
-      if (total > TOTAL_CHARS) over.push(`CLAUDE.md + rules/mine ${total}/${TOTAL_CHARS}`);
-      const notes = longFreshNotes(JSON.parse(raw).session_id);
+      const sessionId = JSON.parse(raw).session_id;
+      const over = freshOverBudget(sessionId);
+      const notes = longFreshNotes(sessionId);
       const msgs = [];
-      if (over.length) msgs.push(`rule files are over budget (${over.join(', ')}). Cut them back.`);
+      if (over.length) msgs.push(`a rule file just written is over budget (${over.join(', ')}): tighten a sentence to bring it back.`);
       if (notes.length) {
         msgs.push(`session note over a cap or outside its sections (${notes.join(' | ')}). It is current state, ` +
           `read again before acting: rewrite it into ${SECTIONS_TEXT}; an approval line is shortened, never dropped; ` +
           'how-tos go into their knowledge/skill file.');
       }
       if (msgs.length) {
-        process.stderr.write(`rules-budget: ${msgs.join(' Also: ')}\n`);
-        process.exit(2);
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: `rules-budget: ${msgs.join(' Also: ')}` },
+        }));
       }
       process.exit(0);
     }
