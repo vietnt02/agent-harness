@@ -2,7 +2,7 @@
 /**
  * note-recall.cjs - PreToolUse(Bash): what this session wrote in its note about a command is read
  * again before that command runs (rules/mine/session-notes.md: the note is kept to be read).
- * The note lines that name the command (two or more of its distinctive words, one of them an
+ * The lines under `## Đang có hiệu lực` that name the command (two or more of its distinctive words, one of them an
  * argument value such as a model slug or branch, not only program/subcommand names; message and
  * body text never count) block the call once, quoted in the message;
  * the same call run again after reading passes, and a line already shown stays quiet for
@@ -107,8 +107,14 @@ function recall(notes, command) {
   if (!values.length) return [];
   const hits = [];
   for (const { file, body } of notes) {
+    // Only `## Đang có hiệu lực` holds what a command must honour (approvals, limits, decisions);
+    // `## Resume` and `## Đã xong` are IDs and `## Đang làm` the next step, so a command naming them
+    // is the plan itself, not a reason to stop. A note with no `## ` section is read whole.
+    const sectioned = /^##\s/m.test(body);
+    let live = !sectioned;
     for (const line of body.split('\n')) {
-      if (!line.trim() || /^#/.test(line)) continue;
+      if (/^##\s/.test(line)) { live = /^##\s+Đang có hiệu lực\b/u.test(line); continue; }
+      if (!live || !line.trim() || /^#/.test(line)) continue;
       const vs = values.filter((t) => hasWord(line, t));
       const strong = vs.some((t) => t.length >= 8 && /[/-]/.test(t));
       if (vs.length && (strong || vs.length + names.filter((t) => hasWord(line, t)).length >= 2)) {
