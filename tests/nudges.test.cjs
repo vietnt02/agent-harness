@@ -75,10 +75,13 @@ test('coordinator-read-guard: the third read runs, with one reminder per turn', 
     hook('coordinator-read-guard.cjs', { ...base, hook_event_name: 'UserPromptSubmit', prompt: 'bảng này đã có chưa' }, home);
     const read = (i) => hook('coordinator-read-guard.cjs', { ...base, hook_event_name: 'PreToolUse', tool_name: 'Read',
       tool_use_id: `tu_${i}`, tool_input: { file_path: path.join(watched, `f${i}`) } }, home);
+    const ran = (i) => hook('coordinator-read-guard.cjs', { ...base, hook_event_name: 'PostToolUse', tool_name: 'Read',
+      tool_use_id: `tu_${i}`, tool_input: { file_path: path.join(watched, `f${i}`) } }, home);
     for (const i of [1, 2]) {
       const r = read(i);
       assert.equal(r.status, 0, r.stderr);
       assert.equal(context(r), '', `read ${i} is quiet`);
+      ran(i); // counted, not left to a pending mark's clock
     }
     const third = read(3);
     assert.equal(third.status, 0, 'the third read is not denied');
@@ -109,17 +112,17 @@ test('worker-default-guard: an edit in a repo runs, with one reminder per repo',
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
-test('gate-line-guard: a remote write with no Gate line is held once', () => {
+test('gate-line-guard: a remote write with no Gate line stays blocked, rerun or not', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-glg-'));
   try {
     const transcript = transcriptWith(dir);
     const s = sid('glg');
-    const run = () => hook('gate-line-guard.cjs', { session_id: s, transcript_path: transcript, cwd: dir,
-      tool_name: 'Bash', tool_input: { command: "ssh web1 'sudo systemctl restart nginx'" } });
-    const first = run();
-    assert.equal(first.status, 2);
-    assert.match(first.stderr, /Gate:.*run it again unchanged/s);
-    assert.equal(run().status, 0, 'run again, it passes');
+    const run = (command) => hook('gate-line-guard.cjs', { session_id: s, transcript_path: transcript, cwd: dir,
+      tool_name: 'Bash', tool_input: { command } });
+    const write = "ssh web1 'sudo systemctl restart nginx'";
+    assert.equal(run(write).status, 2);
+    assert.equal(run(write).status, 2, 'it cannot be undone: a rerun is still blocked');
+    assert.equal(run(`# Gate: mở bởi "khởi động lại nginx" → khối web1\n${write}`).status, 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -129,6 +132,10 @@ test('watch-guard: an unwatched loop is held once; a session lock is always bloc
   const loop = { command: 'while true; do ls; sleep 5; done', run_in_background: true };
   assert.equal(run(loop).status, 2);
   assert.equal(run(loop).status, 0, 'the same loop again passes');
+  const py = { command: "python3 - <<'EOF'\nwhile True:\n    print('ssh host')\nEOF" };
+  assert.equal(run(py).status, 0, 'loop words inside a Python heredoc are text, not a shell loop');
+  const sh = { command: "bash <<'EOF'\nwhile true; do ssh host uptime; sleep 5; done\nEOF" };
+  assert.equal(run(sh).status, 2, 'a heredoc a shell runs is still read');
   const lock = { command: 'npm test', timeout: 300000 };
   assert.equal(run(lock).status, 2);
   assert.equal(run(lock).status, 2, 'a foreground lock stays blocked');
@@ -155,7 +162,9 @@ test('turn-guard: a reply asking two things is sent back once', () => {
   const { manyAsks } = require('../claude/hooks/turn-guard.cjs');
   assert.equal(manyAsks('**Cần bạn:** đồng ý merge !67 không?'), null);
   assert.match(manyAsks('**Cần bạn:** merge !67?\n\n**Cần bạn:** báo khách?'), /2 `\*\*Cần bạn:\*\*` lines/);
-  assert.match(manyAsks('**Cần bạn:**\n- merge !67\n- báo 2 khách nhận thư trùng'), /2 items/);
+  assert.equal(manyAsks('**Cần bạn:** cho phép lệnh `git push origin x` không?\n- rule: Protected Branch Push\n- file: ~/.claude/settings.json\n- tác động: push lên nhánh x'), null, 'the ask to allow a blocked command lists its parts');
+  assert.equal(manyAsks('**Cần bạn:** chọn một:\n1. merge ngay\n2. chờ CI xanh rồi merge'), null, 'a closed choice lists its options');
+  assert.equal(manyAsks('**Cần bạn:** mở https://example.com/a?b=1 rồi duyệt không?'), null, 'a URL query is no question');
   assert.match(manyAsks('**Cần bạn:** merge !67 không? Có báo khách không?'), /2 questions/);
   assert.equal(manyAsks('**Cần bạn:** đồng ý không?\n\nGhi chú: vì sao? chưa rõ?'), null, 'text after the block does not count');
   assert.equal(manyAsks('```\n**Cần bạn:** a?\n```\n**Cần bạn:** chạy `a?b` không?'), null, 'code never counts');
@@ -168,7 +177,60 @@ test('turn-guard: a reply asking two things is sent back once', () => {
 test('worker-start-receipt: each new dispatch gets its stall watch, ready to run', () => {
   const { watchLines } = require('../claude/hooks/worker-start-receipt.cjs');
   const [line] = watchLines(['ctx_0123abcd']);
-  assert.match(line, /worker-stall\.sh --dispatch ctx_0123abcd/);
+  assert.match(line, /node ~\/\.claude\/scripts\/worker-stall\.cjs --dispatch ctx_0123abcd/);
   assert.match(line, /--ok done --wait running/);
   assert.match(line, /--why-wait/);
+  assert.match(line, /--checkpoint 3000/, 'one wake-up per 50 minutes at most, not every 10');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'claude', 'scripts', 'worker-stall.cjs')), 'the script it names ships');
+});
+
+test('worker-stall: a stopped worker is done; errors count only in new worker messages; no worktree is an error', () => {
+  const w = require('../claude/scripts/worker-stall.cjs');
+  const o = { dispatch: 'ctx_t', idle: 10, errors: 3 };
+  assert.equal(w.status(o, { show: () => ({ state: 'stopped' }) }), 'done stopped');
+  assert.throws(() => w.status(o, { show: () => ({ state: 'running', workspace: 'id::/no/such/dir' }), newErrors: () => 0 }), /no worktree/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ws-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
+    const deps = { show: () => ({ state: 'running', workspace: `id::${dir}` }), newErrors: () => 0 };
+    assert.match(w.status(o, deps), /^running changed=a\.txt/);
+    const later = Date.now() + 11 * 60000;
+    assert.match(w.status(o, { ...deps, now: later }), /^stale idle>10m/);
+    assert.match(w.status(o, { ...deps, newErrors: () => 3 }), /^stale api-errors=3/);
+    const page = (messages, limited, cursor) => ({ result: { transcript: { messages, limited, nextCursor: cursor }, cursor } });
+    const pages = [
+      page([{ role: 'user', blocks: [{ type: 'text', text: 'retry on 429 Too Many Requests' }] },
+        { role: 'assistant', blocks: [{ type: 'text', text: 'Error: 502 Bad Gateway' }] }], true, 'c1'),
+      page([{ role: 'assistant', blocks: [{ type: 'tool-result', output: 'HTTP 503' }] },
+        { role: 'assistant', blocks: [{ type: 'text', text: 'edited lines 429-430' }] }], false, 'c2'),
+    ];
+    const asked = [];
+    const read = (a) => { asked.push(a.includes('--cursor') ? a[a.indexOf('--cursor') + 1] : '-'); return pages[asked.length - 1] || page([], false, 'c2'); };
+    const state = path.join(dir, 'state');
+    assert.equal(w.newErrors('ctx_t', read, state), 2, 'the brief and a line number never count');
+    assert.deepEqual(asked, ['-', 'c1']);
+    asked.length = 0;
+    assert.equal(w.newErrors('ctx_t', (a) => { asked.push(a[a.indexOf('--cursor') + 1]); return page([], false, 'c2'); }, state), 0);
+    assert.deepEqual(asked, ['c2'], 'the next run starts where the last one ended');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('worker-start-receipt: a new agy version runs the fixtures and speaks only on a fail', () => {
+  const { agyVersionLines } = require('../claude/hooks/worker-start-receipt.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-agy-'));
+  try {
+    const stamp = path.join(dir, 'tested-versions.json');
+    fs.writeFileSync(stamp, JSON.stringify({ cli: '1.0.0', runtimes: [] }));
+    const runner = (code, out = '') => fs.writeFileSync(path.join(dir, 'run.cjs'), `process.stdout.write(${JSON.stringify(out)}); process.exit(${code});`);
+    const lines = () => agyVersionLines(stamp, path.join(dir, 'no-runtimes'), '1.0.1');
+    runner(0);
+    assert.deepEqual(lines(), [], 'green: the runner recorded the version, nothing to say');
+    runner(3, 'WAIT  no agy payload seen\n');
+    assert.deepEqual(lines(), [], 'no payload of the new version yet: quiet, a later dispatch checks again');
+    runner(1, 'FAIL  the installed agy sent payload shapes payloads.json does not replay:\n  a,b|c\n');
+    const [msg] = lines();
+    assert.match(msg, /fixture bridge FAIL/);
+    assert.match(msg, /a,b\|c/);
+    assert.deepEqual(agyVersionLines(stamp, path.join(dir, 'no-runtimes'), '1.0.0'), [], 'same version: the runner is not run');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

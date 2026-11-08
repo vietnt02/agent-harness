@@ -396,7 +396,7 @@ function payloadShape(payload) {
 
 // Records each payload shape this machine's agy sends (keys only, never values) with when it was last
 // seen, so run.cjs can tell whether the installed agy still sends the shapes the fixtures replay.
-// Written only for a new shape or one last seen over an hour ago. Fixture runs (BRIDGE_FIXTURE) skip it.
+// Written only for a new shape or one last seen over five minutes ago. Fixture runs (BRIDGE_FIXTURE) skip it.
 const SHAPES_FILE = path.join(os.homedir(), '.gemini', 'config', 'bridge-fixtures', 'seen-shapes.json');
 function recordShape(payload) {
   if (process.env.BRIDGE_FIXTURE) return;
@@ -405,7 +405,7 @@ function recordShape(payload) {
     let seen = {};
     try { seen = JSON.parse(fs.readFileSync(SHAPES_FILE, 'utf8')); } catch (_) { /* first one */ }
     const now = Date.now();
-    if (seen[shape] && now - seen[shape] < 60 * 60 * 1000) return;
+    if (seen[shape] && now - seen[shape] < 5 * 60 * 1000) return;
     seen[shape] = now;
     fs.mkdirSync(path.dirname(SHAPES_FILE), { recursive: true });
     fs.writeFileSync(SHAPES_FILE, JSON.stringify(seen, null, 2) + '\n');
@@ -633,6 +633,7 @@ function handlePreToolUse(payload) {
       tool_name: 'Bash',
       tool_input: { command, run_in_background: bg },
       cwd,
+      session_id: payload.conversationId,
     });
     if (res.status === 2) {
       process.stdout.write(

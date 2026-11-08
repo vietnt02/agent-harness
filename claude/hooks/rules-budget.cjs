@@ -10,7 +10,8 @@
  * PostToolUse(Bash): a shell write (sed -i, heredoc) is not seen before it runs, so after a Bash
  * call a rule file over budget that was written in the last 10 minutes, or a session note of this
  * session written past a cap or with a section outside the four, is noted back as context, once per
- * version of the file: a nudge, never a blocking error, and silent in a session that touched no rule.
+ * version of the file: a nudge, never a blocking error, and silent unless some session wrote a rule file
+ * in the last 10 minutes.
  */
 const fs = require('fs');
 const os = require('os');

@@ -48,7 +48,7 @@ const { commands, program } = require('./lib/shell-words.cjs');
 const { expandHome } = require('./lib/platform.cjs');
 const { inside, repoOf, claimed, isWorker, liveLines } = require('./worker-default-guard.cjs');
 
-const LIMIT = 2; // reads allowed per turn before a worker is required
+const LIMIT = 2; // reads per turn before the reminder that a worker is cheaper
 const LIST = path.join(os.homedir(), '.claude', 'knowledge', 'coordinator-reads.txt');
 const STATE_DIR = path.join(os.tmpdir(), 'claude-coordinator-reads');
 const FREE_WORDS = new Set(['gh', 'glab', 'orca']);
@@ -255,7 +255,7 @@ function claimedTarget(target, data, list, notesDir) {
   return claimed(liveLines(data.session_id, notesDir), { names }, data.transcript_path, { quoteOnly: true });
 }
 
-// Why this call is blocked, or ''. Every event updates the turn's state.
+// The reminder for this call, or ''. Every event updates the turn's state.
 function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs = PENDING_MS } = {}) {
   if (!data.session_id) return '';
   const sid = data.session_id;
@@ -268,8 +268,7 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
   if (/^PostToolUse/.test(event)) {
     if (startsWorker(data)) {
       if (event === 'PostToolUse') {
-        fs.mkdirSync(turnDir(sid), { recursive: true });
-        fs.writeFileSync(path.join(turnDir(sid), 'turn.json'), JSON.stringify({ ...turnState(sid), delegated: true }));
+        withLock(sid, () => fs.writeFileSync(path.join(turnDir(sid), 'turn.json'), JSON.stringify({ ...turnState(sid), delegated: true })));
       }
     } else markRan(sid, callKey(data));
     return '';
@@ -301,15 +300,15 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
 }
 
 // True the first time this turn is nudged; remembers it in the turn's state.
+// Under the turn's lock: a worker-start PostToolUse may write turn.json at the same moment.
 function firstNudge(sessionId) {
   if (!sessionId) return true;
-  const state = turnState(sessionId);
-  if (state.nudged) return false;
-  try {
-    fs.mkdirSync(turnDir(sessionId), { recursive: true });
-    fs.writeFileSync(path.join(turnDir(sessionId), 'turn.json'), JSON.stringify({ ...state, nudged: true }));
-  } catch { /* nudged again next call: still only a note */ }
-  return true;
+  return withLock(sessionId, () => {
+    const state = turnState(sessionId);
+    if (state.nudged) return false;
+    try { fs.writeFileSync(path.join(turnDir(sessionId), 'turn.json'), JSON.stringify({ ...state, nudged: true })); } catch { /* said again next call: still only a note */ }
+    return true;
+  });
 }
 
 module.exports = { decide, readTarget, watched, firstNudge, LIMIT };

@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
  * gate-line-guard.cjs - PreToolUse(Bash): a command that changes another machine (ssh running a
- * write/delete/restart, scp or rsync) is blocked once, as a reminder to check the approval, unless the
- * command (a `# Gate:` comment line or its description) or visible text of the current turn holds
- * `Gate:` (CLAUDE.md § Mutation gate); the same command run again passes (lib/block-once.cjs). Edit/Write hooks never see these commands, and
+ * write/delete/restart, scp or rsync) is blocked until the command (a `# Gate:` comment line or its
+ * description) or visible text of the current turn holds `Gate:` (CLAUDE.md § Mutation gate). Edit/Write hooks never see these commands, and
  * the line was skipped there before (2026-10-13, n8n-pg on vps_n8n).
  * Like answer-first.cjs, re-reads the transcript for up to WAIT_MS before blocking, since text
  * written right before the call reaches disk ~0.1 s later. Text written right before a tool call is
@@ -157,12 +156,11 @@ if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
-const { firstTime, AGAIN } = require('./lib/block-once.cjs');
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 process.stdin.on('end', () => {
   try {
-    const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd, session_id: sessionId } = JSON.parse(raw);
+    const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd } = JSON.parse(raw);
     const command = String(input?.command || '');
     if (!transcript || agentId) process.exit(0);
     const remote = REMOTE_WRITE.test(command);
@@ -174,14 +172,14 @@ process.stdin.on('end', () => {
       sleep(POLL_MS);
       ok = gatePrinted(tailLines(transcript));
     }
-    if (!ok && firstTime(sessionId, 'gate-line-guard', command)) {
+    if (!ok) {
       process.stderr.write(
         (git
           ? 'gate-line-guard: this command writes into the user\'s main git checkout (or turns git hooks off) and this turn has no `Gate:` line. ' +
             'To read the latest code: `git fetch`, then `git show origin/<b>:<path>` / `git grep … origin/<b>`; never fast-forward their checkout. '
           : 'gate-line-guard: this command changes another machine and this turn has no `Gate:` line. ') +
           'Put `# Gate: mở bởi "<the user\'s sentence>" → khối <X>` as a comment line in the command, then rerun ' +
-          '(text written before a call is not kept verbatim). If it only reads, `# Gate: không áp (chỉ đọc)`.' + AGAIN + '\n'
+          '(text written before a call is not kept verbatim). If it only reads, `# Gate: không áp (chỉ đọc)`.\n'
       );
       process.exit(2);
     }

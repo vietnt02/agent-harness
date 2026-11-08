@@ -125,7 +125,8 @@ function agyVersionLines(stampFile = path.join(os.homedir(), '.gemini', 'config'
   // records the versions; nothing seen yet stays quiet (a later dispatch checks again); a fail is told.
   const runner = path.join(path.dirname(stampFile), 'run.cjs');
   let r;
-  try { r = spawnSync(process.execPath, [runner], { encoding: 'utf8', timeout: 60000 }); } catch (_) { return []; }
+  // 8 s: inside this hook's own timeout and the agy bridge's 12 s for it; a stall stays quiet (null).
+  try { r = spawnSync(process.execPath, [runner], { encoding: 'utf8', timeout: 8000 }); } catch (_) { return []; }
   if (!r || r.status === 0 || r.status === 3 || r.status === null) return [];
   const tail = String(r.stdout || '').split('\n').filter((l) => /^(FAIL|  )/.test(l)).slice(0, 8).join('\n');
   return [`agy đổi bản (CLI ${tested.cli || '?'} → ${cli || '?'}, runtime chat ${(tested.runtimes || []).join(',') || '?'} → ` +
@@ -196,10 +197,11 @@ function sendLines(command, show = showState) {
 // inbox (`check`), so it takes no message from Orca's wake-ups.
 function watchLines(ids) {
   return ids.map((d) => {
-    const w = `bash ~/.claude/scripts/worker-stall.sh --dispatch ${d}`;
+    const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}`;
     return `Theo dõi treo cho ${d}: \`~/.claude/scripts/watch.sh --once --check "${w}" --ok done --wait running\`, rồi ` +
-      `cùng lệnh bỏ \`--once\`, thêm \`--deadline 4h --every 120 --why-wait "worker đang làm, coordinator không làm thay"\`, chạy background. \`stale\` là tín hiệu để đọc ` +
-      '`worker-read` hai lần cách vài phút, không phải để dừng hay chạy lại worker (ntv-orca § 3).';
+      'cùng lệnh bỏ `--once`, thêm `--deadline <giờ đã hẹn user + biên> --every 120 --checkpoint 3000 --why-wait ' +
+      '"worker đang làm, coordinator không làm thay"`, chạy background. `stale` là tín hiệu để đọc `worker-read` ' +
+      'hai lần cách vài phút, không phải để dừng hay chạy lại worker (ntv-orca § 3).';
   });
 }
 

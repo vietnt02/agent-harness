@@ -16,7 +16,7 @@
  *   check ("bạn kiểm", "đăng xuất rồi đăng nhập lại") is sent back to run the reads that settle the
  *   guess first (CLAUDE.md § Verification: proactive in thinking, never hand me a read-only check).
  * - Stop: a final reply asking the user more than one thing (two `**Cần bạn:**` lines, or one whose
- *   block holds two questions or two bullets) is sent back to keep one: a short answer must say which
+ *   block holds two questions) is sent back to keep one: a short answer must say which
  *   ask it settles (communication-style.md § Format: its one question).
  *   The Stop checks report together: after one send-back `stop_hook_active` skips them.
  * Fails open on any error.
@@ -132,20 +132,20 @@ function handedGuess(text) {
   return null;
 }
 
-// The asks of a reply when it holds more than one, else null: two `**Cần bạn:**` lines, or one whose
-// block (that line up to a blank line) holds two `?` or two bullets. Code and inline code never count.
+// The asks of a reply when it holds more than one, else null: two `**Cần bạn:**` lines, or two `?` in
+// the block of one (that line up to a blank line). A list under it is not counted: the ask to allow a
+// blocked command lists its rule, settings file and impact, and a closed choice lists its options.
+// Code, inline code and URLs never count.
 function manyAsks(text) {
-  const lines = String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n').map((l) => l.replace(/`[^`]*`/g, ' '));
+  const lines = String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
+    .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/\S+/g, ' '));
   const at = lines.map((l, i) => (ASK.test(l) ? i : -1)).filter((i) => i >= 0);
   if (at.length >= 2) return `${at.length} \`**Cần bạn:**\` lines`;
   if (!at.length) return null;
   const block = [];
   for (let i = at[0]; i < lines.length && (i === at[0] || lines[i].trim()); i++) block.push(lines[i]);
   const questions = (block.join('\n').match(/\?/g) || []).length;
-  const bullets = block.slice(1).filter((l) => /^\s*([-*+]|\d+[.)])\s/.test(l)).length;
-  if (questions >= 2) return `${questions} questions in the \`**Cần bạn:**\` block`;
-  if (bullets >= 2) return `${bullets} items in the \`**Cần bạn:**\` block`;
-  return null;
+  return questions >= 2 ? `${questions} questions in the \`**Cần bạn:**\` block` : null;
 }
 
 const asksNote = (what) =>

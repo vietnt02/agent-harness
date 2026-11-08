@@ -139,7 +139,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 - **Giao xong thì kết thúc lượt; Orca đánh thức** khi worker `worker_done`, hỏi, hay dừng không báo
   (`escalation`). Không chạy vòng poll hay script nào đọc `check`: process khác đọc là lấy mất tin.
   Mỗi lần được đánh thức: chạy đúng lệnh `check` của lời nhắc, xử lý mọi tin. Riêng việc theo dõi treo:
-  `watch.sh` với `~/.claude/scripts/worker-stall.sh` (receipt của `worker-start` in sẵn lệnh; nó không
+  `watch.sh` với `~/.claude/scripts/worker-stall.cjs` (receipt của `worker-start` in sẵn lệnh; nó không
   đọc `check`), vì worker lặp lỗi API hay đứng im thì Orca không đánh thức.
 - **Trả lời `ask` ngay.** Worker hỏi vì thiếu quyền hay credential → trả lời bằng đường đã ghi trong
   `AGENTS.md`/`docs/` của repo, không chạy hộ. Ngoại lệ: lệnh ghi production là việc của coordinator.

@@ -223,9 +223,12 @@ function commitProblem(data, notesDir, claudeDir) {
   return '';
 }
 
-// The reminder; its text names the repo root (`… in <root>: the change goes ahead`), the key it is said once per.
+// The repo root of the last reminder built: the key it is said once per.
+let lastRoot = '';
+
 function blockMessage(what, repo) {
   const name = [...repo.names].pop();
+  lastRoot = repo.root;
   return (
     `${what}: the change goes ahead; a reminder, said once per repo this session. Execution usually goes to ` +
     'Orca workers (CLAUDE.md § Delegation; ntv-orca): Claude edits a repo itself for a change to an existing value ' +
@@ -235,7 +238,7 @@ function blockMessage(what, repo) {
     `\`- Người làm: Claude — ${name} — <file>: <key> <old>→<new>\`. Otherwise hand the rest to a worker.`
   );
 }
-const repoKey = (why) => (/ in (.+?): the change goes ahead/.exec(why) || [, why])[1];
+
 
 // True the first time this session is reminded about this repo; remembers it.
 function firstNudge(sessionId, repoRoot) {
@@ -283,7 +286,7 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(raw);
     const why = problem(data);
-    if (why && firstNudge(data.session_id, repoKey(why))) {
+    if (why && firstNudge(data.session_id, lastRoot || why)) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `worker-default-guard: ${why}` },
       }));

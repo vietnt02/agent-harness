@@ -403,6 +403,17 @@ if (require.main !== module) return;
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 
+// Nudges collected so far, said as context when the hook ends, a crash included.
+const notes = [];
+function say() {
+  if (notes.length) {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `dispatch-split-guard: ${notes.join(' Also: ')}` },
+    }));
+  }
+  process.exit(0);
+}
+
 process.stdin.on('end', () => {
   try {
     const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd } = JSON.parse(raw);
@@ -421,20 +432,11 @@ process.stdin.on('end', () => {
       process.exit(2);
     }
     const starts = workerStarts(command);
-    const notes = [];
     if (newSpecs(command, cwd).some((spec) => spec !== null && !readsInbox(spec))) {
       notes.push('the spec never asks the worker to read its inbox mid-turn, so a correction may land only after its ' +
         'turn (ntv-orca § 2, § 3). If you need to steer it, `send` the line: "chạy `orca orchestration check --peek` ' +
         'trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo trước".');
     }
-    const say = () => {
-      if (notes.length) {
-        process.stdout.write(JSON.stringify({
-          hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `dispatch-split-guard: ${notes.join(' Also: ')}` },
-        }));
-      }
-      process.exit(0);
-    };
     if (!starts.segs.length) say();
     if (onlyHelp(starts.segs)) say();
     const model = unpinnedClaudeModel(command, starts);
@@ -463,6 +465,6 @@ process.stdin.on('end', () => {
     const problem = verdict(tailLines(transcript), input, ctx, { advisory: true });
     if (problem) notes.push(problem);
     say();
-  } catch (_) { /* fail-open */ }
-  process.exit(0);
+  } catch (_) { /* fail-open: what was collected is still said */ }
+  say();
 });

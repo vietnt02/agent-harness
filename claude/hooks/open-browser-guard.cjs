@@ -45,9 +45,9 @@ if (require.main === module) {
       const data = JSON.parse(raw);
       if (data.tool_name !== 'Bash') process.exit(0);
       const why = problem((data.tool_input || {}).command || '', process.env.CLAUDE_PROJECT_DIR || data.cwd);
-      const { firstTime, AGAIN } = require('./lib/block-once.cjs');
+      const { firstTime, again } = require('./lib/block-once.cjs');
       if (why && firstTime(data.session_id, 'open-browser-guard', (data.tool_input || {}).command || '')) {
-        process.stderr.write(`open-browser-guard: ${why}${AGAIN}\n`);
+        process.stderr.write(`open-browser-guard: ${why}${again(data.session_id)}\n`);
         process.exit(2);
       }
     } catch (_) { /* fail-open */ }

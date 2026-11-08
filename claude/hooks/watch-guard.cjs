@@ -33,6 +33,12 @@ const expand = (p) => expandHome(p.replace(/^(?:\$HOME|\$\{HOME\})(?=[/\\])/, os
 const isRun = (before) => RUNS.test(before) && !/\b(?:ba|z)?sh(?:\s+-\S+)*\s+-\w*n\w*\s+$/.test(before);
 // A heredoc body is data for another program (`python3 - <<'EOF'`), not shell to run.
 const dropHeredocs = (s) => s.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<heredoc');
+// The body of a heredoc a shell runs (`bash <<EOF`, `| sh`) is commands; any other body (a Python
+// script, a file written with `cat >`, a commit message) is text, and its words are no shell loop.
+const HEREDOC = /([^\n]*)<<-?\s*(['"]?)(\w+)\2([^\n]*)\n([\s\S]*?)\n[ \t]*\3[ \t]*(?=\n|$)/g;
+const SHELL_FED = /(^|[\s|;&(])(ba|z|da)?sh\b(?!\S*\.)/;
+const dropTextHeredocs = (s) => s.replace(HEREDOC, (all, before, q, tag, after) =>
+  (SHELL_FED.test(`${before} ${after}`) ? all : `${before}<<heredoc${after}`));
 
 // The arguments of each place the command runs watch.sh, up to the next separator; quoted
 // strings are blanked first, so `--check "x --once"` does not count as --once.
@@ -81,7 +87,7 @@ process.stdin.on('end', () => {
       process.exit(0);
     }
     const pattern = bg ? LOOP : POLL;
-    const sources = [command, ...scriptsIn(command, cwd || process.cwd())];
+    const sources = [dropTextHeredocs(command), ...scriptsIn(command, cwd || process.cwd())];
     if (sources.some((s) => EXEMPT.test(s))) process.exit(0);
     if (!bg && (Number(input.timeout) > FG_TIMEOUT_MS || sources.some((s) => ANY_LOOP.test(s) && REMOTE.test(s)))) {
       process.stderr.write('watch-guard: this foreground command can lock the session while the user cannot ' +
@@ -90,7 +96,7 @@ process.stdin.on('end', () => {
       process.exit(2);
     }
     if (!sources.some((s) => pattern.test(s))) process.exit(0);
-    const { firstTime, AGAIN } = require('./lib/block-once.cjs');
+    const { firstTime, again } = require('./lib/block-once.cjs');
     if (!firstTime(sessionId, 'watch-guard', command)) process.exit(0);
     process.stderr.write(
       (bg ? 'watch-guard: background loops go through ~/.claude/scripts/watch.sh (see --help): '
@@ -98,7 +104,7 @@ process.stdin.on('end', () => {
           'Bound it (`for i in $(seq 1 N)`) or go through ~/.claude/scripts/watch.sh (see --help): ') +
       'run it with --once in the foreground, then the same command in the background. ' +
       'A loop that is not waiting on external state: add `# watch-exempt: <reason>`. ' +
-      'A wait watch.sh cannot express is a kaizen: see the end of watch.sh --help.' + AGAIN + '\n'
+      'A wait watch.sh cannot express is a kaizen: see the end of watch.sh --help.' + again(sessionId) + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open: malformed hook input */ }
