@@ -106,14 +106,24 @@ function recall(notes, command) {
   const { names, values } = tokens(command);
   if (!values.length) return [];
   const hits = [];
-  for (const { file, body } of notes) {
+  for (const { file, body: raw } of notes) {
     // Only `## Đang có hiệu lực` holds what a command must honour (approvals, limits, decisions);
     // `## Resume` and `## Đã xong` are IDs and `## Đang làm` the next step, so a command naming them
-    // is the plan itself, not a reason to stop. A note with no `## ` section is read whole.
-    const sectioned = /^##\s/m.test(body);
-    let live = !sectioned;
-    for (const line of body.split('\n')) {
-      if (/^##\s/.test(line)) { live = /^##\s+Đang có hiệu lực\b/u.test(line); continue; }
+    // is the plan itself, not a reason to stop. A note in an older layout (none of the four sections of
+    // rules/mine/session-notes.md) is read whole. NFC and LF first, and a `## ` inside a code fence ends no section, as in session-notes.cjs.
+    const body = String(raw).normalize('NFC').replace(/\r\n?/g, '\n');
+    const lines = body.split('\n');
+    const isLive = (l) => /^##\s+Đang có hiệu lực\b/u.test(l);
+    let fence = false;
+    const fourSections = lines.some((l) => {
+      if (/^\s*```/.test(l)) fence = !fence;
+      return !fence && /^##\s+(Đang làm|Đang có hiệu lực|Đã xong|Resume)\s*$/u.test(l);
+    });
+    let live = !fourSections;
+    fence = false;
+    for (const line of lines) {
+      if (/^\s*```/.test(line)) { fence = !fence; continue; }
+      if (!fence && fourSections && /^##\s/.test(line)) { live = isLive(line); continue; }
       if (!live || !line.trim() || /^#/.test(line)) continue;
       const vs = values.filter((t) => hasWord(line, t));
       const strong = vs.some((t) => t.length >= 8 && /[/-]/.test(t));
