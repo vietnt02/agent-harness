@@ -253,3 +253,26 @@ test('worker-start-receipt: a new agy version runs the fixtures and speaks only 
     assert.deepEqual(agyVersionLines(stamp, path.join(dir, 'no-runtimes'), '1.0.0'), [], 'same version: the runner is not run');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('note-recall: only what the note holds in force stops a command; IDs and next steps never do', () => {
+  const { recall } = require('../claude/hooks/note-recall.cjs');
+  const body = [
+    '## Đang làm', 'PR #21: chờ CI rồi merge nhánh kaizen/harness-nhac-nhe', '',
+    '## Đang có hiệu lực', '- "chỉ push kaizen/harness-nhac-nhe, chưa merge" (uuid u1)', '',
+    '## Đã xong', '- vietnt02/agent-harness#19 merged', '',
+    '## Resume', '- vietnt02/agent-harness#21, nhánh kaizen/harness-nhac-nhe',
+  ].join('\n');
+  const hits = recall([{ file: 'n.md', body }], 'git push origin kaizen/harness-nhac-nhe');
+  assert.deepEqual(hits.map((h) => h.line), ['- "chỉ push kaizen/harness-nhac-nhe, chưa merge" (uuid u1)']);
+  assert.deepEqual(recall([{ file: 'n.md', body: body.replace(/^## Đang có hiệu lực\n.*\n/m, '') }],
+    'gh pr checks 21 --repo vietnt02/agent-harness'), [], 'Resume and Đã xong IDs never stop a command');
+  assert.equal(recall([{ file: 'old.md', body: '- dùng nhánh kaizen/harness-nhac-nhe' }], 'git push origin kaizen/harness-nhac-nhe').length, 1,
+    'a note with no sections is read whole');
+  const push = 'git push origin kaizen/harness-nhac-nhe';
+  assert.equal(recall([{ file: 'nfd.md', body: body.normalize('NFD') }], push).length, 1, 'an NFD note still finds its in-force section');
+  assert.equal(recall([{ file: 'crlf.md', body: body.replace(/\n/g, '\r\n') }], push).length, 1, 'CRLF too');
+  const fenced = body.replace('- "chỉ push', '```\n## not a heading\n```\n- "chỉ push');
+  assert.equal(recall([{ file: 'f.md', body: fenced }], push).length, 1, 'a ## inside a fence ends no section');
+  const older = '- Viet: "dùng kaizen/harness-nhac-nhe"\n## Quyết định của Viet\n- push kaizen/harness-nhac-nhe trước\n## Trạng thái resume\n- x';
+  assert.equal(recall([{ file: 'o.md', body: older }], push).length, 2, 'an older layout without the in-force section is read whole');
+});

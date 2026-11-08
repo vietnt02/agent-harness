@@ -2,7 +2,7 @@
 /**
  * note-recall.cjs - PreToolUse(Bash): what this session wrote in its note about a command is read
  * again before that command runs (rules/mine/session-notes.md: the note is kept to be read).
- * The note lines that name the command (two or more of its distinctive words, one of them an
+ * The lines under `## Đang có hiệu lực` that name the command (two or more of its distinctive words, one of them an
  * argument value such as a model slug or branch, not only program/subcommand names; message and
  * body text never count) block the call once, quoted in the message;
  * the same call run again after reading passes, and a line already shown stays quiet for
@@ -106,9 +106,25 @@ function recall(notes, command) {
   const { names, values } = tokens(command);
   if (!values.length) return [];
   const hits = [];
-  for (const { file, body } of notes) {
-    for (const line of body.split('\n')) {
-      if (!line.trim() || /^#/.test(line)) continue;
+  for (const { file, body: raw } of notes) {
+    // Only `## Đang có hiệu lực` holds what a command must honour (approvals, limits, decisions);
+    // `## Resume` and `## Đã xong` are IDs and `## Đang làm` the next step, so a command naming them
+    // is the plan itself, not a reason to stop. A note in an older layout (none of the four sections of
+    // rules/mine/session-notes.md) is read whole. NFC and LF first, and a `## ` inside a code fence ends no section, as in session-notes.cjs.
+    const body = String(raw).normalize('NFC').replace(/\r\n?/g, '\n');
+    const lines = body.split('\n');
+    const isLive = (l) => /^##\s+Đang có hiệu lực\b/u.test(l);
+    let fence = false;
+    const fourSections = lines.some((l) => {
+      if (/^\s*```/.test(l)) fence = !fence;
+      return !fence && /^##\s+(Đang làm|Đang có hiệu lực|Đã xong|Resume)\s*$/u.test(l);
+    });
+    let live = !fourSections;
+    fence = false;
+    for (const line of lines) {
+      if (/^\s*```/.test(line)) { fence = !fence; continue; }
+      if (!fence && fourSections && /^##\s/.test(line)) { live = isLive(line); continue; }
+      if (!live || !line.trim() || /^#/.test(line)) continue;
       const vs = values.filter((t) => hasWord(line, t));
       const strong = vs.some((t) => t.length >= 8 && /[/-]/.test(t));
       if (vs.length && (strong || vs.length + names.filter((t) => hasWord(line, t)).length >= 2)) {
