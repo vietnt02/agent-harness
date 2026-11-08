@@ -21,7 +21,7 @@
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -120,10 +120,18 @@ function agyVersionLines(stampFile = path.join(os.homedir(), '.gemini', 'config'
   let runtimes = [];
   try { runtimes = fs.readdirSync(runtimesDir).filter((d) => !d.startsWith('.')).sort(); } catch (_) { runtimes = []; }
   const same = tested.cli === cli && JSON.stringify(tested.runtimes || []) === JSON.stringify(runtimes);
-  return same ? [] : [`agy đổi bản so với lần fixture bridge PASS (CLI ${tested.cli || '?'} → ${cli || '?'}, runtime chat ` +
-    `${(tested.runtimes || []).join(',') || '?'} → ${runtimes.join(',') || '?'}): thu payload mới và so khoá với ` +
-    '`~/.gemini/config/bridge-fixtures/payloads.json`, rồi `node ~/.gemini/config/bridge-fixtures/run.cjs` ' +
-    '(đầu file run.cjs nói cách thu); tới lúc đó guard của agy có thể bỏ sót mà không báo.'];
+  if (same) return [];
+  // A new version: replay the fixtures and compare the payload shapes the bridge has seen since. Green
+  // records the versions; nothing seen yet stays quiet (a later dispatch checks again); a fail is told.
+  const runner = path.join(path.dirname(stampFile), 'run.cjs');
+  let r;
+  // 8 s: inside this hook's own timeout and the agy bridge's 12 s for it; a stall stays quiet (null).
+  try { r = spawnSync(process.execPath, [runner], { encoding: 'utf8', timeout: 8000 }); } catch (_) { return []; }
+  if (!r || r.status === 0 || r.status === 3 || r.status === null) return [];
+  const tail = String(r.stdout || '').split('\n').filter((l) => /^(FAIL|  )/.test(l)).slice(0, 8).join('\n');
+  return [`agy đổi bản (CLI ${tested.cli || '?'} → ${cli || '?'}, runtime chat ${(tested.runtimes || []).join(',') || '?'} → ` +
+    `${runtimes.join(',') || '?'}) và fixture bridge FAIL: guard của agy có thể bỏ sót mà không báo. ` +
+    `\`node ${runner}\` cho chi tiết:\n${tail}`];
 }
 
 // The receipts in the output: `.result.dispatchId` of each JSON block, else the ids of a filtered one
@@ -184,7 +192,20 @@ function sendLines(command, show = showState) {
   });
 }
 
-module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, acpHomes };
+// The stall watch for each new dispatch, ready to run: wakes the coordinator when the worker ends, or
+// its worktree sits still for 10 minutes, or its transcript shows an API error streak. It reads no
+// inbox (`check`), so it takes no message from Orca's wake-ups.
+function watchLines(ids) {
+  return ids.map((d) => {
+    const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}`;
+    return `Theo dõi treo cho ${d}: \`~/.claude/scripts/watch.sh --once --check "${w}" --ok done --wait running\`, rồi ` +
+      'cùng lệnh bỏ `--once`, thêm `--deadline <thời lượng tới giờ đã hẹn user + biên, vd 2h30m> --every 120 --checkpoint 3000 --why-wait ' +
+      '"worker đang làm, coordinator không làm thay"`, chạy background. `stale` là tín hiệu để đọc `worker-read` ' +
+      'hai lần cách vài phút, không phải để dừng hay chạy lại worker (ntv-orca § 3).';
+  });
+}
+
+module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, watchLines, acpHomes };
 if (require.main !== module) return;
 
 let raw = '';
@@ -211,6 +232,7 @@ process.stdin.on('end', () => {
     if (!ids.length) lines = [`Output không có dispatchId của receipt (bị lọc, hay lệnh lỗi trước khi giao): ${FALLBACK}`];
     else if (!lines.length) lines = [`Không đọc được ${ids.join(', ')} từ Orca: ${FALLBACK}`];
     if (ANTIGRAVITY.test(command)) lines.push(...agyConfigLines(), ...agyVersionLines());
+    lines.push(...watchLines(ids));
     for (const message of errors) {
       const refs = guideLines(message);
       lines.push(`ok:false "${message.slice(0, 200)}"` + (refs.length

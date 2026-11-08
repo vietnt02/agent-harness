@@ -43,6 +43,12 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
   when grep finds none), within the `rules-budget` caps; no rule names an incident or its date;
   an example stays only when the rule is unclear without it. Before another "don't", weigh a
   "do" sentence or an automatic check: rules made only of restraints teach stopping early.
+- The harness guides; the work's output is what counts, and every block costs the agent a read and
+  a retry. A slip seen once is fixed by a sentence; a hook only for one that recurs and spoils
+  output. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a
+  send, a secret, a production write, a session the user cannot type into); anything else is a
+  reminder said once (context back, or `hooks/lib/block-once.cjs` when it must land before the
+  command runs). Never chase every route around a check.
 - A fix lands where it holds: a repo's convention in that repo (its PR), a fact about this machine
   or Viet's setup in `~/.claude/knowledge/`, a skill only what holds on any machine;
   `tests/skills-generic.test.cjs` fails on the common marks (a home or app-data path, an Orca ID, a

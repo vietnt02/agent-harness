@@ -112,11 +112,11 @@ chạy dev server thì spec cấp port riêng kèm `--strictPort`.
 một worker, một nhánh, dispatch cùng lúc. Serial chỉ khi user nói hoặc áp lực bộ nhớ ≥ 2
 (`sysctl -n kern.memorystatus_vm_pressure_level`). Cap là ràng buộc RAM của máy
 (`knowledge/orca.md`); "max N" của user là N worker sống cùng lúc xuyên phiên. Còn slot và còn việc
-đủ điều kiện thì giao ngay, không chờ cả wave. Mỗi `worker-start` có dòng `# Track:` liệt kê việc
-và file (hook `dispatch-split-guard` kiểm). Các track phụ thuộc nhau mà repo có cổng chạy toàn bộ
+đủ điều kiện thì giao ngay, không chờ cả wave. Dòng `# Track:` liệt kê việc và file giúp hook
+`dispatch-split-guard` nhắc khi một worker ôm các việc không chung file. Các track phụ thuộc nhau mà repo có cổng chạy toàn bộ
 test: worker commit local, coordinator gộp vào nhánh tích hợp, mở PR từ đó. Không `--no-verify`. Các nhánh phải
 lên production cùng nhau, hoặc cùng kích hoạt một pipeline deploy/publish tính tiền, cũng gộp như
-vậy thành một PR/MR để pipeline chạy một lần.
+vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không gộp worker — các worker vẫn chạy song song.
 
 **Chọn model** (user chốt; mỗi dòng một file trong `references/models/`):
 
@@ -137,8 +137,10 @@ vậy thành một PR/MR để pipeline chạy một lần.
 ## 3. Trong lúc chạy
 
 - **Giao xong thì kết thúc lượt; Orca đánh thức** khi worker `worker_done`, hỏi, hay dừng không báo
-  (`escalation`). Không chạy vòng poll hay script canh: process khác đọc `check` là lấy mất tin.
-  Mỗi lần được đánh thức: chạy đúng lệnh `check` của lời nhắc, xử lý mọi tin.
+  (`escalation`). Không chạy vòng poll hay script nào đọc `check`: process khác đọc là lấy mất tin.
+  Mỗi lần được đánh thức: chạy đúng lệnh `check` của lời nhắc, xử lý mọi tin. Riêng việc theo dõi treo:
+  `watch.sh` với `~/.claude/scripts/worker-stall.cjs` (receipt của `worker-start` in sẵn lệnh; nó không
+  đọc `check`), vì worker lặp lỗi API hay đứng im thì Orca không đánh thức.
 - **Trả lời `ask` ngay.** Worker hỏi vì thiếu quyền hay credential → trả lời bằng đường đã ghi trong
   `AGENTS.md`/`docs/` của repo, không chạy hộ. Ngoại lệ: lệnh ghi production là việc của coordinator.
 - **Session worker là tài sản** (~30–60k token nạp). Việc kế tiếp cụ thể cần đúng context của worker
@@ -162,7 +164,9 @@ vậy thành một PR/MR để pipeline chạy một lần.
 
 **Review.** Diff logic từ 30 dòng (trừ test, doc, lockfile), hoặc task chạm tiền, thư gửi khách, dữ
 liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-argon high`, worker riêng) trước khi
-merge. Reviewer nhận diff, Scope và mục Nghiệm thu; spec reviewer đòi dán nguyên findings kèm output
+merge. Reviewer nhận diff, Scope, mục Nghiệm thu và hai câu hỏi cố định: lượt chạy xấu nhất (số
+item tối đa × thời gian đo trên lần chạy thật) có lọt trần thời gian của runtime không; và tiến trình
+nào khác (nút bấm, lịch, webhook) ghi hay gửi cho cùng bản ghi trong cùng khoảng thời gian. Spec reviewer đòi dán nguyên findings kèm output
 thô và `file:dòng`; finding coordinator tự gửi worker cũng dẫn `file:dòng` cả nơi sinh lẫn nơi đọc
 giá trị, hoặc kèm một ca chạy thật. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
 thật; PASS của reviewer chỉ là đầu vào. **Tiêu chí dừng:** chỉ finding làm sai output thật khi dùng

@@ -473,7 +473,7 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       for (const l of miss) assert.equal(dispatchSplitGuard.prodWrites(l).length, 0, l);
     });
 
-    await t.test('a new spec that never asks for a mid-turn inbox check is blocked', () => {
+    await t.test('a new spec that never asks for a mid-turn inbox check gets a nudge, never a block', () => {
       const ws = 'worker' + '-start';
       const spec = (name, body) => { fs.writeFileSync(path.join(tmp, name), body); return name; };
       const flags = '--agent antigravity --model gemini-3.8-flash --effort high';
@@ -481,8 +481,16 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       const yes = spec('yes.md', 'Rà a.py. Chạy `orca orchestration check --peek` trước mỗi commit.');
       const no = spec('no.md', 'Rà a.py, báo lại.');
       const neg = spec('neg.md', 'Rà a.py. Đừng chạy `orca orchestration check --peek`.');
-      const block = (c, why) => { const r = run(c); assert.equal(r.status, 2, why); assert.match(r.stderr, /check --peek/, why); };
-      const pass = (c, why) => { const r = run(c); assert.equal(r.status, 0, `${why}: ${r.stderr}`); };
+      const block = (c, why) => {
+        const r = run(c);
+        assert.equal(r.status, 0, `${why}: ${r.stderr}`);
+        assert.match(r.stdout, /additionalContext.*inbox mid-turn/, why);
+      };
+      const pass = (c, why) => {
+        const r = run(c);
+        assert.equal(r.status, 0, `${why}: ${r.stderr}`);
+        assert.doesNotMatch(r.stdout, /inbox mid-turn/, why);
+      };
       block(cmd(`--spec-file ${no}`), 'spec without it');
       block(cmd(`--spec-file ${neg}`), 'a negated mention');
       block(`# nhắc: check --peek\n${cmd(`--spec-file ${no}`)}`, 'a comment in the command is not the spec');

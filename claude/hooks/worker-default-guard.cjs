@@ -3,7 +3,8 @@
  * worker-default-guard.cjs - PreToolUse(Write|Edit|MultiEdit|NotebookEdit|Bash): execution goes to Orca
  * workers (CLAUDE.md § Delegation); Claude edits a repo itself only in the cases ntv-implement
  * § Who works lists, and says which first. An edit to a file inside a git repo outside ~/.claude
- * is blocked until this session's note (rules/mine/session-notes.md) holds, under
+ * gets a reminder back as context (once per repo per session; the edit still runs: who edits costs
+ * quota, not output) until this session's note (rules/mine/session-notes.md) holds, under
  * `## Đang có hiệu lực`, a line `Người làm: Claude — <repo folder> — <evidence>` naming that repo
  * (its folder, or its main checkout's folder for a linked worktree), where the evidence is a
  * quoted sentence found in one of the user's messages, or a value change written with `→`.
@@ -17,8 +18,8 @@
  * revert, pull; in cwd, after `cd <dir>`, or under `-C <dir>`) in the repo ~/.claude/CLAUDE.md links into
  * (same git common dir) needs the same line, since a commit there needs no Edit.
  * Limit: a shell write (sed -i, heredoc) is not seen; `--git-dir`/`GIT_DIR` are not followed.
- * Fails open when git or stdin fails (no repo known: nothing to guard); fails closed when the note
- * or transcript cannot be read (no evidence: the block message says how to add it).
+ * Fails open when git or stdin fails (no repo known: nothing to guard); reminds when the note
+ * or transcript cannot be read (no evidence: the reminder says how to add it).
  */
 const fs = require('fs');
 const os = require('os');
@@ -207,7 +208,7 @@ function commitDirs(command, cwd) {
   return out;
 }
 
-// Why this `git commit` is blocked, or ''.
+// The reminder for this `git commit`, or ''.
 function commitProblem(data, notesDir, claudeDir) {
   const dirs = commitDirs(String(data.tool_input?.command || ''), data.cwd || process.cwd());
   const harness = dirs.length ? harnessRepo(claudeDir) : null;
@@ -222,19 +223,39 @@ function commitProblem(data, notesDir, claudeDir) {
   return '';
 }
 
+// The repo root of the last reminder built: the key it is said once per.
+let lastRoot = '';
+
 function blockMessage(what, repo) {
   const name = [...repo.names].pop();
+  lastRoot = repo.root;
   return (
-    `${what}: execution goes to Orca workers (CLAUDE.md § Delegation; ntv-orca). ` +
-    'Claude edits a repo itself only for a change to an existing value with no new logic, or work the user ' +
-    'named Claude for (ntv-implement § Who works); a harness bug met during other work goes into a kaizen ' +
-    'file (ntv-kaizen), not a fix. If one holds, first add under `## Đang có hiệu lực` of ' +
+    `${what}: the change goes ahead; a reminder, said once per repo this session. Execution usually goes to ` +
+    'Orca workers (CLAUDE.md § Delegation; ntv-orca): Claude edits a repo itself for a change to an existing value ' +
+    'with no new logic, or work the user named Claude for (ntv-implement § Who works); a harness bug met during ' +
+    'other work goes into a kaizen file (ntv-kaizen). If one holds, note it under `## Đang có hiệu lực` of ' +
     `this session's note: \`- Người làm: Claude — ${name} — "<the user's exact sentence naming Claude>"\` or ` +
-    `\`- Người làm: Claude — ${name} — <file>: <key> <old>→<new>\`. Otherwise dispatch a worker.`
+    `\`- Người làm: Claude — ${name} — <file>: <key> <old>→<new>\`. Otherwise hand the rest to a worker.`
   );
 }
 
-// Why this edit is blocked, or '' when it passes.
+
+// True the first time this session is reminded about this repo; remembers it.
+function firstNudge(sessionId, repoRoot) {
+  const file = path.join(os.tmpdir(), 'claude-worker-default', `${String(sessionId || 'none').replace(/[^\w-]/g, '_')}.json`);
+  let told = [];
+  try { told = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first time */ }
+  const key = String(repoRoot || '');
+  if (told.includes(key)) return false;
+  told.push(key);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(told));
+  } catch { /* reminded again next time: still only a note */ }
+  return true;
+}
+
+// The reminder for this edit, or '' when none is due.
 function problem(data, notesDir = NOTES_DIR, claudeDir = CLAUDE_DIR) {
   if (!data.session_id) return '';
   if (data.tool_name === 'Bash') return commitProblem(data, notesDir, claudeDir);
@@ -256,17 +277,19 @@ function problem(data, notesDir = NOTES_DIR, claudeDir = CLAUDE_DIR) {
   return blockMessage(`editing ${file} in ${repo.root}`, repo);
 }
 
-module.exports = { problem, commitDirs, harnessRepo, inside, realPath, repoOf, claimed, isWorker, liveLines, userTexts };
+module.exports = { problem, firstNudge, commitDirs, harnessRepo, inside, realPath, repoOf, claimed, isWorker, liveLines, userTexts };
 if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 process.stdin.on('end', () => {
   try {
-    const why = problem(JSON.parse(raw));
-    if (why) {
-      process.stderr.write(`worker-default-guard: ${why}\n`);
-      process.exit(2);
+    const data = JSON.parse(raw);
+    const why = problem(data);
+    if (why && firstNudge(data.session_id, lastRoot || why)) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `worker-default-guard: ${why}` },
+      }));
     }
   } catch (_) { /* fail-open */ }
   process.exit(0);

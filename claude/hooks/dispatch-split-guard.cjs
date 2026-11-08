@@ -1,18 +1,16 @@
 #!/usr/bin/env node
 /**
- * dispatch-split-guard.cjs - PreToolUse(Bash): `orca orchestration worker-start` is blocked until
- * the command (a `# Track:` comment line or its description) or visible text of this turn holds a
- * `Track:` line per worker, listing each task with the files it
- * touches: `Track: w17 ← sửa chốt [gui/chot.py, giao_dien.py] | tắt backend [app.py]`.
- * A worker given ≥2 tasks whose file sets do not chain through a shared source file is blocked: they are
- * separate tracks for separate workers (skills/ntv-orca/SKILL.md § 2, Song song và cap). Test, doc, plan and fixture files
- * never link tasks: a shared test suite is not a shared file. The user's request for serial work or memory pressure is written on the line as
- * `(serial: <lý do>)`; it counts only when one of the user's last 10 prompts asks for it ("chạy serial",
- * "làm tuần tự"; not a complaint, a negation, a question or "serial number") or
- * `kern.memorystatus_vm_pressure_level` is ≥2 (`DSG_PRESSURE` overrides it in tests). A single task whose
- * files sit under ≥3 top-level roots is blocked with no escape: groups that truly edit one shared source
- * file list it in each group and chain into one track. A command whose every worker-start is `--retry-of`
- * is exempt.
+ * dispatch-split-guard.cjs - PreToolUse(Bash): checks on `orca orchestration worker-start`. Blocks only
+ * what spoils a worker's whole run or hands it a production write; how the work was split is a nudge.
+ * Nudge (context back, the worker starts): a `Track:` line (in the command as a `# Track:` comment or
+ * its description, or in visible text of this turn) listing each task with the files it touches,
+ * `Track: w17 ← sửa chốt [gui/chot.py, giao_dien.py] | tắt backend [app.py]`, whose tasks share no
+ * source file, or whose one task spans ≥3 top-level roots: separate tracks for separate workers next
+ * time (skills/ntv-orca/SKILL.md § 2, Song song và cap). Test, doc, plan and fixture files never link
+ * tasks. `(serial: <lý do>)` on the line silences it when one of the user's last 10 prompts asks for
+ * serial work ("chạy serial", "làm tuần tự"; not a complaint, a negation, a question or "serial
+ * number") or `kern.memorystatus_vm_pressure_level` is ≥2 (`DSG_PRESSURE` overrides it in tests). No
+ * `Track:` line, or a command whose every worker-start is `--retry-of`: nothing said.
  * An antigravity worker started without `--effort` is blocked, `--retry-of` included: agy then runs
  * Medium, not the High ntv-orca § 2 (Chọn model) requires. `--terminal` reuses a running agy.
  * A claude worker whose `--model` is not a bare alias (opus, sonnet, fable, haiku) is blocked unless the
@@ -22,7 +20,7 @@
  * antigravity unless the user names another (ntv-orca § 2, Chọn model); a rule naming only what a
  * worker is not let the coordinator copy the codex example of the orchestration skill.
  * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
- * `orca orchestration check --peek` (a negated mention does not count) is blocked: before Orca 1.4.249
+ * `orca orchestration check --peek` (a negated mention does not count) gets a nudge: before Orca 1.4.249
  * a Chat worker saw a coordinator's `send` only after its turn ended, and on another agent or version
  * it may still, so the spec's inbox check is what makes a correction land mid-turn everywhere. A `--task` dispatch brings a Task whose
  * spec `task-create` brought; a spec this hook cannot read (`$var` path, stdin) is not judged.
@@ -52,8 +50,6 @@ const { execFileSync } = require('child_process');
 const { toSlash, expandHome } = require('./lib/platform.cjs');
 
 const TAIL_BYTES = 512 * 1024;
-const WAIT_MS = 1500;
-const POLL_MS = 100;
 
 // A command handing a worker text to act on: a spec, a message, an answer to its `ask`.
 const TO_WORKER = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/;
@@ -368,10 +364,13 @@ function unrelatedTasks(line, ctx) {
   return tasks.filter((_, i) => !linked.has(i)).map((t) => t.name);
 }
 
-function verdict(lines, input, ctx) {
+// A nudge on how the work was split, or null. With `advisory` (the hook) a dispatch with no `Track:`
+// line is not judged: the line helps the check, it is not owed.
+function verdict(lines, input, ctx, { advisory = false } = {}) {
   const own = `${input.command || ''}\n${input.description || ''}`.split('\n').filter((l) => /^\W*Track:/.test(l));
   const tracks = [...own, ...trackLines(lines)];
   if (!tracks.length) {
+    if (advisory) return null;
     return 'no `Track:` line. Put one per worker in the command as a comment line, above the call: ' +
       '`# Track: <wN> ← <task> [file, file] | <task> [file]` (text written before a call is not kept verbatim).';
   }
@@ -384,14 +383,15 @@ function verdict(lines, input, ctx) {
         'task (`| task [files]`), so unrelated groups go to separate workers, each on its own branch; the ' +
         'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca § 2, Song song và cap). ' +
         'Groups that truly edit one shared source file list that file in each group, and stay one track. ' +
-        'A shared test, doc, plan or fixture file does not link groups.';
+        'A shared test, doc, plan or fixture file does not link groups. The worker starts as given; split the next ' +
+        'dispatch if the groups are truly independent.';
     }
     const split = unrelatedTasks(line, ctx);
     if (split.length) {
       return `\`${line.trim()}\` bundles tasks that share no source file (${split.join(', ')}): give each its own ` +
         'worker, dispatched now (ntv-orca § 2, Song song và cap); shared test, doc, plan or fixture files do not count. Only the ' +
         'user\'s request for serial work or memory pressure ≥2 keeps them together, written on the line as ' +
-        '`(serial: <lý do>)`.' + serialNote;
+        '`(serial: <lý do>)`. The worker starts as given; this is a hint for the next split.' + serialNote;
     }
   }
   return null;
@@ -402,7 +402,17 @@ if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// Nudges collected so far, said as context when the hook ends, a crash included.
+const notes = [];
+function say() {
+  if (notes.length) {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `dispatch-split-guard: ${notes.join(' Also: ')}` },
+    }));
+  }
+  process.exit(0);
+}
 
 process.stdin.on('end', () => {
   try {
@@ -423,14 +433,12 @@ process.stdin.on('end', () => {
     }
     const starts = workerStarts(command);
     if (newSpecs(command, cwd).some((spec) => spec !== null && !readsInbox(spec))) {
-      process.stderr.write('dispatch-split-guard: the spec never asks the worker to read its inbox mid-turn. A Chat worker ' +
-        'gets a `send` mid-turn or only at its next `check --peek` depending on the Orca version (ntv-orca § 2, § 3). Add to the spec: ' +
-        '"chạy `orca orchestration check --peek` trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của ' +
-        'coordinator thì làm theo trước, tin đã làm theo thì bỏ qua khi thấy lại".\n');
-      process.exit(2);
+      notes.push('the spec never asks the worker to read its inbox mid-turn, so a correction may land only after its ' +
+        'turn (ntv-orca § 2, § 3). If you need to steer it, `send` the line: "chạy `orca orchestration check --peek` ' +
+        'trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo trước".');
     }
-    if (!starts.segs.length) process.exit(0);
-    if (onlyHelp(starts.segs)) process.exit(0);
+    if (!starts.segs.length) say();
+    if (onlyHelp(starts.segs)) say();
     const model = unpinnedClaudeModel(command, starts);
     if (model) {
       process.stderr.write(`dispatch-split-guard: a claude worker takes a bare alias (\`--model opus\`, sonnet, ` +
@@ -451,18 +459,12 @@ process.stdin.on('end', () => {
         'runs Medium. A model with one level gets exactly that level (`agy models`).\n');
       process.exit(2);
     }
-    if (starts.segs.every((seg) => /\s--retry-of\b/.test(seg))) process.exit(0);
+    if (starts.segs.every((seg) => /\s--retry-of\b/.test(seg))) say();
     const once = (f) => { let v; return () => (v === undefined ? (v = f()) : v); };
     const ctx = { serial: once(() => userAskedSerial(tailLines(transcript))), pressure: once(memoryPressure) };
-    let problem = verdict(tailLines(transcript), input, ctx);
-    for (let waited = 0; problem && waited < WAIT_MS; waited += POLL_MS) {
-      sleep(POLL_MS);
-      problem = verdict(tailLines(transcript), input, ctx);
-    }
-    if (problem) {
-      process.stderr.write(`dispatch-split-guard: ${problem}\n`);
-      process.exit(2);
-    }
-  } catch (_) { /* fail-open */ }
-  process.exit(0);
+    const problem = verdict(tailLines(transcript), input, ctx, { advisory: true });
+    if (problem) notes.push(problem);
+    say();
+  } catch (_) { /* fail-open: what was collected is still said */ }
+  say();
 });

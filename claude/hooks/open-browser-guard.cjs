@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * open-browser-guard.cjs - PreToolUse(Bash): keep pages for the user inside Orca, in this session's
- * worktree (knowledge/browser-debug.md § Verify UI).
+ * worktree (knowledge/browser-debug.md § Verify UI). Blocked once with the reminder; the same command
+ * run again passes (lib/block-once.cjs).
  * - `open` given an http(s) URL or a .html file opens the user's default browser, which is not
  *   their work browser (`-a <app>` / `--args` included: the page still opens; `-R`, `-e`, `-t` pass).
  * - `orca tab create` / `orca goto` without `--worktree` (or `goto --page`) land in whichever
@@ -44,8 +45,9 @@ if (require.main === module) {
       const data = JSON.parse(raw);
       if (data.tool_name !== 'Bash') process.exit(0);
       const why = problem((data.tool_input || {}).command || '', process.env.CLAUDE_PROJECT_DIR || data.cwd);
-      if (why) {
-        process.stderr.write(`open-browser-guard: ${why}\n`);
+      const { firstTime, again } = require('./lib/block-once.cjs');
+      if (why && firstTime(data.session_id, 'open-browser-guard', (data.tool_input || {}).command || '')) {
+        process.stderr.write(`open-browser-guard: ${why}${again(data.session_id)}\n`);
         process.exit(2);
       }
     } catch (_) { /* fail-open */ }
