@@ -26,12 +26,14 @@ function firstTime(sessionId, hook, command, now = Date.now()) {
   const was = seen[key];
   seen[key] = now;
   for (const [k, t] of Object.entries(seen)) if (now - t > TTL_MS) delete seen[k];
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}`;
   try {
     fs.mkdirSync(DIR, { recursive: true });
-    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}`;
     fs.writeFileSync(tmp, JSON.stringify(seen));
     fs.renameSync(tmp, file);
-  } catch { /* not remembered: the next run is blocked once more */ }
+  } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* nothing left */ }
+  }
   return !(was && now - was <= TTL_MS);
 }
 

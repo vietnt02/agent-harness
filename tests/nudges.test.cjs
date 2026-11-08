@@ -132,10 +132,17 @@ test('watch-guard: an unwatched loop is held once; a session lock is always bloc
   const loop = { command: 'while true; do ls; sleep 5; done', run_in_background: true };
   assert.equal(run(loop).status, 2);
   assert.equal(run(loop).status, 0, 'the same loop again passes');
-  const py = { command: "python3 - <<'EOF'\nwhile True:\n    print('ssh host')\nEOF" };
-  assert.equal(run(py).status, 0, 'loop words inside a Python heredoc are text, not a shell loop');
-  const sh = { command: "bash <<'EOF'\nwhile true; do ssh host uptime; sleep 5; done\nEOF" };
-  assert.equal(run(sh).status, 2, 'a heredoc a shell runs is still read');
+  const msg = { command: "git commit -F - <<'EOF'\nfix: while waiting do not sleep\nEOF" };
+  assert.equal(run(msg).status, 0, 'loop words in a commit message are text, not a poll');
+  const py = { command: "python3 - <<'EOF'\nwhile x:\n    do(); ssh(); sleep(1)\nEOF" };
+  assert.equal(run(py).status, 0, 'a Python heredoc is text');
+  for (const runner of ['bash', 'ssh web1', 'sudo -u app -s']) {
+    const loop = { command: `${runner} <<'EOF'\nwhile true; do uptime; sleep 5; done\nEOF`, run_in_background: true };
+    assert.equal(run(loop).status, 2, `${runner} runs its heredoc: still read`);
+  }
+  const remote = { command: "ssh web1 <<'EOF'\nwhile true; do uptime; sleep 5; done\nEOF" };
+  assert.equal(run(remote).status, 2, 'a foreground remote poll locks the session');
+  assert.equal(run(remote).status, 2, 'and stays blocked');
   const lock = { command: 'npm test', timeout: 300000 };
   assert.equal(run(lock).status, 2);
   assert.equal(run(lock).status, 2, 'a foreground lock stays blocked');
@@ -165,6 +172,8 @@ test('turn-guard: a reply asking two things is sent back once', () => {
   assert.equal(manyAsks('**Cần bạn:** cho phép lệnh `git push origin x` không?\n- rule: Protected Branch Push\n- file: ~/.claude/settings.json\n- tác động: push lên nhánh x'), null, 'the ask to allow a blocked command lists its parts');
   assert.equal(manyAsks('**Cần bạn:** chọn một:\n1. merge ngay\n2. chờ CI xanh rồi merge'), null, 'a closed choice lists its options');
   assert.equal(manyAsks('**Cần bạn:** mở https://example.com/a?b=1 rồi duyệt không?'), null, 'a URL query is no question');
+  assert.match(manyAsks('**Cần bạn:** merge [#21](https://github.com/o/r/pull/21)? Và báo khách không?'), /2 questions/, 'a ? after a link counts');
+  assert.equal(manyAsks('**Cần bạn:** chọn một:\n1. merge ngay?\n2. chờ CI xanh rồi merge?'), null, 'options ending in ? are one choice');
   assert.match(manyAsks('**Cần bạn:** merge !67 không? Có báo khách không?'), /2 questions/);
   assert.equal(manyAsks('**Cần bạn:** đồng ý không?\n\nGhi chú: vì sao? chưa rõ?'), null, 'text after the block does not count');
   assert.equal(manyAsks('```\n**Cần bạn:** a?\n```\n**Cần bạn:** chạy `a?b` không?'), null, 'code never counts');
@@ -212,6 +221,16 @@ test('worker-stall: a stopped worker is done; errors count only in new worker me
     asked.length = 0;
     assert.equal(w.newErrors('ctx_t', (a) => { asked.push(a[a.indexOf('--cursor') + 1]); return page([], false, 'c2'); }, state), 0);
     assert.deepEqual(asked, ['c2'], 'the next run starts where the last one ended');
+    asked.length = 0;
+    const rejectSaved = (a) => {
+      const c = a.includes('--cursor') ? a[a.indexOf('--cursor') + 1] : '-';
+      asked.push(c);
+      if (c === 'c2') throw Object.assign(new Error('Command failed'), { stderr: 'source_changed' });
+      return pages[0].result.transcript.nextCursor === c ? pages[1] : pages[0];
+    };
+    assert.equal(w.newErrors('ctx_t', rejectSaved, state), 0, 'a rejected cursor resets without counting old history');
+    assert.deepEqual(asked, ['c2', '-', 'c1']);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'ctx_t.json'), 'utf8')).cursor, 'c2', 'and the cursor is at the end again');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

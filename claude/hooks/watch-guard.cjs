@@ -33,12 +33,13 @@ const expand = (p) => expandHome(p.replace(/^(?:\$HOME|\$\{HOME\})(?=[/\\])/, os
 const isRun = (before) => RUNS.test(before) && !/\b(?:ba|z)?sh(?:\s+-\S+)*\s+-\w*n\w*\s+$/.test(before);
 // A heredoc body is data for another program (`python3 - <<'EOF'`), not shell to run.
 const dropHeredocs = (s) => s.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<heredoc');
-// The body of a heredoc a shell runs (`bash <<EOF`, `| sh`) is commands; any other body (a Python
-// script, a file written with `cat >`, a commit message) is text, and its words are no shell loop.
+// A heredoc body is commands unless a known non-shell reader takes it (a Python or Node script, SQL,
+// a file written with `cat >`/`tee`, a commit message): only then are its words text, not a loop.
+// `bash <<EOF`, `ssh host <<EOF`, `sudo -s <<EOF` keep their body.
 const HEREDOC = /([^\n]*)<<-?\s*(['"]?)(\w+)\2([^\n]*)\n([\s\S]*?)\n[ \t]*\3[ \t]*(?=\n|$)/g;
-const SHELL_FED = /(^|[\s|;&(])(ba|z|da)?sh\b(?!\S*\.)/;
+const TEXT_READER = /(^|[\s|;&(])(python[\d.]*|node|ruby|perl|psql|mysql|sqlite3|jq|cat\s*>{1,2}|tee|git\s+commit)\b[^|;&]*$/;
 const dropTextHeredocs = (s) => s.replace(HEREDOC, (all, before, q, tag, after) =>
-  (SHELL_FED.test(`${before} ${after}`) ? all : `${before}<<heredoc${after}`));
+  (TEXT_READER.test(before) ? `${before}<<heredoc${after}` : all));
 
 // The arguments of each place the command runs watch.sh, up to the next separator; quoted
 // strings are blanked first, so `--check "x --once"` does not count as --once.

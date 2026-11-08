@@ -138,13 +138,14 @@ function handedGuess(text) {
 // Code, inline code and URLs never count.
 function manyAsks(text) {
   const lines = String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
-    .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/\S+/g, ' '));
+    .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/[^\s)]+?(?=[?!.,;:]*(?:[\s)]|$))/g, ' '));
   const at = lines.map((l, i) => (ASK.test(l) ? i : -1)).filter((i) => i >= 0);
   if (at.length >= 2) return `${at.length} \`**Cần bạn:**\` lines`;
   if (!at.length) return null;
   const block = [];
   for (let i = at[0]; i < lines.length && (i === at[0] || lines[i].trim()); i++) block.push(lines[i]);
-  const questions = (block.join('\n').match(/\?/g) || []).length;
+  const prose = block.filter((l, i) => i === 0 || !/^\s*([-*+]|\d+[.)])\s/.test(l));
+  const questions = (prose.join('\n').match(/\?/g) || []).length;
   return questions >= 2 ? `${questions} questions in the \`**Cần bạn:**\` block` : null;
 }
 

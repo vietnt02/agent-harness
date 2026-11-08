@@ -408,7 +408,11 @@ function recordShape(payload) {
     if (seen[shape] && now - seen[shape] < 5 * 60 * 1000) return;
     seen[shape] = now;
     fs.mkdirSync(path.dirname(SHAPES_FILE), { recursive: true });
-    fs.writeFileSync(SHAPES_FILE, JSON.stringify(seen, null, 2) + '\n');
+    // Written whole (temp + rename): a parallel bridge reading a half-written file would start from {}
+    // and drop a shape run.cjs must see.
+    const tmp = `${SHAPES_FILE}.${process.pid}.${now}`;
+    fs.writeFileSync(tmp, JSON.stringify(seen, null, 2) + '\n');
+    fs.renameSync(tmp, SHAPES_FILE);
   } catch (_) { /* a record lost costs one later check, never a guard */ }
 }
 

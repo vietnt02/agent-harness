@@ -49,12 +49,20 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
   try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { /* first run */ }
   let cursor = state.cursor;
   let count = 0;
+  // A saved cursor Orca rejects (`source_changed`) is dropped once: the run reads from the start
+  // again and only moves the cursor to the end, counting nothing, so old history is not new errors.
+  let counting = true;
   for (let page = 0; page < MAX_PAGES; page++) {
     const a = ['orchestration', 'worker-read', '--dispatch', dispatch, '--source', 'transcript', '--limit', '50', '--json'];
     if (cursor) a.push('--cursor', cursor);
-    const r = read(a).result || {};
+    let r;
+    try { r = read(a).result || {}; } catch (e) {
+      if (!cursor || page > 0 || !counting) throw e;
+      cursor = undefined; counting = false; page = -1;
+      continue;
+    }
     const t = r.transcript || {};
-    for (const m of t.messages || []) if (API_ERROR.test(workerText(m))) count++;
+    if (counting) for (const m of t.messages || []) if (API_ERROR.test(workerText(m))) count++;
     if (r.cursor || t.nextCursor) cursor = t.nextCursor || r.cursor;
     if (!t.limited) break;
   }
@@ -105,6 +113,7 @@ if (o.bad || !o.dispatch || !(o.idle > 0) || !(o.errors > 0)) {
 try {
   process.stdout.write(`${status(o)}\n`);
 } catch (e) {
-  process.stderr.write(`worker-stall: ${e.message.split('\n')[0]}\n`);
+  const why = String(e.stderr || '').split('\n').find((l) => l.trim()) || String(e.message).split('\n')[0];
+  process.stderr.write(`worker-stall: ${why}\n`);
   process.exit(1);
 }
