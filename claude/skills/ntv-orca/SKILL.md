@@ -72,9 +72,9 @@ worker một dòng:
 - Mỗi phase kèm bằng chứng chưa làm, đọc từ nhánh chính và PR/MR đang mở của repo đích, không từ
   cột trạng thái của plan. Worker không sửa bảng trạng thái trong file plan dùng chung (các nhánh
   conflict khi merge); coordinator cập nhật sau merge.
-- Worker tên `w<N>-<việc>`, N theo thứ tự dispatch, không cấp lại; dùng cho `--name`,
-  `--display-name`, `--task-title` và mọi báo cáo. Reviewer là một dòng `w<N>-review-w<M>`, tính
-  vào cap.
+- Worker tên `w<N>-<việc>`, N theo thứ tự dispatch, không cấp lại; dùng cho `--task-title`
+  và mọi báo cáo; `--name`, `--display-name` chỉ thêm khi `--worktree new-child|new-top-level`.
+  Reviewer là một dòng `w<N>-review-w<M>`, tính vào cap.
 - Đổi phase, worker hay model sau khi user "ok" → hỏi lại, không báo sau.
 - Manifest chỉ phủ tầng A của worker. Tầng B hỏi riêng một lần, tầng C hỏi ngay trước khi làm
   (`CLAUDE.md` § Irreversible actions). Bot không người không bao giờ mở B hay C.

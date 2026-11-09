@@ -231,6 +231,22 @@ test('worker-stall: a stopped worker is done; errors count only in new worker me
     assert.equal(w.newErrors('ctx_t', rejectSaved, state), 0, 'a rejected cursor resets without counting old history');
     assert.deepEqual(asked, ['c2', '-', 'c1']);
     assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'ctx_t.json'), 'utf8')).cursor, 'c2', 'and the cursor is at the end again');
+    // First run: the worker writes between pages, so Orca rejects the cursor it just issued; the run
+    // restarts once and counts from zero. The last page stays `limited` (clipped text), empty.
+    const fresh = path.join(dir, 'fresh');
+    asked.length = 0;
+    let moved = false;
+    const midRun = (a) => {
+      const c = a.includes('--cursor') ? a[a.indexOf('--cursor') + 1] : '-';
+      asked.push(c);
+      if (c === 'c1' && !moved) { moved = true; throw Object.assign(new Error('Command failed'), { stderr: 'source_changed' }); }
+      if (c === '-') return pages[0];
+      if (c === 'c1') return page([], true, 'c2');
+      return page([], true, c);
+    };
+    assert.equal(w.newErrors('ctx_f', midRun, fresh), 1, 'a first run counts its history once');
+    assert.deepEqual(asked, ['-', 'c1', '-', 'c1'], 'restarts once, then stops at the empty page');
+    assert.throws(() => w.newErrors('ctx_g', () => { throw Object.assign(new Error('x'), { stderr: 'boom' }); }, fresh), /x/, 'any other error still stops the run');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
