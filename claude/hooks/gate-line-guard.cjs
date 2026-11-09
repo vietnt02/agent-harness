@@ -112,11 +112,12 @@ function writesMainCheckout(command, cwd) {
   };
   // The literal variables a command in `scope` sees; a value that cannot be known unsets its name.
   // Any command other than a plain assignment or a `cd` may rebind a name (`unset`, `read`, `for`,
-  // `{ X=…; }`, a function), so it forgets them all: a variable is followed only right after it is set.
+  // `{ X=…; }`, a function), so it forgets them all for its own shell: a variable is followed only
+  // right after it is set. A command inside `$(…)` or `(…)` cannot rebind the outer shell's names.
   const varsIn = (scope) => {
     const vars = {};
     for (const v of sets) {
-      if (v.forget) { for (const k of Object.keys(vars)) delete vars[k]; continue; }
+      if (v.forget) { if (inScope(scope, v.scope)) for (const k of Object.keys(vars)) delete vars[k]; continue; }
       if (inScope(scope, v.scope)) { if (v.value === null) delete vars[v.name]; else vars[v.name] = v.value; }
     }
     return vars;
@@ -136,7 +137,7 @@ function writesMainCheckout(command, cwd) {
       cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars) });
       continue;
     }
-    sets.push({ forget: true });
+    sets.push({ forget: true, scope: raw.scope });
     const script = innerScript(words);
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);

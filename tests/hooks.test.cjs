@@ -921,6 +921,7 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         'git fetch origin && git show origin/main:f',
         `WT="${L}"\ncd $WT && git commit -q --allow-empty -m x`,
         `export WT="${L}"; git -C "\${WT}" reset --hard`,
+        `WT="${L}"; git -C "$WT" commit -m "$(date)"`,
       ]) assert.equal(writes(c), false, c);
     });
     await t.test('git that runs stays gated, whatever text surrounds it', () => {
