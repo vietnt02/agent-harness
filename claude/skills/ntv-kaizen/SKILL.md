@@ -19,8 +19,9 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
      wrong, Viet had to interrupt, block or undo);
    - a defect of the harness itself (hook, rule, skill), Claude's mistake or not
      (`## Rule đã phạm`: "lỗi của harness").
-   Anything else is no file, a break of only Claude Code's own instructions (its system prompt,
-   tool descriptions) included: Viet cannot change those, so a file about them is wasted.
+   Anything else is no file. Nor is a break of Claude Code's built-in instructions (system
+   prompt, tool descriptions) that no file above repeats, whatever its consequence, and never as
+   "rule còn thiếu": Viet cannot change them.
 3. Per failure pattern, `ls ~/Desktop/kaizen-*`: a file already has it → add a `## Lần lặp`
    entry there. Otherwise write `~/Desktop/kaizen-<yymmdd>-<slug>.md` (Vietnamese):
    - `# <one-line title>`, then `Phiên: <task> (session <id>)`.
