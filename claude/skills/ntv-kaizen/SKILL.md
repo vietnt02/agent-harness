@@ -38,8 +38,8 @@ description: "Record what this session showed a hook, script, skill or ambiguous
 4. Never offer to apply a kaizen; Viet opens a session for that. A harness defect met during other
    work gets no fix, PR or ask to open one in that session.
 5. In a kaizen session no file is written: what step 2 would file, met there, is fixed in that
-   session, with no ask (anything else only in the task's output, step 1), once the topic at hand closes (Viet opened the session
-   for this; a new file costs him another session).
+   session, with no ask (anything else only in the task's output, step 1), once the topic at
+   hand closes (Viet opened the session for this; a new file costs him another session).
 
 ## Apply kaizen files (a session where Viet opens them)
 

@@ -1236,7 +1236,7 @@ test('session-notes: once every note of the session is done, the kaizen summary 
     assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [], 'only once per session');
     assert.deepEqual(notes.closedNote([{ file }], 's2', marks), [file], 'another session has its own mark');
     assert.match(notes.kaizenReminder([file], '/p/s1.jsonl'), /\/p\/s1\.jsonl, not your memory/);
-    // Only what code or a skill must fix is listed: a clear rule broken without harm is no file.
+    // Only what a hook, script, skill or reworded sentence must fix is listed: a clear rule broken without harm is no file.
     for (const kind of [/only what a hook, script, skill or reworded sentence must fix/, /a harness defect met/,
       /a serious break no hook stops yet .*its fix is a hook, never a sentence/, /two fair readings of which lead to two different actions/])
       assert.match(notes.kaizenReminder([file]), kind);
