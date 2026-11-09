@@ -1178,7 +1178,12 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `git ls-files ${E}`, `diff -q ${E} b`, `cmp -s ${E} b`, `sha256sum ${E}`,
     `docker compose -p myproj --env-file ${E} up -d`, `git -C repo ls-files ${E}`, `source ${E} && make | tail -5`,
     `cat ${E} # secret-ok: "cho đọc file env nhé"`, 'ls -la',
+    // A heredoc body written to a file only names it: backticks there are markdown, not a substitution.
+    `cat > README.md <<'EOF'\n| names of \`/root/app/${E}\` |\nEOF`, `cat > a.md <<EOF\nsee ${E} and \\$(not run) here\nEOF`,
   ]) assert.equal(run('Bash', cmd), '', cmd);
+  // The checker reports a template in markdown quotes: no secret in it.
+  const quoted = { checkPrivacy: () => ({ blocked: true, accesses: [{ filePath: `\`deploy/${E}.example\`` }] }) };
+  assert.equal(run('Bash', `cat > a.md <<EOF\nsee \\\`deploy/${E}.example\\\`\nEOF`, { checker: quoted, userTexts }), '');
   for (const cmd of [
     `cat ${E}`, `cat<${E}`, `sort < ${E}`, `cat ${E}>out.txt`, `cat ${E} | wc -l`, `f=${E}; cat $f`,
     `grep DB_URL ${E}`, `grep -esecret ${E}`, `grep -- -c ${E}`, `cut -d= -f1 ${E}`, `cut -d= -f1 --complement ${E}`,
@@ -1188,6 +1193,8 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `cat <>${E}`, `cp ${E} ${E}.example`, `docker compose --env-file ${E} convert`, `uv run --env-file ${E} python -c x`,
     `cat $(ls ${E})`, `ls ${E} | xargs cat`, `set -e -x; source ${E}`, `set -v; source ${E}`, `bash -o xtrace -c "source ${E}"`,
     `grep -e -c ${E}`,
+    // A substitution that runs still reads it: an unquoted heredoc, a heredoc fed to a shell.
+    `cat > a.md <<EOF\n$(cat ${E})\nEOF`, `cat > a.md <<EOF\n\`cat ${E}\`\nEOF`, `bash <<'EOF'\ncat ${E}\nEOF`,
     `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`, 'cat k/server.pem',
   ]) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   assert.match(run('Read', E), /secret-file-guard/);

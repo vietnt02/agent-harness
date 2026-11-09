@@ -5,6 +5,9 @@
  * secret-file-guard.cjs - keeps secret values out of the conversation, in place of AgentKit's
  * privacy-block (turned off with `ak config prefs set hooks.privacy-block false`). The risk is a
  * value entering the transcript, so the guard judges what a call prints, not which file it names.
+ * Scope: ordinary commands that would leak a secret by slip (`cat .env`, `grep KEY .env`), never
+ * every route an agent set on reading one could take; a case is added only when it is an ordinary
+ * command, and text that merely names a secret file must not be blocked.
  * - Which paths a call touches and which of them are secret: AgentKit's own checker
  *   (`~/.claude/hooks/lib/privacy-checker.cjs` `checkPrivacy`, required, never edited: editing a kit
  *   lib makes `ak update` abort), so key and credential patterns follow kit updates. No checker
@@ -32,7 +35,7 @@
 
 const os = require('os');
 const path = require('path');
-const { commands, program, innerScript } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, dropHeredocs } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
@@ -195,7 +198,8 @@ function quietUse(command) {
   // A quiet program still prints the file's name: `cat $(ls .env)`, `ls .env | xargs cat` turn it
   // back into a read. A plain pipe is judged per command (`cat .env | wc` fails at `cat`).
   if (/\bxargs\b/.test(command)) return false;
-  for (const sub of command.match(/\$\([^)]*\)|`[^`]*`|<\([^)]*\)/g) || []) if (/\.env\b/i.test(sub)) return false;
+  // A heredoc body written to a file is text (backticks there are markdown): only substitutions that run count.
+  for (const sub of dropHeredocs(command).match(/\$\([^)]*\)|`[^`]*`|<\([^)]*\)/g) || []) if (/\.env\b/i.test(sub)) return false;
   for (const words of all) {
     const inner = innerScript(program(words));
     if (inner !== null) {
@@ -222,6 +226,8 @@ function approved(command, transcript, userTexts) {
 function decide(data, { checker = loadChecker(), userTexts = require('./worker-default-guard.cjs').userTexts } = {}) {
   const tool = data.tool_name || '';
   const access = secretAccess(data, checker);
+  // A template the checker reports in markdown quotes (`` `x/.env.example` ``) holds no secret.
+  access.paths = access.paths.filter((p) => !SAFE.test(String(p).replace(/^[`'"]+|[`'"]+$/g, '')));
   if (!access.uninspectable && access.paths.length === 0) return '';
   const command = typeof (data.tool_input || {}).command === 'string' ? data.tool_input.command : '';
   if (command && approved(command, data.transcript_path, userTexts)) return '';
