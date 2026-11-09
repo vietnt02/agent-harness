@@ -4,6 +4,7 @@
  * write/delete/restart, scp or rsync) is blocked until the command (a `# Gate:` comment line or its
  * description) or visible text of the current turn holds `Gate:` (CLAUDE.md § Mutation gate). Edit/Write hooks never see these commands, and
  * the line was skipped there before (2026-10-13, n8n-pg on vps_n8n).
+ * A `Gate:` already in an earlier Bash call of the turn counts, so it is written once per turn.
  * Like answer-first.cjs, re-reads the transcript for up to WAIT_MS before blocking, since text
  * written right before the call reaches disk ~0.1 s later. Text written right before a tool call is
  * stored as a paraphrased `narration` thinking block (2026-10-15), so only the call itself is reliable. Subagents are skipped. Fails open.
@@ -20,7 +21,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { promptText } = require('./lib/user-intent.cjs');
 const { expandHome } = require('./lib/platform.cjs');
-const { commands, program, innerScript } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, assignments, expandVars } = require('./lib/shell-words.cjs');
 
 const TAIL_BYTES = 512 * 1024;
 const WAIT_MS = 1500;
@@ -84,12 +85,14 @@ function gitWrite(raw, words) {
 }
 
 // The directory a `cd`/`pushd` leads to from `base`, or null when it cannot be known here (a
-// variable, `-`, a stack entry, a directory that does not exist yet).
-function cdTarget(words, base) {
+// variable the command did not set to a literal, `-`, a stack entry, a directory that does not
+// exist yet).
+function cdTarget(words, base, vars = {}) {
   if (base === null) return null;
   const args = words.slice(1).filter((a, k, all) => !(/^-[LPe@]+$/.test(a) && all.slice(0, k).every((b) => b.startsWith('-'))));
-  const target = args[0] === '--' ? args[1] : args[0];
-  if (words[0] === 'popd' || !target || target === '-' || /^[+-]\d+$/.test(target) || /[$`]/.test(target)) return null;
+  const raw = args[0] === '--' ? args[1] : args[0];
+  const target = raw && expandVars(raw, vars);
+  if (words[0] === 'popd' || !target || target === '-' || /^[+-]\d+$/.test(target)) return null;
   const dir = resolveDir(target, base);
   return fs.existsSync(dir) ? dir : null;
 }
@@ -100,25 +103,42 @@ function cdTarget(words, base) {
 // script of `bash -c`/`eval` is read the same way.
 function writesMainCheckout(command, cwd) {
   const cds = [];
+  const sets = [];
+  const inScope = (scope, of) => scope === of || scope.startsWith(`${of}.`);
   const dirIn = (scope) => {
     let dir = cwd;
-    for (const cd of cds) if (scope === cd.scope || scope.startsWith(`${cd.scope}.`)) dir = cd.dir;
+    for (const cd of cds) if (inScope(scope, cd.scope)) dir = cd.dir;
     return dir;
+  };
+  // The literal variables a command in `scope` sees; a value that cannot be known unsets its name.
+  const varsIn = (scope) => {
+    const vars = {};
+    for (const v of sets) if (inScope(scope, v.scope)) { if (v.value === null) delete vars[v.name]; else vars[v.name] = v.value; }
+    return vars;
   };
   const isMain = (dir) => dir === null || isMainCheckout(dir);
   for (const raw of commands(command)) {
     const words = program(raw);
+    const vars = varsIn(raw.scope);
+    const set = assignments(raw);
+    if (set) {
+      for (const [name, value] of set) sets.push({ scope: raw.scope, name, value: expandVars(value, vars) });
+      continue;
+    }
     let here = dirIn(raw.scope);
-    if (words.chdir !== undefined) here = cdTarget(['cd', words.chdir], here);
+    if (words.chdir !== undefined) here = cdTarget(['cd', words.chdir], here, vars);
     if (['cd', 'pushd', 'popd'].includes(words[0])) {
-      cds.push({ scope: raw.scope, dir: cdTarget(words, here) });
+      cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars) });
       continue;
     }
     const script = innerScript(words);
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);
     if (!git) continue;
-    const dir = git.dirs && git.dirs.reduce((d, c) => (d === null || /[$`]/.test(c) ? null : resolveDir(c, d)), here);
+    const dir = git.dirs && git.dirs.reduce((d, c) => {
+      const to = d === null ? null : expandVars(c, vars);
+      return to === null ? null : resolveDir(to, d);
+    }, here);
     if (isMain(git.dirs ? dir : null)) return true;
   }
   return false;
@@ -139,14 +159,17 @@ function tailLines(file) {
   }
 }
 
-// True once visible assistant text since the user's latest prompt holds `Gate:`.
+// True once, since the user's latest prompt, visible assistant text or an earlier Bash call (its
+// command or description) holds `Gate:`: the line is printed once per turn, before its first change.
 function gatePrinted(lines) {
+  const holds = (b) => (b.type === 'text' && String(b.text).includes('Gate:')) ||
+    (b.type === 'tool_use' && b.name === 'Bash' && `${b.input?.command || ''}\n${b.input?.description || ''}`.includes('Gate:'));
   for (let i = lines.length - 1; i >= 0; i--) {
     let rec;
     try { rec = JSON.parse(lines[i]); } catch { continue; }
     if (promptText(rec) !== null) return false;
     const blocks = (rec.type === 'assistant' && rec.message?.content) || [];
-    if (blocks.some((b) => b.type === 'text' && b.text.includes('Gate:'))) return true;
+    if (Array.isArray(blocks) && blocks.some(holds)) return true;
   }
   return false;
 }

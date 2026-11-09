@@ -8,7 +8,8 @@
  * guard can tell that a `cd` inside `(…)` or `$(…)` ends with it.
  * Heredoc bodies are dropped unless the heredoc feeds a shell (`bash <<EOF`), whose body runs; an
  * unquoted heredoc keeps the substitutions in its body, which run.
- * Expansions (`$URL`) are left as written: a guard cannot see their value.
+ * Expansions (`$URL`) are left as written; `assignments` and `expandVars` let a guard follow a
+ * variable the same command set to a literal (`WT=/path` … `cd $WT`).
  */
 const HEREDOC = /<<-?[ \t]*(['"]?)([^\s'"<>;&|()]+)\1([^\n]*)\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g;
 
@@ -197,4 +198,19 @@ function innerScript(words) {
   return at > 0 && at + 1 < words.length ? words[at + 1] : null;
 }
 
-module.exports = { commands, program, innerScript, dropHeredocs };
+// The `NAME=value` pairs a command made only of assignments sets for the rest of its shell
+// (`X=1 Y=2`, `export X=1`), else null: `X=1 git push` sets X for that command alone.
+function assignments(words) {
+  const rest = words[0] === 'export' ? words.slice(1) : words;
+  if (!rest.length || !rest.every((w) => /^\w+=/.test(w))) return null;
+  return rest.map((w) => [w.slice(0, w.indexOf('=')), w.slice(w.indexOf('=') + 1)]);
+}
+
+// A word with `$NAME` / `${NAME}` taken from `vars` (name → literal), or null while it still holds
+// an expansion whose value is unknown here (an unset name, `$(…)`, backticks, `${x:-…}`).
+function expandVars(word, vars) {
+  const out = word.replace(/\$(?:\{(\w+)\}|(\w+))/g, (m, a, b) => (Object.hasOwn(vars, a || b) ? vars[a || b] : m));
+  return /[$`]/.test(out) ? null : out;
+}
+
+module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars };

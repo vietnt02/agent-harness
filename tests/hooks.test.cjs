@@ -279,6 +279,18 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.equal(one('git push --repo=up')[0].remote, 'up');
     assert.equal(pushAfterPrGuard.redact('https://x-access-token:SECRET@github.com/a/b.git'), 'https://***@github.com/a/b.git');
     assert.deepEqual(one('git status'), []);
+    assert.equal(one('WT=/w/t\ncd $WT && git push -u origin feat')[0].dir, path.resolve('/w/t'), 'a variable the command set');
+    assert.equal(one('export WT=/w; D=${WT}/t; git -C "$D" push')[0].dir, path.resolve('/w/t'));
+    assert.equal(one('cd $UNSET && git push')[0].dir, null, 'an unknown variable hides the directory');
+    assert.equal(one('WT=$(pwd); cd $WT && git push')[0].dir, null);
+  });
+
+  await t.test('push-after-pr-guard: a push whose directory cannot be known is voiced as such', () => {
+    const reviews = () => { throw new Error('must not be asked'); };
+    const r = pushAfterPrGuard.decide('cd $UNSET && git push origin feat', '/r', { reviews, branches: (p) => p.refspecs });
+    assert.match(r.blind[0], /không xác định được thư mục của `git push`/);
+    const gone = pushAfterPrGuard.decide('cd /no/such/dir/xyz && git push origin feat', '/r');
+    assert.match(gone.blind[0], /"feat" \(origin\): thư mục .*xyz không tồn tại/);
   });
 
   await t.test('push-after-pr-guard: blocks a merged or closed branch, voices what it could not read', () => {
@@ -906,6 +918,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         `cd "${L}" && git checkout -q HEAD`,
         `git -C "${L}" reset --hard`,
         'git fetch origin && git show origin/main:f',
+        `WT="${L}"\ncd $WT && git commit -q --allow-empty -m x`,
+        `export WT="${L}"; git -C "\${WT}" reset --hard`,
       ]) assert.equal(writes(c), false, c);
     });
     await t.test('git that runs stays gated, whatever text surrounds it', () => {
@@ -951,6 +965,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         `cd "${L}" && cd -- "${T}" && git checkout main`,
         `cd "${L}" && cd -P "${T}" && git checkout main`,
         `cd "${L}" && M="${T}"; cd $M && git checkout main`,
+        `cd "${L}" && cd $UNSET && git checkout main`,
+        `WT=$(pwd); cd "${L}" && cd $WT && git checkout main`,
         `cd "${L}" && cd - && git checkout main`,
         `cd "${L}" && cd "${L}/not-made-yet" && git checkout main`,
         'cat <<EOF > /tmp/x && git checkout main\nbody\nEOF',
@@ -1219,4 +1235,17 @@ test('session-notes: once every note of the session is done, the kaizen summary 
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('gate-line-guard: a Gate line in an earlier Bash call of the turn counts, not one before the prompt', () => {
+  const j = (r) => JSON.stringify(r);
+  const prompt = (text) => j({ type: 'user', message: { content: text } });
+  const bash = (command) => j({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command } }] } });
+  const result = j({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } });
+  const reminder = j({ type: 'attachment', attachment: { type: 'silent_turn_reminder' } });
+  const gated = bash('# Gate: mở bởi "làm đi" → khối X\ngit worktree add ../wt');
+  assert.equal(gateLineGuard.gatePrinted([prompt('làm đi'), gated, result, reminder, bash('ls'), result]), true);
+  assert.equal(gateLineGuard.gatePrinted([prompt('làm đi'), gated, result, prompt('merge đi'), bash('ls'), result]), false,
+    'a new prompt opens a new turn');
+  assert.equal(gateLineGuard.gatePrinted([prompt('làm đi'), bash('echo Gate'), result]), false);
 });
