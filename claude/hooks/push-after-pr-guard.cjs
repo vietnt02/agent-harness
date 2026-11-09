@@ -13,6 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { expandHome } = require('./lib/platform.cjs');
+const { assignments, expandVars } = require('./lib/shell-words.cjs');
 
 // One deadline for the whole hook, under the 15 s an agy bridge allows, so a hung gh still ends
 // in a voiced pass instead of a kill.
@@ -38,19 +39,34 @@ const PUSH_VALUE = new Set(['-o', '--push-option', '--repo', '--receive-pack', '
 const REDIRECT = /^\d*(?:[<>]|&>)/;
 const expand = (dir, cwd) => path.resolve(cwd, expandHome(unquote(dir)));
 
-// Each `git push` in the command, with the directory it runs in.
+// Each `git push` in the command, with the directory it runs in (null when a variable the command
+// did not set to a literal hides it).
 function findPushes(command, startCwd) {
   const pushes = [];
+  const vars = {};
   let cwd = startCwd;
+  // `dir` from `base`, following variables set earlier in the command.
+  const to = (dir, base) => {
+    const literal = base === null ? null : expandVars(dir, vars);
+    return literal === null ? null : expand(literal, base);
+  };
   for (const seg of command.split(/&&|\|\||;|\n|\|/)) {
     const toks = (seg.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map(unquote);
-    if (toks[0] === 'cd' && toks[1]) { cwd = expand(toks[1], cwd); continue; }
+    const set = assignments(toks);
+    if (set) {
+      for (const [name, value] of set) { const v = expandVars(value, vars); if (v === null) delete vars[name]; else vars[name] = v; }
+      continue;
+    }
+    if (toks[0] === 'cd' && toks[1]) { cwd = to(toks[1], cwd); continue; }
+    // Any other command may rebind a name (`unset`, `read`, `for`…): variables are followed only
+    // right after they are set.
+    const forget = () => { for (const k of Object.keys(vars)) delete vars[k]; };
     const g = toks.indexOf('git');
-    if (g === -1) continue;
+    if (g === -1) { forget(); continue; }
     let i = g + 1;
     let dir = cwd;
     while (i < toks.length && toks[i].startsWith('-')) {
-      if (toks[i] === '-C') { dir = expand(toks[i + 1] || '.', cwd); i += 2; }
+      if (toks[i] === '-C') { dir = to(toks[i + 1] || '.', cwd); i += 2; }
       else if (toks[i] === '-c') i += 2;
       else i += 1;
     }
@@ -118,6 +134,7 @@ const glabEnvs = once(() => glabDirs());
 
 // Returns [{ id, state }] with state normalised to OPEN / MERGED / CLOSED.
 function reviewsFor(dir, remote, branch, { gh = ghEnvs, glab = glabEnvs } = {}) {
+  if (!fs.existsSync(dir)) throw new Error(`thư mục ${dir} không tồn tại`);
   const url = run('git', ['remote', 'get-url', remote], dir);
   if (!/github\.com[:/]/.test(url)) {
     const mrs = firstThatWorks(glab, (env) => JSON.parse(runEnv('glab', ['mr', 'list', '--source-branch', branch, '--all', '-F', 'json'], dir, env)));
@@ -132,6 +149,10 @@ function reviewsFor(dir, remote, branch, { gh = ghEnvs, glab = glabEnvs } = {}) 
 function decide(command, cwd, { reviews = reviewsFor, branches = branchesOf } = {}) {
   const blind = [];
   for (const push of findPushes(command, cwd)) {
+    if (push.dir === null) {
+      blind.push('không xác định được thư mục của `git push` (nằm sau một biến lệnh không gán giá trị literal)');
+      continue;
+    }
     let names = [];
     try { names = branches(push); } catch (e) { blind.push(`nhánh ở ${push.dir}: ${why(e)}`); }
     for (const branch of names) {
