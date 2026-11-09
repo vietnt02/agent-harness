@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { expandHome } = require('./lib/platform.cjs');
-const { assignments, expandVars } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, assignments, expandVars } = require('./lib/shell-words.cjs');
 
 // One deadline for the whole hook, under the 15 s an agy bridge allows, so a hung gh still ends
 // in a voiced pass instead of a kill.
@@ -40,33 +40,56 @@ const REDIRECT = /^\d*(?:[<>]|&>)/;
 const expand = (dir, cwd) => path.resolve(cwd, expandHome(unquote(dir)));
 
 // Each `git push` in the command, with the directory it runs in (null when a variable the command
-// did not set to a literal hides it).
+// did not set to a literal hides it). Commands come from shell-words, so text in quotes, comments
+// and heredoc bodies (a commit message, a PR body, a script) is never read as a push.
 function findPushes(command, startCwd) {
   const pushes = [];
-  const vars = {};
-  let cwd = startCwd;
-  // `dir` from `base`, following variables set earlier in the command.
-  const to = (dir, base) => {
+  const log = [];
+  const inScope = (scope, of) => scope === of || scope.startsWith(`${of}.`);
+  // The directory and literal variables a command in `scope` sees. Any command other than a plain
+  // assignment or a `cd` may rebind a name (`unset`, `read`, `for`…), so it forgets them all for
+  // its own shell: a variable is followed only right after it is set.
+  const seen = (scope) => {
+    let cwd = startCwd;
+    const vars = {};
+    for (const e of log) {
+      if (!inScope(scope, e.scope)) continue;
+      if ('cd' in e) cwd = e.cd;
+      else if (e.forget) for (const k of Object.keys(vars)) delete vars[k];
+      else if (e.value === null) delete vars[e.name];
+      else vars[e.name] = e.value;
+    }
+    return { cwd, vars };
+  };
+  const to = (dir, base, vars) => {
     const literal = base === null ? null : expandVars(dir, vars);
     return literal === null ? null : expand(literal, base);
   };
-  for (const seg of command.split(/&&|\|\||;|\n|\|/)) {
-    const toks = (seg.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map(unquote);
-    const set = assignments(toks);
+  for (const raw of commands(command)) {
+    const { cwd, vars } = seen(raw.scope);
+    const set = assignments(raw);
     if (set) {
-      for (const [name, value] of set) { const v = expandVars(value, vars); if (v === null) delete vars[name]; else vars[name] = v; }
+      for (const [name, value] of set) log.push({ scope: raw.scope, name, value: expandVars(value, vars) });
       continue;
     }
-    if (toks[0] === 'cd' && toks[1]) { cwd = to(toks[1], cwd); continue; }
-    // Any other command may rebind a name (`unset`, `read`, `for`…): variables are followed only
-    // right after they are set.
-    const forget = () => { for (const k of Object.keys(vars)) delete vars[k]; };
-    const g = toks.indexOf('git');
-    if (g === -1) { forget(); continue; }
+    const toks = program(raw);
+    if (toks[0] === 'cd' && toks[1]) { log.push({ scope: raw.scope, cd: to(toks[1], cwd, vars) }); continue; }
+    log.push({ scope: raw.scope, forget: true });
+    const here = toks.chdir === undefined ? cwd : to(toks.chdir, cwd, vars);
+    // The script of `bash -c` / `eval` is read the same way, from where it runs.
+    const script = innerScript(toks);
+    if (script !== null) {
+      if (here !== null) pushes.push(...findPushes(script, here));
+      else if (/\bgit\b[\s\S]*\bpush\b/.test(script)) pushes.push({ dir: null, remote: 'origin', refspecs: [] });
+      continue;
+    }
+    // `git` anywhere in the words, so a wrapper shell-words does not know (`doas`, `stdbuf -oL`) still counts.
+    const g = toks.findIndex((w) => w.replace(/^.*\//, '') === 'git');
+    if (g === -1) continue;
     let i = g + 1;
-    let dir = cwd;
+    let dir = here;
     while (i < toks.length && toks[i].startsWith('-')) {
-      if (toks[i] === '-C') { dir = to(toks[i + 1] || '.', cwd); i += 2; }
+      if (toks[i] === '-C') { dir = to(toks[i + 1] || '.', here, vars); i += 2; }
       else if (toks[i] === '-c') i += 2;
       else i += 1;
     }
