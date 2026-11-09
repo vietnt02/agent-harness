@@ -44,6 +44,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
 
 ## Verify (`CLAUDE.md` § Verification and claims holds the core)
 
+- Writing, changing or deleting tests, or reviewing a diff's tests: `ntv-test` first.
 - Turn the task into a check first: a bug → a test that fails before the fix; a refactor →
   tests pass before and after; a layout or document → render every page, including pages the
   change can spread to; Power BI → PBIR/TMDL only; a sweep ("rename every X to Y", "remove all

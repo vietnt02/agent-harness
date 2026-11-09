@@ -24,16 +24,22 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    - **Files and repos** it touches.
    - **Done when**: the check for each action, at the layer of its claim
      (`CLAUDE.md` § Verification and claims).
+   - **Prerequisites**: everything a listed action needs that the run cannot obtain alone (a
+     login, a token, a permission, a secret's presence, quota or credit, a free port, a file at
+     an agreed path), each with its read-only check and today's result. One not ready is an open
+     question naming where Viet puts it; a secret is never pasted into the conversation.
+   - **Defaults**: each reversible choice Claude made that the plan relies on, one line with its
+     reason; Viet may override any at the gate.
    - **Out of scope**.
    - **Open questions**.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
    promised for later (an outline, a draft), is an open question.
-4. Check or render everything the block has produced so far.
+4. Check or render everything the block has produced so far, and run every prerequisite check.
 5. End the turn that writes or changes the plan with a message: the plan's full path and a
-   summary (the design settled, actions by group, each tier C step by name, Done when, out of
-   scope). From the next turn, ask in one AskUserQuestion call: every open question, the role
-   question if the user named none (`CLAUDE.md` § Scope), every tier-B ask with its conditions.
-   Recommended option first. Only when none is left, ask the final gate in one
+   summary (the design settled, actions by group, each tier C step by name, Done when,
+   prerequisites with their results, defaults, out of scope). From the next turn, ask in one
+   AskUserQuestion call: every open question, the role question if the user named none
+   (`CLAUDE.md` § Scope), every tier-B ask with its conditions. Recommended option first. Only when none is left, ask the final gate in one
    AskUserQuestion: run this plan on autopilot? Never ask it while a question is open.
 
 ## Approve
@@ -45,6 +51,7 @@ again.
 
 ## Run
 
+- First, rerun every prerequisite check: one failing parks the actions that need it.
 - Every listed action runs without a new ask, tier C included, after the checks
   `CLAUDE.md` § Irreversible actions puts before a B/C step.
 - Never stop the plan to ask. A question the plan or the user's words already answer is no
@@ -59,6 +66,7 @@ again.
 
 ## Report
 
-One report: `**Claude đã làm:**` with `Đã kiểm / CHƯA kiểm` per action, then `**Đã park:**`,
-each item with why and the exact command or decision it needs. Every listed action done →
+One report: `**Claude đã làm:**` with `Đã kiểm / CHƯA kiểm` per action, then `**Quyết định thay
+bạn:**`, each choice the run made that the plan did not state, one line with its reason, then
+`**Đã park:**`, each item with why and the exact command or decision it needs. Every listed action done →
 `status: done`.
