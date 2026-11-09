@@ -2,8 +2,8 @@
 /**
  * rules-budget.cjs - PreToolUse(Edit|Write|MultiEdit): block an edit that grows a personal rule
  * file past its character budget, or CLAUDE.md plus rules/mine/*.md past their joint budget.
- * Characters, not lines: a line cap only made sentences denser. The rule gets a tightened
- * sentence (skills/ntv-kaizen, applying kaizen files).
+ * Characters, not lines: a line cap only made sentences denser. An ambiguous rule is reworded,
+ * never added to (skills/ntv-kaizen, applying kaizen files).
  * A session note is capped per section and per line, and limited to four `## ` sections (lib/session-note-cap.cjs):
  * it is current state, rewritten, never a log (rules/mine/session-notes.md); an older note gets the four
  * sections the first time it is edited. Edits that shrink an over-budget file are allowed.

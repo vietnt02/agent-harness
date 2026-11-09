@@ -135,8 +135,11 @@ function kaizenReminder(files, transcript) {
     `The session note ${[].concat(files).join(', ')} is now \`status: done\`: before the final report, sum up this session's kaizen ` +
     '(skills/ntv-kaizen § Record a mistake). Read the transcript' +
     (transcript ? ` ${transcript}` : ' (the session .jsonl)') +
-    ', not your memory: every correction from Viet, every mistake you caught and fixed yourself (a secret printed, ' +
-    'a wrong dispatch, a claim later found wrong) and every harness defect met (a hook, rule or skill that misfired). ' +
+    ', not your memory, and list only what a hook, script, skill or reworded sentence must fix: a harness defect met ' +
+    '(a hook or script that misfired or lacks a step it is the only route for, a skill that gave a wrong step), a serious ' +
+    'break no hook stops yet (a secret printed, a production or shared-data write, a tier B/C action done wrong; its fix ' +
+    'is a hook, never a sentence), a rule sentence two fair readings of which lead to two different actions. ' +
+    'A clear rule broken without such harm, or an intent misread, is no file. ' +
     'In a kaizen session fix them there instead (ntv-kaizen step 5). The report says how many files were written, or that the transcript held none.'
   );
 }

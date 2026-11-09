@@ -49,7 +49,7 @@ theo dõi CI, ghi production (`ntv-implement` § Who works).
 
 **Worker lặp lại cùng một lỗi:** không vá từng ca. Coordinator yêu cầu worker phân tích nguyên nhân
 gốc (cơ chế sinh ra cả lớp lỗi) và gửi kế hoạch mới; coordinator duyệt. Hết vòng mà vẫn sai → đổi
-worker hoặc đổi model. Lỗi do luật hay spec thiếu thì ghi kaizen (`ntv-kaizen`).
+worker hoặc đổi model. Lỗi do skill chỉ sai bước hoặc luật mơ hồ thì ghi kaizen (`ntv-kaizen`); spec thiếu thì sửa spec.
 
 **Mọi dòng model đều rà và lập kế hoạch.** `gemini-flash`/`gpt-luna` không tự phản biện spec, nên ở
 chặng 4 coordinator đối chiếu từng con số trong kế hoạch với output thô worker dán.
