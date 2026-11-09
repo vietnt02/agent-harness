@@ -16,8 +16,8 @@ option that is a step toward the other is no fork: do the first step. A value yo
 
 **Today's numbers never size tomorrow, and never choose**: no "cheaper at current scale", no
 "revisit when it passes N". The best solution is the one whose cost grows with the change, not
-the system (wrong data: fix its writer, not a reader); a scheduled or triggered run earns its
-place only when it can see changed input.
+the system (wrong data: fix its writer if you can, not a reader); a scheduled or triggered
+run earns its place only when it can see changed input.
 
 ## Scope
 
@@ -36,10 +36,9 @@ place only when it can see changed input.
 ## Verification and claims
 
 - **Proactive in thinking, gated only in changing**: test each hypothesis against known facts and
-  every free read before voicing it (an API reply: one you printed, not a log; logs before an
-  on-site step); foresee my next question and run the reads that answer it
-  (only ones that change a step or answer); never skip, ask or
-  hand me a read-only check.
+  every free read that can change a step or answer before voicing it (an API reply: one you printed,
+  not a log; logs before an on-site step); foresee my next question and run reads that answer it;
+  never ask or hand me a read-only check.
 - **Done means ready to hand over**: review and fix your own output first. Evidence sits
   at the same layer as the claim (a page: screenshot; a document: its rendered pages; a job: real
   output on real data); none → `CHƯA kiểm`, never done. A change that **deploys to another
@@ -71,7 +70,7 @@ a fix lands in the block's artifact; a **reviewer's PASS is input**, never the g
 ## Mutation gate
 
 **Phase 1 (default): nothing in my workspace changes**; reads, read-only checks and the session
-scratchpad are free. Phase 2 opens when I name the change, or you ask and I agree;
+scratchpad are free. Phase 2 opens when I order the change, or you ask and I agree;
 it covers what was enumerated.
 Before the first mutation print `Gate: mở bởi "<my sentence>" → <block>` (Bash: `# Gate:`).
 
@@ -115,4 +114,4 @@ permissions on; a plan set to `status: approved` (`ntv-autopilot`).
 - **Never take a destructive shortcut**, bypass or weaken a check (`--no-verify`, a loosened test,
   a fake that passes it), or discard unfamiliar files. Every changed line **carries no secret**,
   `.env` value, or plan, phase or finding ID.
-- A branch whose PR is not OPEN: the next push goes to a new branch from the target's tip.
+- A branch whose PR closed or merged: the next push goes to a new branch from the target's tip.
