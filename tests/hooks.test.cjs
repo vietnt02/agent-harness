@@ -283,6 +283,7 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.equal(one('export WT=/w; D=${WT}/t; git -C "$D" push')[0].dir, path.resolve('/w/t'));
     assert.equal(one('cd $UNSET && git push')[0].dir, null, 'an unknown variable hides the directory');
     assert.equal(one('WT=$(pwd); cd $WT && git push')[0].dir, null);
+    assert.equal(one('WT=/a; unset WT; git -C $WT push')[0].dir, null, 'another command may rebind the name');
   });
 
   await t.test('push-after-pr-guard: a push whose directory cannot be known is voiced as such', () => {
@@ -967,6 +968,8 @@ test('gate-line-guard: only git that runs is a git write', async (t) => {
         `cd "${L}" && M="${T}"; cd $M && git checkout main`,
         `cd "${L}" && cd $UNSET && git checkout main`,
         `WT=$(pwd); cd "${L}" && cd $WT && git checkout main`,
+        ...['if true; then WT=.; fi', '{ WT=.; }', 'unset WT', 'for WT in .; do :; done', 'read WT </dev/null', 'export WT=. OTHER']
+          .map((rebind) => `WT="${L}"; ${rebind}; git -C "$WT" commit -m x`),
         `cd "${L}" && cd - && git checkout main`,
         `cd "${L}" && cd "${L}/not-made-yet" && git checkout main`,
         'cat <<EOF > /tmp/x && git checkout main\nbody\nEOF',
@@ -1248,4 +1251,6 @@ test('gate-line-guard: a Gate line in an earlier Bash call of the turn counts, n
   assert.equal(gateLineGuard.gatePrinted([prompt('làm đi'), gated, result, prompt('merge đi'), bash('ls'), result]), false,
     'a new prompt opens a new turn');
   assert.equal(gateLineGuard.gatePrinted([prompt('làm đi'), bash('echo Gate'), result]), false);
+  for (const read of ['# Gate: không áp (chỉ đọc)\ngit status', 'grep -rn "Gate:" ~/.claude/CLAUDE.md'])
+    assert.equal(gateLineGuard.gatePrinted([prompt('làm đi'), bash(read), result]), false, read);
 });

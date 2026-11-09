@@ -111,9 +111,14 @@ function writesMainCheckout(command, cwd) {
     return dir;
   };
   // The literal variables a command in `scope` sees; a value that cannot be known unsets its name.
+  // Any command other than a plain assignment or a `cd` may rebind a name (`unset`, `read`, `for`,
+  // `{ X=…; }`, a function), so it forgets them all: a variable is followed only right after it is set.
   const varsIn = (scope) => {
     const vars = {};
-    for (const v of sets) if (inScope(scope, v.scope)) { if (v.value === null) delete vars[v.name]; else vars[v.name] = v.value; }
+    for (const v of sets) {
+      if (v.forget) { for (const k of Object.keys(vars)) delete vars[k]; continue; }
+      if (inScope(scope, v.scope)) { if (v.value === null) delete vars[v.name]; else vars[v.name] = v.value; }
+    }
     return vars;
   };
   const isMain = (dir) => dir === null || isMainCheckout(dir);
@@ -131,6 +136,7 @@ function writesMainCheckout(command, cwd) {
       cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars) });
       continue;
     }
+    sets.push({ forget: true });
     const script = innerScript(words);
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);
@@ -159,11 +165,12 @@ function tailLines(file) {
   }
 }
 
-// True once, since the user's latest prompt, visible assistant text or an earlier Bash call (its
-// command or description) holds `Gate:`: the line is printed once per turn, before its first change.
+// True once, since the user's latest prompt, visible assistant text holds `Gate:` or an earlier
+// Bash call holds a `# Gate: mở bởi …` line: the line is printed once per turn, before its first change.
 function gatePrinted(lines) {
+  // In a call, only an opening line counts: `# Gate: không áp (chỉ đọc)` or a grep for the word opens nothing.
   const holds = (b) => (b.type === 'text' && String(b.text).includes('Gate:')) ||
-    (b.type === 'tool_use' && b.name === 'Bash' && `${b.input?.command || ''}\n${b.input?.description || ''}`.includes('Gate:'));
+    (b.type === 'tool_use' && b.name === 'Bash' && /^\s*#\s*Gate:\s*mở bởi/m.test(String(b.input?.command || '')));
   for (let i = lines.length - 1; i >= 0; i--) {
     let rec;
     try { rec = JSON.parse(lines[i]); } catch { continue; }

@@ -58,8 +58,11 @@ function findPushes(command, startCwd) {
       continue;
     }
     if (toks[0] === 'cd' && toks[1]) { cwd = to(toks[1], cwd); continue; }
+    // Any other command may rebind a name (`unset`, `read`, `for`…): variables are followed only
+    // right after they are set.
+    const forget = () => { for (const k of Object.keys(vars)) delete vars[k]; };
     const g = toks.indexOf('git');
-    if (g === -1) continue;
+    if (g === -1) { forget(); continue; }
     let i = g + 1;
     let dir = cwd;
     while (i < toks.length && toks[i].startsWith('-')) {
