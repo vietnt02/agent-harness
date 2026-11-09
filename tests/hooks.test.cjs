@@ -284,6 +284,11 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.equal(one('cd $UNSET && git push')[0].dir, null, 'an unknown variable hides the directory');
     assert.equal(one('WT=$(pwd); cd $WT && git push')[0].dir, null);
     assert.equal(one('WT=/a; unset WT; git -C $WT push')[0].dir, null, 'another command may rebind the name');
+    for (const text of ["git commit -F - <<'EOF'\nthen git push origin merged\nEOF", 'echo "git push origin merged"',
+      "node -e 'run(`git push origin merged`)'", '# git push origin merged'])
+      assert.deepEqual(one(text), [], `text is not a push: ${text}`);
+    assert.equal(one('(cd sub && git push); git push')[1].dir, base, 'a cd inside (…) ends with it');
+    assert.equal(one('/usr/bin/git push origin feat')[0].remote, 'origin');
   });
 
   await t.test('push-after-pr-guard: a push whose directory cannot be known is voiced as such', () => {
