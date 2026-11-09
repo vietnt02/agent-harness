@@ -49,22 +49,32 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
   try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { /* first run */ }
   let cursor = state.cursor;
   let count = 0;
-  // A saved cursor Orca rejects (`source_changed`) is dropped once: the run reads from the start
-  // again and only moves the cursor to the end, counting nothing, so old history is not new errors.
+  // Orca rejects a cursor (`source_changed`) once the transcript's source identity moves, which a
+  // working worker does between pages too: the run then reads from the start again, once. From a
+  // saved cursor it keeps what it counted and only moves the cursor to the end, counting nothing
+  // more, so old history is not new errors; a first run counts again from zero. A second rejection
+  // ends the run with what it counted: a busy worker must not turn the watch into an error.
   let counting = true;
+  let reset = false;
   for (let page = 0; page < MAX_PAGES; page++) {
     const a = ['orchestration', 'worker-read', '--dispatch', dispatch, '--source', 'transcript', '--limit', '50', '--json'];
     if (cursor) a.push('--cursor', cursor);
     let r;
     try { r = read(a).result || {}; } catch (e) {
-      if (!cursor || page > 0 || !counting) throw e;
-      cursor = undefined; counting = false; page = -1;
+      if (!cursor || !/source_changed/.test(`${e.stderr || ''}${e.message || ''}`)) throw e;
+      if (reset) break;
+      reset = true; counting = !state.cursor; if (counting) count = 0; cursor = undefined; page = -1;
       continue;
     }
     const t = r.transcript || {};
-    if (counting) for (const m of t.messages || []) if (API_ERROR.test(workerText(m))) count++;
-    if (r.cursor || t.nextCursor) cursor = t.nextCursor || r.cursor;
-    if (!t.limited) break;
+    const msgs = t.messages || [];
+    if (counting) for (const m of msgs) if (API_ERROR.test(workerText(m))) count++;
+    const next = t.nextCursor || r.cursor;
+    // `limited` stays true on the last page when Orca clipped oversized text: an empty page or a
+    // cursor that did not move is the end.
+    const moved = next && next !== cursor;
+    if (next) cursor = next;
+    if (!t.limited || !msgs.length || !moved) break;
   }
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ cursor }));

@@ -231,6 +231,37 @@ test('worker-stall: a stopped worker is done; errors count only in new worker me
     assert.equal(w.newErrors('ctx_t', rejectSaved, state), 0, 'a rejected cursor resets without counting old history');
     assert.deepEqual(asked, ['c2', '-', 'c1']);
     assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'ctx_t.json'), 'utf8')).cursor, 'c2', 'and the cursor is at the end again');
+    // First run: the worker writes between pages, so Orca rejects the cursor it just issued; the run
+    // restarts once and counts from zero. The last page stays `limited` (clipped text), empty.
+    const fresh = path.join(dir, 'fresh');
+    asked.length = 0;
+    let moved = false;
+    const midRun = (a) => {
+      const c = a.includes('--cursor') ? a[a.indexOf('--cursor') + 1] : '-';
+      asked.push(c);
+      if (c === 'c1' && !moved) { moved = true; throw Object.assign(new Error('Command failed'), { stderr: 'source_changed' }); }
+      if (c === '-') return pages[0];
+      if (c === 'c1') return page([], true, 'c2');
+      return page([], true, c);
+    };
+    assert.equal(w.newErrors('ctx_f', midRun, fresh), 1, 'a first run counts its history once');
+    assert.deepEqual(asked, ['-', 'c1', '-', 'c1'], 'restarts once, then stops at the empty page');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(fresh, 'ctx_f.json'), 'utf8')).cursor, 'c2', 'a first run saves where it ended');
+    const err = (stderr) => Object.assign(new Error('Command failed'), { stderr });
+    const cur = (a) => (a.includes('--cursor') ? a[a.indexOf('--cursor') + 1] : '-');
+    const three = page([1, 2, 3].map(() => ({ role: 'assistant', blocks: [{ type: 'text', text: 'HTTP 429' }] })), true, 's1');
+    // From a saved cursor, errors counted before a rejection are kept.
+    fs.writeFileSync(path.join(fresh, 'ctx_k.json'), JSON.stringify({ cursor: 's0' }));
+    assert.equal(w.newErrors('ctx_k', (a) => { const c = cur(a); if (c === 's0') return three; if (c === 's1') throw err('source_changed'); return page([], false, 'e'); }, fresh), 3);
+    // A page that keeps the cursor it was sent is the end, messages or not.
+    let calls = 0;
+    w.newErrors('ctx_m', (a) => { calls++; return page([{ role: 'assistant', blocks: [{ type: 'text', text: 'ok' }] }], true, cur(a) === '-' ? 'm1' : 'm1'); }, fresh);
+    assert.equal(calls, 2, 'stops when the cursor does not move');
+    // Any other error, with or without a cursor, still stops the run.
+    assert.throws(() => w.newErrors('ctx_g', () => { throw err('boom'); }, fresh), /Command failed/);
+    assert.throws(() => w.newErrors('ctx_h', (a) => { if (cur(a) === '-') return three; throw err('boom'); }, fresh), /Command failed/);
+    // A second rejection ends the run with what it counted instead of an error.
+    assert.equal(w.newErrors('ctx_r', (a) => { if (cur(a) === '-') return three; throw err('source_changed'); }, path.join(dir, 'r')), 3);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
