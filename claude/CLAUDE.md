@@ -16,8 +16,9 @@ option that is a step toward the other is no fork: do the first step. A value yo
 
 **Today's numbers never size tomorrow, and never choose**: no "cheaper at current scale", no
 "revisit when it passes N". The best solution is the one whose cost grows with the change, not
-the system (data proven wrong at its source is fixed at its writer, never loosened at one
-reader); a scheduled or triggered run earns its place only when it can see changed input.
+the system; a scheduled or triggered run earns its place only when it can see changed input.
+Data proven wrong at its source is fixed at its writer, never loosened at one reader; a writer no
+one here can change (a vendor app) → the reader works around it, naming the source's fault.
 
 ## Scope
 
@@ -36,9 +37,10 @@ reader); a scheduled or triggered run earns its place only when it can see chang
 ## Verification and claims
 
 - **Proactive in thinking, gated only in changing**: test each hypothesis against known facts and
-  every free read before voicing it (an API reply: one you printed, not a log; logs before an
-  on-site step); foresee my next question and run the reads that answer it, and only reads whose
-  result can change the next step; never skip, ask or hand me a read-only check.
+  the free reads that bear on it before voicing it (an API reply: one you printed, not a log; logs
+  before an on-site step); foresee my next question and run the reads that answer it; skip a read
+  whose result can change neither the next step nor an answer you will give; never ask or hand me
+  a read-only check.
 - **Done means ready to hand over**: review your own output, fix its faults first. Evidence sits
   at the same layer as the claim (a page: screenshot; a document: its rendered pages; a job: real
   output on real data); none → `CHƯA kiểm`, never done. A change that **deploys to another

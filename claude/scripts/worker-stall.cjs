@@ -51,8 +51,9 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
   let count = 0;
   // Orca rejects a cursor (`source_changed`) once the transcript's source identity moves, which a
   // working worker does between pages too: the run then reads from the start again, once. From a
-  // saved cursor it only moves the cursor to the end, counting nothing, so old history is not new
-  // errors; on a first run it counts again from zero.
+  // saved cursor it keeps what it counted and only moves the cursor to the end, counting nothing
+  // more, so old history is not new errors; a first run counts again from zero. A second rejection
+  // ends the run with what it counted: a busy worker must not turn the watch into an error.
   let counting = true;
   let reset = false;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -60,8 +61,9 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
     if (cursor) a.push('--cursor', cursor);
     let r;
     try { r = read(a).result || {}; } catch (e) {
-      if (reset || !cursor || !/source_changed/.test(`${e.stderr || ''}${e.message || ''}`)) throw e;
-      reset = true; counting = !state.cursor; count = 0; cursor = undefined; page = -1;
+      if (!cursor || !/source_changed/.test(`${e.stderr || ''}${e.message || ''}`)) throw e;
+      if (reset) break;
+      reset = true; counting = !state.cursor; if (counting) count = 0; cursor = undefined; page = -1;
       continue;
     }
     const t = r.transcript || {};

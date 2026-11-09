@@ -239,7 +239,7 @@ function decide(data, { checker = loadChecker(), userTexts = require('./worker-d
   return (
     `secret-file-guard: this ${tool} call would print a secret file into the conversation (${what}). ` +
     (onlyDotenv
-      ? 'Use the file without printing it: `source <file>`, `--env-file <file>`, `test -f`, `grep -q`/`grep -c \'^KEY=\' <file>` ' +
+      ? 'Use the file without printing it: `source <file>`, `--env-file=<file>`, `test -f`, `grep -q`/`grep -c \'^KEY=\' <file>` ' +
         'to check a key is set; a script that needs its values: `node --env-file=<file> <script file>`. '
       : 'Keys and credentials stay unread. ') +
     'If Viet must see a value, ask him; once he agrees, rerun the Bash command with the comment ' +

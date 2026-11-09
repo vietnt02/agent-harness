@@ -246,7 +246,22 @@ test('worker-stall: a stopped worker is done; errors count only in new worker me
     };
     assert.equal(w.newErrors('ctx_f', midRun, fresh), 1, 'a first run counts its history once');
     assert.deepEqual(asked, ['-', 'c1', '-', 'c1'], 'restarts once, then stops at the empty page');
-    assert.throws(() => w.newErrors('ctx_g', () => { throw Object.assign(new Error('x'), { stderr: 'boom' }); }, fresh), /x/, 'any other error still stops the run');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(fresh, 'ctx_f.json'), 'utf8')).cursor, 'c2', 'a first run saves where it ended');
+    const err = (stderr) => Object.assign(new Error('Command failed'), { stderr });
+    const cur = (a) => (a.includes('--cursor') ? a[a.indexOf('--cursor') + 1] : '-');
+    const three = page([1, 2, 3].map(() => ({ role: 'assistant', blocks: [{ type: 'text', text: 'HTTP 429' }] })), true, 's1');
+    // From a saved cursor, errors counted before a rejection are kept.
+    fs.writeFileSync(path.join(fresh, 'ctx_k.json'), JSON.stringify({ cursor: 's0' }));
+    assert.equal(w.newErrors('ctx_k', (a) => { const c = cur(a); if (c === 's0') return three; if (c === 's1') throw err('source_changed'); return page([], false, 'e'); }, fresh), 3);
+    // A page that keeps the cursor it was sent is the end, messages or not.
+    let calls = 0;
+    w.newErrors('ctx_m', (a) => { calls++; return page([{ role: 'assistant', blocks: [{ type: 'text', text: 'ok' }] }], true, cur(a) === '-' ? 'm1' : 'm1'); }, fresh);
+    assert.equal(calls, 2, 'stops when the cursor does not move');
+    // Any other error, with or without a cursor, still stops the run.
+    assert.throws(() => w.newErrors('ctx_g', () => { throw err('boom'); }, fresh), /Command failed/);
+    assert.throws(() => w.newErrors('ctx_h', (a) => { if (cur(a) === '-') return three; throw err('boom'); }, fresh), /Command failed/);
+    // A second rejection ends the run with what it counted instead of an error.
+    assert.equal(w.newErrors('ctx_r', (a) => { if (cur(a) === '-') return three; throw err('source_changed'); }, path.join(dir, 'r')), 3);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
