@@ -1,6 +1,6 @@
 ---
 name: ntv-kaizen
-description: "Record this session's mistakes as files on the Desktop for Viet's next kaizen session, once at session end: when the session note turns `status: done` (the session-notes hook says so), or when Viet asks for it. During the work no file is written: a mistake is fixed in the task's output and named in the report. Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
+description: "Record what this session showed a hook, script, skill or ambiguous rule must fix (harness defects, serious breaks no hook stops, ambiguous rules; never a clear rule merely broken) as files on the Desktop for Viet's next kaizen session, once at session end: when the session note turns `status: done` (the session-notes hook says so), or when Viet asks for it. During the work no file is written: a mistake is fixed in the task's output and named in the report. Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
 ---
 
 # /ntv-kaizen
@@ -11,10 +11,11 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
    mistake. Fix the task's output first in this turn (redo the check, correct the answer), name the
    mistake in the report at full severity with no mitigating fact, and return to Viet's topic.
 2. At session end (the note turned `status: done`, or Viet asks), read the session transcript
-   (`.jsonl`), never memory, and list only what code or a skill must fix. Rules are text: a clear
-   one is broken now and then, and rewording it fixes nothing.
-   - a defect of the harness itself: a hook or script misfired, or a skill followed to the letter
-     gave a wrong step (`## Rule đã phạm`: "lỗi của harness");
+   (`.jsonl`), never memory, and list only what a hook, script, skill or reworded sentence must
+   fix. Rules are text: a clear one is broken now and then, and rewording it fixes nothing.
+   - a defect of the harness itself: a hook or script misfired or lacks a step it is the only
+     route for, or a skill followed to the letter gave a wrong step (`## Rule đã phạm`: "lỗi của
+     harness");
    - a serious break no hook stops yet: a secret printed, a write to production or to data others
      read, a tier B/C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
    - a rule sentence two fair readings of which lead to two different actions; the fix rewords
@@ -36,16 +37,18 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
    The final report says how many files were written, or that the transcript held none.
 4. Never offer to apply a kaizen; Viet opens a session for that. A harness defect met during other
    work gets no fix, PR or ask to open one in that session.
-5. In a kaizen session no file is written: a harness defect or a mistake of yours met there is
-   fixed in that session, with no ask, once the topic at hand closes (Viet opened the session
+5. In a kaizen session no file is written: what step 2 would file, met there, is fixed in that
+   session, with no ask (anything else only in the task's output, step 1), once the topic at hand closes (Viet opened the session
    for this; a new file costs him another session).
 
 ## Apply kaizen files (a session where Viet opens them)
 
-- Discuss each file with Viet; he decides. A file whose cause is a clear rule Claude did not
-  follow is closed (deleted) with no change: a break is never fixed by adding or tightening a
-  sentence. Otherwise fix: reword the ambiguous sentence within the `rules-budget` caps; no rule
-  names an incident or its date; an example stays only when the rule is unclear without it.
+- Discuss each file with Viet; he decides. A file whose cause is a clear rule broken without
+  serious harm is closed (deleted) with no change: a break is never fixed by adding or
+  tightening a sentence. Otherwise fix per type: the harness defect in its hook, script or skill;
+  a serious break with the hook that stops it; an ambiguous sentence reworded within the
+  `rules-budget` caps. No rule names an incident or its date; an example stays only when the
+  rule is unclear without it.
 - The harness guides; the work's output is what counts, and every block costs the agent a read and
   a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a
   send, a secret, a production write, a session the user cannot type into); anything else is a
