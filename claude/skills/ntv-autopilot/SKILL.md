@@ -73,5 +73,5 @@ again.
 One report: `**Claude đã làm:**` with `Đã kiểm / CHƯA kiểm` per action, then `**Quyết định thay
 bạn:**`, each technical choice inside a listed action that the plan did not state and that
 changes nothing the user feels, one line with its reason (a choice needing intent was parked,
-never listed here), then `**Đã park:**`, each item with why and the exact command or decision it needs.
-Every listed action done → `status: done`.
+never listed here), then `**Đã park:**`, each item with why and the exact command or decision
+it needs. Every listed action done → `status: done`.

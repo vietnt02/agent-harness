@@ -41,7 +41,8 @@ def changed_lines(diff_text, module):
         elif line.startswith("@@") and current == module:
             m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)
             start, count = int(m.group(1)), int(m.group(2) or 1)
-            lines.update(range(start, start + count))
+            # A deletion-only hunk (`+c,0`) changed the code around the gap: the lines on both sides.
+            lines.update(range(start, start + count) if count else (start, start + 1))
         prev = line
     return lines
 
@@ -57,8 +58,8 @@ def is_guard(node):
 
 
 def points(tree):
-    skip = {id(n) for n in ast.walk(tree) if isinstance(n, ast.If) and is_guard(n)}
-    skip |= {id(n) for g in ast.walk(tree) if isinstance(g, ast.If) and is_guard(g) for n in ast.walk(g.test)}
+    # A guard and all under it: tests never run a `__main__` block, so its mutants always survive.
+    skip = {id(n) for g in ast.walk(tree) if isinstance(g, ast.If) and is_guard(g) for n in ast.walk(g)}
     pts = []
     for node in ast.walk(tree):
         if id(node) in skip:
@@ -110,8 +111,17 @@ def run_tests(root, python, tests, timeout, module_path):
     try:
         rc = p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)  # the tests' own servers and workers too
-        p.wait()
+        rc = None
+    finally:
+        # Its own session: a signal or Ctrl-C here would otherwise leave pytest, and the servers
+        # and workers its tests started, running after this script exits.
+        if p.poll() is None:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            p.wait()
+    if rc is None:
         return "timeout", timeout
     # 1: a test failed; 2: collection failed, which the clean baseline rules out as a cause.
     return {0: "survived", 1: "killed", 2: "killed"}.get(rc, f"pytest exit {rc}"), round(time.time() - t0, 1)

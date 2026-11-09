@@ -58,8 +58,8 @@ python3 -I ~/.claude/skills/ntv-test/scripts/mutate.py <scratch>/copy <scratch>/
   file already kills (`killed_elsewhere`) is no gap.
 - `scripts/mutate.py` covers Python (pytest). Another language uses its own mutation tool on the
   same terms: changed lines only, a fixed sample, a copy; a repo with none says so in the PR/MR.
-- Each survivor is judged: equivalent (it behaves the same, e.g. a log text) with its reason, or
-  a gap, which gets a test per § 1. The PR/MR lists every result class with its count and every
+- Each survivor is judged, with its reason: equivalent (it behaves the same, e.g. a log text),
+  unreachable (no caller the change serves runs it), or a gap, which gets a test per § 1. The PR/MR lists every result class with its count and every
   survivor with its verdict.
 - The budget is the change: at most 40 mutants per touched module, local, free. Never a CI gate
   on the whole repo.
@@ -73,8 +73,8 @@ Mutation gate), since deleting tests this work did not write is not this change'
 - A test whose named defect (§ 1) another test already names and catches is a candidate to merge,
   lower to a cheaper layer or retire; never deleted for the suite's size, age or speed alone, nor
   for a mutation sample alone, which shows what is caught, not what is safe to drop.
-- Retiring or merging tests reruns mutation on the module as it now is: every result class holds
-  or improves, else the change is rejected. Never both of two tests that each look redundant with
+- Retiring or merging tests reruns the same mutants (same module, seed and `--confirm-tests`): no
+  mutant killed or killed_elsewhere before survives now, else the change is rejected. Never both of two tests that each look redundant with
   the other.
 - A skipped or disabled test carries the reason and what reopens it; one without is fixed, or
   removed with that stated.
