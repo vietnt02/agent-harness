@@ -1236,6 +1236,10 @@ test('session-notes: once every note of the session is done, the kaizen summary 
     assert.deepEqual(notes.closedNote([{ file }, { file: second }], 's1', marks), [], 'only once per session');
     assert.deepEqual(notes.closedNote([{ file }], 's2', marks), [file], 'another session has its own mark');
     assert.match(notes.kaizenReminder([file], '/p/s1.jsonl'), /\/p\/s1\.jsonl, not your memory/);
+    // Only what code or a skill must fix is listed: a clear rule broken without harm is no file.
+    assert.match(notes.kaizenReminder([file]), /only what code or a skill must fix/);
+    assert.match(notes.kaizenReminder([file]), /clear rule broken without such harm, or an intent misread, is no file/);
+    assert.doesNotMatch(notes.kaizenReminder([file]), /every correction from Viet/);
     // A note this session wrote without its id on the session: line is named; its own note, a done
     // one, a file with no front matter or one outside the notes folder is not.
     const write = (f) => ({ tool_name: 'Write', tool_input: { file_path: f } });

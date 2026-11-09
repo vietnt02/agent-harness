@@ -11,27 +11,28 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
    mistake. Fix the task's output first in this turn (redo the check, correct the answer), name the
    mistake in the report at full severity with no mitigating fact, and return to Viet's topic.
 2. At session end (the note turned `status: done`, or Viet asks), read the session transcript
-   (`.jsonl`), never memory, and list each of these:
-   - a sentence of `~/.claude/CLAUDE.md`, `~/.claude/rules/mine/*.md` or a file they point to that
-     Claude broke, caught by Viet or by Claude itself (a secret printed, a wrong dispatch, a claim
-     later found wrong), even when undone before Viet saw it;
-   - a matter Viet corrected twice, or a mistake with a real consequence (a tier B/C action done
-     wrong, Viet had to interrupt, block or undo);
-   - a defect of the harness itself (hook, rule, skill), Claude's mistake or not
-     (`## Rule đã phạm`: "lỗi của harness").
-   Anything else is no file. Nor is a break of Claude Code's built-in instructions (system
-   prompt, tool descriptions) that no rule file above repeats, whatever its consequence, and never as
-   "rule còn thiếu": Viet cannot change them.
+   (`.jsonl`), never memory, and list only what code or a skill must fix. Rules are text: a clear
+   one is broken now and then, and rewording it fixes nothing.
+   - a defect of the harness itself: a hook or script misfired, or a skill followed to the letter
+     gave a wrong step (`## Rule đã phạm`: "lỗi của harness");
+   - a serious break no hook stops yet: a secret printed, a write to production or to data others
+     read, a tier B/C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
+   - a rule sentence two fair readings of which lead to two different actions; the fix rewords
+     that sentence, never adds one.
+   Anything else is no file: a clear rule broken without such harm, Viet's intent misread (both
+   fixed in the session, step 1), or a break of Claude Code's built-in instructions (system
+   prompt, tool descriptions) that no rule file repeats, whatever its consequence: Viet cannot
+   change them.
 3. Per failure pattern, `ls ~/Desktop/kaizen-*`: a file already has it → add a `## Lần lặp`
    entry there. Otherwise write `~/Desktop/kaizen-<yymmdd>-<slug>.md` (Vietnamese):
    - `# <one-line title>`, then `Phiên: <task> (session <id>)`.
    - `## Chuyện đã xảy ra`: timed steps, Viet's words quoted, and what it cost him (time, rework,
      a decision made on a wrong answer). A secret the transcript shows is written `[redacted]`.
-   - `## Rule đã phạm`: the exact sentence and its file, or "rule còn thiếu".
+   - `## Rule đã phạm`: the exact sentence and its file, or "lỗi của harness".
    - `## Mẫu lỗi chung`: the mechanism, and why no check caught it.
    - `## Hướng kaizen`: each fix and the file it belongs in. A fix works unremembered (hook,
-     script, safe default, a `knowledge/` fact) or tightens a rule sentence; "be more careful"
-     fixes nothing.
+     script, safe default, a `knowledge/` fact) or rewords the ambiguous sentence; "be more
+     careful" fixes nothing.
    The final report says how many files were written, or that the transcript held none.
 4. Never offer to apply a kaizen; Viet opens a session for that. A harness defect met during other
    work gets no fix, PR or ask to open one in that session.
@@ -41,13 +42,12 @@ description: "Record this session's mistakes as files on the Desktop for Viet's 
 
 ## Apply kaizen files (a session where Viet opens them)
 
-- Discuss each file with Viet; he decides. Then fix: tighten an existing sentence (add one only
-  when grep finds none), within the `rules-budget` caps; no rule names an incident or its date;
-  an example stays only when the rule is unclear without it. Before another "don't", weigh a
-  "do" sentence or an automatic check: rules made only of restraints teach stopping early.
+- Discuss each file with Viet; he decides. A file whose cause is a clear rule Claude did not
+  follow is closed (deleted) with no change: a break is never fixed by adding or tightening a
+  sentence. Otherwise fix: reword the ambiguous sentence within the `rules-budget` caps; no rule
+  names an incident or its date; an example stays only when the rule is unclear without it.
 - The harness guides; the work's output is what counts, and every block costs the agent a read and
-  a retry. A slip seen once is fixed by a sentence; a hook only for one that recurs and spoils
-  output. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a
+  a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a
   send, a secret, a production write, a session the user cannot type into); anything else is a
   reminder said once (context back, or `hooks/lib/block-once.cjs` when it must land before the
   command runs). Never chase every route around a check.
