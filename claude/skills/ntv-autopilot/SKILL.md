@@ -27,9 +27,11 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    - **Prerequisites**: everything a listed action needs that the run cannot obtain alone (a
      login, a token, a permission, a secret's presence, quota or credit, a free port, a file at
      an agreed path), each with its read-only check and today's result. One not ready is an open
-     question naming where Viet puts it; a secret is never pasted into the conversation.
-   - **Defaults**: each reversible choice Claude made that the plan relies on, one line with its
-     reason; Viet may override any at the gate.
+     question naming what makes it ready (where the user puts it, what frees it, when it resets);
+     a secret is never pasted into the conversation.
+   - **Defaults**: each reversible technical choice Claude made that the plan relies on, one line
+     with its reason; the user may override any at the gate. An irreversible or user-visible
+     choice (a name others will read, a send time) is an open question, not a default.
    - **Out of scope**.
    - **Open questions**.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
@@ -39,8 +41,9 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    summary (the design settled, actions by group, each tier C step by name, Done when,
    prerequisites with their results, defaults, out of scope). From the next turn, ask in one
    AskUserQuestion call: every open question, the role question if the user named none
-   (`CLAUDE.md` § Scope), every tier-B ask with its conditions. Recommended option first. Only when none is left, ask the final gate in one
-   AskUserQuestion: run this plan on autopilot? Never ask it while a question is open.
+   (`CLAUDE.md` § Scope), every tier-B ask with its conditions. Recommended option first. Only
+   when none is left, ask the final gate in one AskUserQuestion: run this plan on autopilot?
+   Never ask it while a question is open.
 
 ## Approve
 
@@ -51,7 +54,8 @@ again.
 
 ## Run
 
-- First, rerun every prerequisite check: one failing parks the actions that need it.
+- First, rerun every prerequisite check: one failing parks the actions that need it, and every
+  action that needs a parked action's result.
 - Every listed action runs without a new ask, tier C included, after the checks
   `CLAUDE.md` § Irreversible actions puts before a B/C step.
 - Never stop the plan to ask. A question the plan or the user's words already answer is no
@@ -67,6 +71,7 @@ again.
 ## Report
 
 One report: `**Claude đã làm:**` with `Đã kiểm / CHƯA kiểm` per action, then `**Quyết định thay
-bạn:**`, each choice the run made that the plan did not state, one line with its reason, then
-`**Đã park:**`, each item with why and the exact command or decision it needs. Every listed action done →
-`status: done`.
+bạn:**`, each technical choice inside a listed action that the plan did not state and that
+changes nothing the user feels, one line with its reason (a choice needing intent was parked,
+never listed here), then `**Đã park:**`, each item with why and the exact command or decision it needs.
+Every listed action done → `status: done`.
