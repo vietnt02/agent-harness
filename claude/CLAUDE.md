@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Personal overlay for all projects: it wins over every rule in `~/.claude/rules/`; my own
-`rules/mine/*` are authoritative wherever this file is silent. Knowledge a repo never recorded
+Personal overlay for all projects: it beats every rule in `~/.claude/rules/`; my
+`rules/mine/*` decide wherever it is silent. Knowledge a repo never recorded
 (routes too: deploy, logs, DNS) goes into that repo's own PR.
 
 ## Who decides what
@@ -16,9 +16,8 @@ option that is a step toward the other is no fork: do the first step. A value yo
 
 **Today's numbers never size tomorrow, and never choose**: no "cheaper at current scale", no
 "revisit when it passes N". The best solution is the one whose cost grows with the change, not
-the system; a scheduled or triggered run earns its place only when it can see changed input.
-Data proven wrong at its source is fixed at its writer, never loosened at one reader; a writer no
-one here can change (a vendor app) → the reader works around it, naming the source's fault.
+the system (wrong data: fix its writer, not a reader); a scheduled or triggered run earns its
+place only when it can see changed input.
 
 ## Scope
 
@@ -37,11 +36,11 @@ one here can change (a vendor app) → the reader works around it, naming the so
 ## Verification and claims
 
 - **Proactive in thinking, gated only in changing**: test each hypothesis against known facts and
-  the free reads that bear on it before voicing it (an API reply: one you printed, not a log; logs
-  before an on-site step); foresee my next question and run the reads that answer it; skip a read
-  whose result can change neither the next step nor an answer you will give; never ask or hand me
-  a read-only check.
-- **Done means ready to hand over**: review your own output, fix its faults first. Evidence sits
+  every free read before voicing it (an API reply: one you printed, not a log; logs before an
+  on-site step); foresee my next question and run the reads that answer it
+  (only ones that change a step or answer); never skip, ask or
+  hand me a read-only check.
+- **Done means ready to hand over**: review and fix your own output first. Evidence sits
   at the same layer as the claim (a page: screenshot; a document: its rendered pages; a job: real
   output on real data); none → `CHƯA kiểm`, never done. A change that **deploys to another
   runtime** needs evidence from that runtime, before the merge (revertible deploy: right after it,
@@ -72,8 +71,8 @@ a fix lands in the block's artifact; a **reviewer's PASS is input**, never the g
 ## Mutation gate
 
 **Phase 1 (default): nothing in my workspace changes**; reads, read-only checks and the session
-scratchpad are free. Phase 2 opens when I instruct the change by name, or you ask and
-I agree; the agreement covers what was enumerated.
+scratchpad are free. Phase 2 opens when I name the change, or you ask and I agree;
+it covers what was enumerated.
 Before the first mutation print `Gate: mở bởi "<my sentence>" → <block>` (Bash: `# Gate:`).
 
 Not permission: "ok" when your last message asked nothing; skipping a question you asked (it stays
@@ -116,5 +115,4 @@ permissions on; a plan set to `status: approved` (`ntv-autopilot`).
 - **Never take a destructive shortcut**, bypass or weaken a check (`--no-verify`, a loosened test,
   a fake that passes it), or discard unfamiliar files. Every changed line **carries no secret**,
   `.env` value, or plan, phase or finding ID.
-- Once a branch has had a PR, the next push goes to a new branch from the target's tip unless that
-  PR is OPEN.
+- A branch whose PR is not OPEN: the next push goes to a new branch from the target's tip.
