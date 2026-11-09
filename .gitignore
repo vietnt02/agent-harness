@@ -1,3 +1,4 @@
 agy/bridge-fixtures/local.json
 agy/bridge-fixtures/tested-versions.json
 .DS_Store
+*.pyc

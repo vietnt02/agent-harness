@@ -92,6 +92,8 @@ chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;
+- task viết/sửa test, đổi logic, hay chạm hệ thống ngoài, dữ liệu thật, lịch, quyền: trích `ntv-test`
+  § 1–3; worker chạy mutation và kiểm thực tế trước review, PR ghi kết quả; coordinator soát ở bước 7;
 - báo cáo có `Đã kiểm: <cách> → <kết quả>` và `CHƯA kiểm: <điều gì> — <lý do>`;
 - các câu trong mục "Phải nói rõ trong spec" của file model đang dùng;
 - worker mở trình duyệt: câu tắt tiếng sau mỗi lần tải trang (`~/.claude/knowledge/browser-debug.md`);
