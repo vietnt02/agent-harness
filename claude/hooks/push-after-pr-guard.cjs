@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { expandHome } = require('./lib/platform.cjs');
-const { commands, program, assignments, expandVars } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, assignments, expandVars } = require('./lib/shell-words.cjs');
 
 // One deadline for the whole hook, under the 15 s an agy bridge allows, so a hung gh still ends
 // in a voiced pass instead of a kill.
@@ -75,11 +75,21 @@ function findPushes(command, startCwd) {
     const toks = program(raw);
     if (toks[0] === 'cd' && toks[1]) { log.push({ scope: raw.scope, cd: to(toks[1], cwd, vars) }); continue; }
     log.push({ scope: raw.scope, forget: true });
-    if (toks[0] !== 'git') continue;
-    let i = 1;
-    let dir = cwd;
+    const here = toks.chdir === undefined ? cwd : to(toks.chdir, cwd, vars);
+    // The script of `bash -c` / `eval` is read the same way, from where it runs.
+    const script = innerScript(toks);
+    if (script !== null) {
+      if (here !== null) pushes.push(...findPushes(script, here));
+      else if (/\bgit\b[\s\S]*\bpush\b/.test(script)) pushes.push({ dir: null, remote: 'origin', refspecs: [] });
+      continue;
+    }
+    // `git` anywhere in the words, so a wrapper shell-words does not know (`doas`, `stdbuf -oL`) still counts.
+    const g = toks.findIndex((w) => w.replace(/^.*\//, '') === 'git');
+    if (g === -1) continue;
+    let i = g + 1;
+    let dir = here;
     while (i < toks.length && toks[i].startsWith('-')) {
-      if (toks[i] === '-C') { dir = to(toks[i + 1] || '.', cwd, vars); i += 2; }
+      if (toks[i] === '-C') { dir = to(toks[i + 1] || '.', here, vars); i += 2; }
       else if (toks[i] === '-c') i += 2;
       else i += 1;
     }

@@ -289,6 +289,13 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
       assert.deepEqual(one(text), [], `text is not a push: ${text}`);
     assert.equal(one('(cd sub && git push); git push')[1].dir, base, 'a cd inside (…) ends with it');
     assert.equal(one('/usr/bin/git push origin feat')[0].remote, 'origin');
+    for (const real of ['eval git push origin feat', 'bash -c \'cd /x; git push origin feat\'', 'sh -c "git fetch && git push origin feat"',
+      'doas git push origin feat', 'stdbuf -oL git push origin feat', 'time -p git push origin feat', 'env -C /x git push origin feat'])
+      assert.deepEqual(one(real).map((p) => p.refspecs), [['feat']], `a real push: ${real}`);
+    assert.equal(one("bash -c 'cd /x; git push origin feat'")[0].dir, path.resolve('/x'));
+    assert.equal(one('env -C /x git push origin feat')[0].dir, path.resolve('/x'));
+    assert.equal(one('bash -c "cd $UNSET && git push"')[0].dir, null);
+    assert.equal(one('cd $UNSET && bash -c "git push"')[0].dir, null);
   });
 
   await t.test('push-after-pr-guard: a push whose directory cannot be known is voiced as such', () => {
