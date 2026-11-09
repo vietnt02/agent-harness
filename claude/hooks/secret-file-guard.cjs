@@ -14,7 +14,8 @@
  *   printing it (quietUse), each simple command naming one judged on its own:
  *   loading it (`source`, `.`; not with `set -x`), `--env-file` for a program not asked to print
  *   (`config`, `env`, `printenv`, `-p`, `-e`, `--print`, `--eval` deny), testing or listing (`test`,
- *   `[`, `ls`, `stat`, `chmod`, `touch`, `rm`, `git check-ignore|ls-files|rm`), hashing or comparing
+ *   `[`, `ls`, `stat`, `chmod`, `touch`, `rm`, `git check-ignore|ls-files|rm`), naming it in text (`echo`, `printf`, `git commit`, a quoted
+ *   heredoc's body, a phrase the checker reports whole), hashing or comparing
  *   (`sha256sum`, `shasum`, `md5`, `cmp -s`, `diff -q`), counting (`wc` without `--files0-from`,
  *   `grep -q|-c|-l|-L`, real option letters only), copying or linking between dotenv files only
  *   (`cp .env.example .env`), and writing (`>`, `>>`); and in the Write tool.
@@ -32,14 +33,14 @@
 
 const os = require('os');
 const path = require('path');
-const { commands, program, innerScript } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, dropHeredocs } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
 const SAFE = /\.(example|sample|template|dist)$/i;
 const SECRETISH = /(^|[\s/"'=<>])(\.env(\.[\w.-]+)?|[\w.-]+\.env|id_(rsa|dsa|ecdsa|ed25519)[\w.-]*|[\w.-]+\.(pem|key|p12|pfx|jks|keystore)|credentials(\.[\w-]+)?|secrets?\.ya?ml)(?=$|[\s"';&|)<>])/i;
 // Programs that never print a file's content, whatever their arguments.
-const QUIET = new Set(['source', '.', 'test', '[', 'ls', 'stat', 'chmod', 'touch', 'rm', 'sha256sum', 'shasum', 'md5', 'md5sum']);
+const QUIET = new Set(['source', '.', 'test', '[', 'ls', 'stat', 'chmod', 'touch', 'rm', 'sha256sum', 'shasum', 'md5', 'md5sum', 'echo', 'printf']);
 const COPY = new Set(['cp', 'mv', 'ln']);
 const GIT_QUIET = new Set(['check-ignore', 'ls-files', 'rm']);
 // `--env-file` passes only for a program that runs a service or a script file, never one asked to
@@ -61,6 +62,12 @@ const pieces = (w) => String(w).split(/(\d*[<>]+&?)/);
 // The word names a dotenv, alone or as one piece of a redirect.
 const isDotenv = (w) => pieces(w).some((x, k) => k % 2 === 0 && plainDotenv(x));
 const envLike = (p) => DOTENV.test(path.basename(target(p))); // a dotenv or its template
+// A path the checker reports as a whole phrase (`'ignore deployment/.env'`, a markdown-quoted
+// template): text naming dotenv files only, judged as a dotenv (quietUse reads what the command does).
+const dotenvMention = (p) => {
+  const secret = String(p).split(/\s+/).map((t) => t.replace(/^[`'"(]+|[`'",;:)]+$/g, '')).filter((t) => SECRETISH.test(t));
+  return secret.length > 0 && secret.every(envLike);
+};
 const norm = (s) => String(s).normalize('NFC').replace(/\s+/g, ' ').trim();
 
 function loadChecker() {
@@ -139,6 +146,8 @@ function quietCommand(words, raw) {
     if (name === 'cmp' && args.includes('-s')) continue;
     if (name === 'diff' && args.some((a) => /^(-q|--brief)$/.test(a))) continue;
     if (name === 'git' && GIT_QUIET.has(gitSubcommand(args))) continue;
+    // A commit message names it; `-F <file>` would read it as the message, and print its first line.
+    if (name === 'git' && gitSubcommand(args) === 'commit' && !/^(-[a-zA-Z]*F|--file)$/.test(prev) && !/^(--file=|-F.)/.test(w)) continue;
     if (COPY.has(name) && copyQuiet(args)) continue;
     return false;
   }
@@ -195,7 +204,8 @@ function quietUse(command) {
   // A quiet program still prints the file's name: `cat $(ls .env)`, `ls .env | xargs cat` turn it
   // back into a read. A plain pipe is judged per command (`cat .env | wc` fails at `cat`).
   if (/\bxargs\b/.test(command)) return false;
-  for (const sub of command.match(/\$\([^)]*\)|`[^`]*`|<\([^)]*\)/g) || []) if (/\.env\b/i.test(sub)) return false;
+  // A quoted heredoc's body is text (its backticks are markdown): only substitutions that run count.
+  for (const sub of dropHeredocs(command).match(/\$\([^)]*\)|`[^`]*`|<\([^)]*\)/g) || []) if (/\.env\b/i.test(sub)) return false;
   for (const words of all) {
     const inner = innerScript(program(words));
     if (inner !== null) {
@@ -225,7 +235,7 @@ function decide(data, { checker = loadChecker(), userTexts = require('./worker-d
   if (!access.uninspectable && access.paths.length === 0) return '';
   const command = typeof (data.tool_input || {}).command === 'string' ? data.tool_input.command : '';
   if (command && approved(command, data.transcript_path, userTexts)) return '';
-  const onlyDotenv = !access.fallback && !access.uninspectable && access.paths.every(isDotenv);
+  const onlyDotenv = !access.fallback && !access.uninspectable && access.paths.every((p) => isDotenv(p) || dotenvMention(p));
   if (onlyDotenv && tool === 'Bash' && quietUse(command)) return '';
   if (onlyDotenv && tool === 'Write') return '';
   if (access.fallback) {

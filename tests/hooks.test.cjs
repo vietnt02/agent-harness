@@ -1178,7 +1178,22 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `git ls-files ${E}`, `diff -q ${E} b`, `cmp -s ${E} b`, `sha256sum ${E}`,
     `docker compose -p myproj --env-file ${E} up -d`, `git -C repo ls-files ${E}`, `source ${E} && make | tail -5`,
     `cat ${E} # secret-ok: "cho đọc file env nhé"`, 'ls -la',
+    // Text that only names a dotenv: a quoted heredoc body (backticks there are markdown), echo, a commit message.
+    `cat > README.md <<'EOF'\n| \`${E}.example\` | names of \`/root/app/${E}\` |\nEOF`,
+    `cat > a.md <<EOF\nsee \\\`deploy/${E}\\\` here\nEOF`,
+    `echo 'path is ${E}' > notes.md`, `printf '\\ndeployment/${E}\\n' >> .gitignore`, `git commit -m 'ignore deployment/${E}'`,
   ]) assert.equal(run('Bash', cmd), '', cmd);
+  // AgentKit's checker reports a quoted phrase whole: a phrase naming only dotenv files is judged as one.
+  const phrases = {
+    checkPrivacy: ({ toolInput }) => {
+      const paths = (toolInput.command.match(/'[^']*\.env[^']*'|`[^`]*\.env[^`]*`/g) || []).map((q) => q.slice(1, -1));
+      return paths.length ? { blocked: true, accesses: paths.map((filePath) => ({ filePath })) } : { blocked: false };
+    },
+  };
+  for (const cmd of [`echo 'path is ${E}' > notes.md`, `git commit -m 'ignore deployment/${E} and x/${E}.example'`])
+    assert.equal(run('Bash', cmd, { checker: phrases, userTexts }), '', cmd);
+  for (const cmd of [`cat 'my dir/${E}'`, `echo 'k/server.pem and ${E}'`])
+    assert.match(run('Bash', cmd, { checker: phrases, userTexts }), /secret-file-guard/, cmd);
   for (const cmd of [
     `cat ${E}`, `cat<${E}`, `sort < ${E}`, `cat ${E}>out.txt`, `cat ${E} | wc -l`, `f=${E}; cat $f`,
     `grep DB_URL ${E}`, `grep -esecret ${E}`, `grep -- -c ${E}`, `cut -d= -f1 ${E}`, `cut -d= -f1 --complement ${E}`,
@@ -1188,6 +1203,9 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `cat <>${E}`, `cp ${E} ${E}.example`, `docker compose --env-file ${E} convert`, `uv run --env-file ${E} python -c x`,
     `cat $(ls ${E})`, `ls ${E} | xargs cat`, `set -e -x; source ${E}`, `set -v; source ${E}`, `bash -o xtrace -c "source ${E}"`,
     `grep -e -c ${E}`,
+    // A substitution that runs still reads it: an unquoted heredoc, echo of a substitution.
+    `cat > a.md <<EOF\n$(cat ${E})\nEOF`, `cat > a.md <<EOF\n\`cat ${E}\`\nEOF`, `echo "$(cat ${E})"`, `bash <<'EOF'\ncat ${E}\nEOF`,
+    `git commit -F ${E}`, `git commit --file=${E}`, `git commit -aF ${E}`,
     `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`, 'cat k/server.pem',
   ]) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   assert.match(run('Read', E), /secret-file-guard/);
