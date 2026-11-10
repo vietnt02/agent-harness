@@ -907,7 +907,8 @@ test('shell-words: innerScript reads -c only among the shell\'s own options', ()
     [['bash', '--rcfile', 'f', '-c', 'x'], 'x'], [['bash', '--init-file', 'f', '-c', 'x'], 'x'], [['zsh', '--emulate', 'sh', '-c', 'x'], 'x'],
     [['bash', '--rcfile=f', '-c', 'x'], 'x'], [['bash', '-c', '--', 'x'], 'x'], [['bash', '-co', 'pipefail', 'x'], 'x'],
     [['bash', '-oc', 'pipefail', 'x'], 'x'], [['bash', '--', '-c', 'x'], null], [['bash', '-O', 'extglob', '-c', 'x'], 'x'],
-    [['bash', '-c', 'x', 'sh', 'a'], 'x']])
+    [['bash', '-c', 'x', 'sh', 'a'], 'x'], [['bash', '-c', '-e', 'x'], 'x'], [['sh', '-c', '-o', 'pipefail', 'x'], 'x'],
+    [['bash', '-c', '-e', '--', 'x'], 'x'], [['bash', '-o', 'pipefail', '-oc', 'x'], null]])
     assert.equal(innerScript(w), out, JSON.stringify(w));
 });
 
