@@ -20,7 +20,9 @@ description: "Record what this session showed a hook, script, skill or ambiguous
      read, a tier B/C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
    - a rule sentence two fair readings of which lead to two different actions; the fix rewords
      that sentence, never adds one.
-   Anything else is no file: a clear rule broken without such harm, Viet's intent misread (both
+   Anything else is no file: a command shape a hook missed (a hook catches the common path,
+   never every route; only the permission mode is a wall), a clear rule broken without such
+   harm, Viet's intent misread (both
    fixed in the session, step 1), or a break of Claude Code's built-in instructions (system
    prompt, tool descriptions) that no rule file repeats, whatever its consequence: Viet cannot
    change them.
@@ -53,7 +55,11 @@ description: "Record what this session showed a hook, script, skill or ambiguous
   a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a
   send, a secret, a production write, a session the user cannot type into); anything else is a
   reminder said once (context back, or `hooks/lib/block-once.cjs` when it must land before the
-  command runs). Never chase every route around a check.
+  command runs).
+- A hook is a guardrail for the commands agents actually write, never a wall: an agent always finds
+  another route, and only the permission mode stops one. Build it, and brief its reviewer, on those
+  common commands; a fix is done when they hit and miss right. A reviewer's "it can be bypassed
+  with …" is no blocker and opens no round: no attack simulation, no patching variant by variant.
 - A fix lands where it holds: a repo's convention in that repo (its PR), a fact about this machine
   or Viet's setup in `~/.claude/knowledge/`, a skill only what holds on any machine;
   `tests/skills-generic.test.cjs` fails on the common marks (a home or app-data path, an Orca ID, a
