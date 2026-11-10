@@ -1267,79 +1267,86 @@ test('coordinator-read-guard: parallel PreToolUse processes let only LIMIT reads
   }
 });
 
-test('secret-file-guard: a dotenv used without printing passes; printing it or a key is denied', () => {
+test('secret-file-guard: closed blocklist blocks printing secret files or loaded vars and passes other uses', () => {
   const guard = require('../claude/hooks/secret-file-guard.cjs');
   const E = '.e' + 'nv';
-  // A stand-in for AgentKit's checkPrivacy: flags every secret-looking path it is shown.
+  // Stand-in for AgentKit's checkPrivacy on hosts without AgentKit (CI): flags secret-looking file paths.
   const checker = {
     checkPrivacy: ({ toolInput }) => {
       const text = toolInput.command || toolInput.file_path || '';
-      const paths = (text.match(/[^\s"'<>]*(\.env[\w.]*|id_ed25519|\.pem)\b/g) || []).filter((p) => !/\.example$/.test(p));
+      const paths = (text.match(/[^\s"'<>]*(\.env[\w.]*|id_ed25519[\w.]*|\.(?:pem|key)|credentials[\w.]*|secrets?\.ya?ml)\b/gi) || [])
+        .filter((p) => !/\.(example|sample|template|dist)$/i.test(p));
       return paths.length ? { blocked: true, accesses: paths.map((filePath) => ({ filePath })) } : { blocked: false };
     },
   };
   const userTexts = () => ['cho đọc file env nhé', 'ok'];
   const run = (tool_name, x, opts = { checker, userTexts }) =>
-    guard.decide({ tool_name, tool_input: tool_name === 'Bash' ? { command: x } : { file_path: x }, transcript_path: '/t' }, opts);
-  for (const cmd of [
-    `source ${E} && psql -c "select 1"`, `set -a; . ./${E}; set +a; node app.js`, `docker compose --env-file ${E} up -d`,
-    `node --env-file=${E} x.js`, `test -f ${E} && ls -la ${E}`, `grep -q DB_URL ${E}`, `grep -c KEY ${E}`, `grep --count K ${E}`,
-    `grep -L K ${E}`, `echo "A=1" >> ${E}`, `echo A=1 >${E}`, `wc -l local${E}`, `cp ${E}.example ${E}`, `ln -s ../${E} ${E}`,
-    `git ls-files ${E}`, `diff -q ${E} b`, `cmp -s ${E} b`, `sha256sum ${E}`,
-    `docker compose -p myproj --env-file ${E} up -d`, `git -C repo ls-files ${E}`, `source ${E} && make | tail -5`,
-    `cat ${E} # secret-ok: "cho đọc file env nhé"`, 'ls -la',
-    // A heredoc body written to a file only names it: backticks there are markdown, not a substitution.
-    `cat > README.md <<'EOF'\n| names of \`/root/app/${E}\` |\nEOF`, `cat > a.md <<EOF\nsee ${E} and \\$(not run) here\nEOF`,
-    // An Orca message carries text and reads no file (a worker's plan naming the file it will not open).
-    `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`, `orca orchestration reply --id m1 --body "đừng in ${E}"`,
-    `orca orchestration send --type worker_done --subject "xong" --body 'đã bỏ qua ${E}'`,
-  ]) assert.equal(run('Bash', cmd), '', cmd);
-  // AgentKit's checker reports a quoted phrase whole (seen on `ask --question "… <dotenv>"`).
-  const phrase = {
-    checkPrivacy: ({ toolInput }) => {
-      const hits = (toolInput.command.match(/"[^"]*"|\S+/g) || []).map((w) => w.replace(/^"|"$/g, '')).filter((w) => /\.env\b/.test(w));
-      return hits.length ? { blocked: true, accesses: hits.map((filePath) => ({ filePath })) } : { blocked: false };
-    },
-  };
-  assert.equal(run('Bash', `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`, { checker: phrase, userTexts }), '');
-  // A message naming the file never hides a real read of it in the same command, with either checker or none.
-  const beside = [`orca orchestration ask --question "x" && cat ${E}`, `orca orchestration ask --question "$(cat ${E})"`,
-    `orca orchestration ask --question "x ${E}"; cat ${E}`, `orca orchestration ask --question "x ${E}" && cat ${E}`,
-    `cat ${E} && orca orchestration ask --question "đã đọc ${E}"`, `cat ${E} | orca orchestration send --subject s --body "about ${E}"`,
-    `orca orchestration ask --question "${E}" > /dev/null; grep KEY ${E}`, `orca orchestration ask --question "x ${E}"; bash -c "cat ${E}"`,
-    `orca orchestration ask --question "see app/${E}"; cat ${E}`, `orca orchestration ask --question "q" --options "${E}"; cat ${E}`,
-    `orca orchestration send --subject "${E}" --body x < ${E}`];
-  assert.match(run('Bash', `echo "không đọc ${E}"`, { checker: phrase, userTexts }), /secret-file-guard/, 'echo stays as narrowed');
-  for (const cmd of beside) {
-    assert.match(run('Bash', cmd, { checker: phrase, userTexts }), /secret-file-guard/, `phrase: ${cmd}`);
-    assert.match(run('Bash', cmd), /secret-file-guard/, `token: ${cmd}`);
-    assert.match(run('Bash', cmd, { checker: null, userTexts }), /secret-file-guard/, `no checker: ${cmd}`);
-  }
-  // The message route still sends a file named by a `--*-file` option, and runs a substitution.
-  for (const cmd of [`orca orchestration send --to x --body-file ${E}`, `orca orchestration send --body-file=${E}`,
-    `orca orchestration ask --question "$(cat ${E})"`, `orca orchestration ask --question "x" && cat ${E}`])
-    assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
-  // The checker reports a template in markdown quotes: no secret in it.
-  const quoted = { checkPrivacy: () => ({ blocked: true, accesses: [{ filePath: `\`deploy/${E}.example\`` }] }) };
-  assert.equal(run('Bash', `cat > a.md <<EOF\nsee \\\`deploy/${E}.example\\\`\nEOF`, { checker: quoted, userTexts }), '');
-  for (const cmd of [
-    `cat ${E}`, `cat<${E}`, `sort < ${E}`, `cat ${E}>out.txt`, `cat ${E} | wc -l`, `f=${E}; cat $f`,
-    `grep DB_URL ${E}`, `grep -esecret ${E}`, `grep -- -c ${E}`, `cut -d= -f1 ${E}`, `cut -d= -f1 --complement ${E}`,
-    `cp ${E} /dev/stdout`, `ln -s ${E} n.txt`, `wc --files0-from=${E}`, `set -x; source ${E}`, `bash -x -c "source ${E}"`,
-    `bash -c "cat ${E}"`, `docker compose --env-file ${E} config`, `node --env-file=${E} -p process.env`,
-    `docker run --env-file ${E} alpine env`, `git diff ${E}`,
-    `cat <>${E}`, `cp ${E} ${E}.example`, `docker compose --env-file ${E} convert`, `uv run --env-file ${E} python -c x`,
-    `cat $(ls ${E})`, `ls ${E} | xargs cat`, `set -e -x; source ${E}`, `set -v; source ${E}`, `bash -o xtrace -c "source ${E}"`,
-    `grep -e -c ${E}`,
-    // A substitution that runs still reads it: an unquoted heredoc, a heredoc fed to a shell.
+    guard.decide(
+      { tool_name, tool_input: tool_name === 'Bash' || tool_name === 'PowerShell' ? { command: x } : { file_path: x }, transcript_path: '/t' },
+      opts,
+    );
+
+  const allowed = [
+    `set -a && . ./${E} && set +a && python3 -I x.py`,
+    `set -a && . ./${E} && set +a && python3 -I x.py | grep -v -i -e token -e secret | head -20`,
+    `python3 -I x.py ./${E}`,
+    `node --env-file=${E} app.js`,
+    `cp ${E}.example ${E}`,
+    `cat > spec.md <<EOF\nFile ${E}, \`${E}\` and ${E}.\nEOF`,
+    `cat > spec.md <<'EOF'\nFile ${E} and server.pem in prose.\nEOF`,
+    'ssh -i ~/.ssh/id_ed25519 host',
+    'cat ~/.ssh/id_ed25519.pub',
+    `source ${E} && psql -c "select 1"`,
+    `source ${E} && env FOO=1 python3 x.py`,
+    'env FOO=1 python3 x.py',
+    `docker compose --env-file ${E} up -d`,
+    `uv run --env-file ${E} python -c x`,
+    `test -f ${E} && ls -la ${E}`,
+    `grep -q DB_URL ${E}`, `grep -c KEY ${E}`, `grep --count K ${E}`, `grep -L K ${E}`,
+    `grep ${E} .gitignore`,
+    `sed -i 's/A=1/A=2/' ${E}`, `sed 's/\\${E}/x/' README.md`,
+    `ps aux | awk '/\\${E}/{print $1}'`,
+    `echo "A=1" >> ${E}`, `echo A=1 >${E}`, `echo "không đọc ${E}"`, `source ${E} && echo "done"`,
+    `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`,
+    `cat ${E} # secret-ok: "cho đọc file env nhé"`,
+    'ls -la',
+  ];
+  for (const cmd of allowed) assert.equal(run('Bash', cmd), '', cmd);
+
+  const blocked = [
+    `cat ${E}`, `CAT ${E}`, `cat < ${E}`, `cat<${E}`, `<${E} cat`, `cat <> ${E}`,
+    `head -n 5 ${E}`, `head < ${E}`, `tail ${E}`, `less ${E}`, `more ${E}`, `bat ${E}`,
+    `grep KEY ${E}`, `grep -e KEY ${E}`, `grep -- -c ${E}`, `grep -e -c ${E}`, `grep KEY < ${E}`,
+    `cut -d= -f2 ${E}`,
+    `awk -F= '{print $2}' ${E}`,
+    `sed -n '1,5p' ${E}`,
+    `base64 ${E}`, `xxd ${E}`, `strings ${E}`,
+    `source ${E}; echo $K`, `. ./${E} && printf '%s\\n' "$K"`,
+    `source ${E}; env`, `source ${E}; printenv`, `source ${E}; set`,
+    `source ${E}; export -p`, `source ${E}; declare -p`,
+    `set -x; source ${E}`, `source ${E}; set -x`, `set -v; source ${E}`, `set -o xtrace; . ./${E}`,
     `cat > a.md <<EOF\n$(cat ${E})\nEOF`, `cat > a.md <<EOF\n\`cat ${E}\`\nEOF`, `bash <<'EOF'\ncat ${E}\nEOF`,
-    `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`, 'cat k/server.pem',
-  ]) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
+    `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`,
+    'cat server.pem', 'cat ~/.ssh/id_ed25519', 'head credentials.json',
+  ];
+  for (const cmd of blocked) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
+  assert.match(run('Bash', `cat ${E}`), /set -a; \. \.\/\.env; set \+a;/);
+
+  for (const ps of [`Get-Content ${E}`, `gc ${E}`, `TYPE ${E}`, `Select-String KEY ${E}`, `sls -Pattern KEY -Path ${E}`])
+    assert.match(run('PowerShell', ps), /secret-file-guard/, ps);
+  for (const ps of ['Get-ChildItem', `Get-ChildItem ${E}`])
+    assert.equal(run('PowerShell', ps), '', ps);
+
   assert.match(run('Read', E), /secret-file-guard/);
+  assert.match(run('Read', 'server.pem'), /secret-file-guard/);
+  assert.match(run('Read', '~/.ssh/id_ed25519'), /secret-file-guard/);
+  assert.equal(run('Read', '~/.ssh/id_ed25519.pub'), '');
   assert.match(run('Edit', E), /secret-file-guard/);
   assert.equal(run('Write', E), '');
+  assert.equal(run('Write', 'server.pem'), '');
   assert.equal(run('Read', 'src/app.js'), '');
-  // No checker, or one that throws: fail closed, even a quiet use is denied, and the reason says why.
+
+  // No checker, or one that throws: fail closed, even a non-printing command is denied, and the reason says why.
   for (const broken of [null, { checkPrivacy: () => { throw new Error('moved'); } }]) {
     assert.match(run('Bash', `source ${E}`, { checker: broken, userTexts }), /did not load or failed/);
     assert.equal(run('Bash', `cat ${E} # secret-ok: "cho đọc file env nhé"`, { checker: broken, userTexts }), '');
@@ -1348,6 +1355,38 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
   // A command the checker cannot read stays denied, with its reason.
   const opaque = { checkPrivacy: () => ({ blocked: true, uninspectable: true, accesses: [], reason: 'eval of a variable' }) };
   assert.match(run('Bash', 'eval "$X"', { checker: opaque, userTexts }), /eval of a variable/);
+});
+
+const KIT_PRIVACY = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
+test('secret-file-guard: reality check against installed AgentKit privacy-checker', { skip: !fs.existsSync(KIT_PRIVACY) && 'no AgentKit privacy-checker' }, () => {
+  const guard = require('../claude/hooks/secret-file-guard.cjs');
+  const E = '.e' + 'nv';
+  const userTexts = () => [];
+  const run = (tool_name, x) =>
+    guard.decide(
+      { tool_name, tool_input: tool_name === 'Bash' || tool_name === 'PowerShell' ? { command: x } : { file_path: x }, transcript_path: '/t' },
+      { userTexts },
+    );
+
+  for (const cmd of [
+    `set -a && . ./${E} && set +a && python3 -I x.py`,
+    `set -a && . ./${E} && set +a && python3 -I x.py | grep -v secret | head -20`,
+    `python3 -I x.py ./${E}`,
+    `node --env-file=${E} app.js`,
+    `cp ${E}.example ${E}`,
+    `cat > spec.md <<EOF\nFile ${E}, \`${E}\` and ${E}.\nEOF`,
+    'ssh -i ~/.ssh/id_ed25519 host',
+    'cat ~/.ssh/id_ed25519.pub',
+  ]) assert.equal(run('Bash', cmd), '', cmd);
+
+  for (const cmd of [`cat ${E}`, `grep KEY ${E}`, `source ${E}; echo $K`, 'cat server.pem', 'cat ~/.ssh/id_ed25519', 'head credentials.json'])
+    assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
+  assert.match(run('PowerShell', `Get-Content ${E}`), /secret-file-guard/);
+  assert.equal(run('PowerShell', 'Get-ChildItem'), '');
+  assert.equal(run('PowerShell', `Get-ChildItem ${E}`), '');
+  assert.match(run('Read', E), /secret-file-guard/);
+  assert.match(run('Read', '~/.ssh/id_ed25519'), /secret-file-guard/);
+  assert.equal(run('Read', '~/.ssh/id_ed25519.pub'), '');
 });
 
 test('worker-default-guard: userTexts skips entries no human typed (task notifications, other sessions)', () => {
