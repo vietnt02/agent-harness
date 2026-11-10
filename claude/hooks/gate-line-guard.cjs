@@ -165,24 +165,45 @@ function writesMainCheckout(command, cwd) {
   return false;
 }
 
-// A production write this hook knows, as one simple command's words (after program()): its verbs
-// are read up to the first flag, so a flag value never counts.
+// A production write this hook knows, as one simple command's words (after program()). `npx`-style
+// runners are unwrapped; global flags before the verbs are skipped with their value, then verbs are
+// read up to the next flag, so a flag value never counts.
 const PROD_VERBS = {
   cf: /^(update|edit|create|delete|put|patch|set|rm|remove|deploy|publish|purge)$/,
-  wrangler: /^(deploy|publish|put|delete|execute|create)$/,
+  wrangler: /^(deploy|publish|put|delete|execute|create|apply|rollback|bulk)$/,
 };
-function prodWrite([cmd, ...args]) {
-  const verbs = args.slice(0, Math.max(0, args.findIndex((a) => a.startsWith('-'))) || args.length);
+const RUNNERS = { npx: 1, bunx: 1, pnpm: 1, yarn: 1 };
+function verbsOf(args) {
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-')) i += /=/.test(args[i]) ? 1 : 2;
+  const rest = args.slice(i);
+  const flag = rest.findIndex((a) => a.startsWith('-'));
+  return flag < 0 ? rest : rest.slice(0, flag);
+}
+function prodWrite(words) {
+  let [cmd, ...args] = words;
+  if (RUNNERS[cmd]) {
+    while (args.length && (args[0].startsWith('-') || /^(exec|dlx|run)$/.test(args[0]))) args = args.slice(1);
+    [cmd, ...args] = args;
+  }
+  const verbs = verbsOf(args);
   if (PROD_VERBS[cmd]) return verbs.some((w) => PROD_VERBS[cmd].test(w));
-  return (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') || (cmd === 'glab' && args[0] === 'mr' && args[1] === 'merge');
+  return (cmd === 'gh' && verbs[0] === 'pr' && verbs[1] === 'merge') || (cmd === 'glab' && verbs[0] === 'mr' && verbs[1] === 'merge');
 }
 
 // The first production write that runs after another step of the same call (a `cd`, an assignment
-// or `set` before it is no step), as its text; null when each one runs alone.
+// or `set` before it is no step; nor a `$(…)` feeding the write or an assignment, such as
+// `GH_TOKEN=$(gh auth token) gh pr merge`), as its text; null when each one runs alone. A second
+// production write counts the first as a step.
 function chainedProdWrite(command) {
   let before = false;
+  let pending = false; // a command inside `$(…)` or `(…)` not yet known to feed the next one
+  const top = (raw) => !String(raw.scope).includes('.');
   for (const raw of commands(command)) {
     const words = program(raw);
+    if (!top(raw)) { pending = true; continue; }
+    if (pending && !raw.some((w) => /\$\(|`/.test(w))) before = true;
+    pending = false;
     const script = innerScript(words);
     if (script !== null) {
       const inner = chainedProdWrite(script);
@@ -193,6 +214,7 @@ function chainedProdWrite(command) {
     }
     if (prodWrite(words)) {
       if (before) return words.join(' ');
+      before = true;
       continue;
     }
     if (!words.length || assignments(raw) || ['cd', 'pushd', 'set', 'export', 'true', ':'].includes(words[0])) continue;

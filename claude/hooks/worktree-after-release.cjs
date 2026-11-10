@@ -66,11 +66,12 @@ function describe(dispatch, show) {
 }
 
 // What the command's output says about each dispatch: a line instead of the reminder when Orca
-// refused it (a worker not settled yet, or an error naming no dispatch), else null.
-function refused(dispatch, output) {
+// refused it (a worker not settled yet; an error naming no dispatch, read only when the call released
+// one dispatch, since it cannot be told apart between several), else null.
+function refused(dispatch, output, alone = true) {
   const m = output.match(new RegExp(`Dispatch ${dispatch} is (\\S+); only a settled worker can release`));
   if (m) return `${dispatch}: chưa release (worker đang ${m[1]}, chưa settle); worktree giữ nguyên. Muốn dừng: \`orca orchestration worker-stop --dispatch ${dispatch}\`.`;
-  if (/"ok"\s*:\s*false|^error:/m.test(output)) return `${dispatch}: worker-release báo lỗi; worktree giữ nguyên, đọc lỗi trước khi gỡ.`;
+  if (alone && /"ok"\s*:\s*false|^error:/m.test(output)) return `${dispatch}: worker-release báo lỗi; worktree giữ nguyên, đọc lỗi trước khi gỡ.`;
   return null;
 }
 
@@ -90,9 +91,10 @@ process.stdin.on('end', () => {
       .filter(([cmd, sub, verb]) => cmd === 'orca' && sub === 'orchestration' && verb === 'worker-release')
       .flatMap((w) => w.join(' ').match(/ctx_[0-9a-f]+/g) || []);
     const notes = [];
-    const lines = [...new Set(released)]
+    const ids = [...new Set(released)];
+    const lines = ids
       .map((d) => {
-        const no = refused(d, output);
+        const no = refused(d, output, ids.length === 1);
         if (no) { notes.push(no); return null; }
         try { return describe(d); } catch (e) {
           return `${d}: không đọc được worktree (${String(e.message || e).slice(0, 120)}); tự tìm bằng ` +
