@@ -195,12 +195,20 @@ function innerScript(words) {
   if (words[0] === 'eval') return words.slice(1).join(' ');
   if (!/^(ba|z|da|k)?sh$/.test(words[0] || '')) return null;
   // `-c` counts only among the shell's own options, before its first operand (`sh x.sh -c y`
-  // passes `-c` to x.sh); `-o`/`-O` (also packed, `-euo pipefail`) take the next word.
+  // passes `-c` to x.sh). Each `o`/`O` in a short option (`-euo pipefail`, `-co pipefail`) and the long
+  // `--rcfile`, `--init-file`, `--emulate` take the next word; `-c -- '<s>'` runs `<s>`.
   for (let k = 1; k < words.length; k++) {
     const w = words[k];
-    if (!/^[-+][a-zA-Z]+$/.test(w)) { if (/^--[a-z]/.test(w)) continue; return null; }
-    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(w)) return k + 1 < words.length ? words[k + 1] : null;
-    if (/[oO]$/.test(w)) k++;
+    if (/^--(rcfile|init-file|emulate)$/.test(w)) { k++; continue; }
+    if (/^--./.test(w)) continue;
+    if (!/^[-+][a-zA-Z]+$/.test(w)) return null;
+    const values = (w.match(/[oO]/g) || []).length;
+    if (w[0] === '-' && w.includes('c')) {
+      let at = k + 1 + values;
+      if (words[at] === '--') at++;
+      return at < words.length ? words[at] : null;
+    }
+    k += values;
   }
   return null;
 }

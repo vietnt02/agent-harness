@@ -903,7 +903,11 @@ test('shell-words: innerScript reads -c only among the shell\'s own options', ()
   const { innerScript } = require('../claude/hooks/lib/shell-words.cjs');
   for (const [w, out] of [[['bash', '-c', 'x'], 'x'], [['sh', '-lc', 'x'], 'x'], [['bash', '-euo', 'pipefail', '-c', 'x'], 'x'],
     [['bash', '--norc', '-c', 'x'], 'x'], [['bash', '-o', 'pipefail', '-c', 'x'], 'x'], [['sh', 'script.sh', '-c', 'git push'], null],
-    [['bash', './run.sh', '-c'], null], [['bash', 'x.sh'], null], [['eval', 'a', 'b'], 'a b']])
+    [['bash', './run.sh', '-c'], null], [['bash', 'x.sh'], null], [['eval', 'a', 'b'], 'a b'],
+    [['bash', '--rcfile', 'f', '-c', 'x'], 'x'], [['bash', '--init-file', 'f', '-c', 'x'], 'x'], [['zsh', '--emulate', 'sh', '-c', 'x'], 'x'],
+    [['bash', '--rcfile=f', '-c', 'x'], 'x'], [['bash', '-c', '--', 'x'], 'x'], [['bash', '-co', 'pipefail', 'x'], 'x'],
+    [['bash', '-oc', 'pipefail', 'x'], 'x'], [['bash', '--', '-c', 'x'], null], [['bash', '-O', 'extglob', '-c', 'x'], 'x'],
+    [['bash', '-c', 'x', 'sh', 'a'], 'x']])
     assert.equal(innerScript(w), out, JSON.stringify(w));
 });
 
