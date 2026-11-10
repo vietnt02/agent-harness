@@ -194,8 +194,21 @@ function program(words) {
 function innerScript(words) {
   if (words[0] === 'eval') return words.slice(1).join(' ');
   if (!/^(ba|z|da|k)?sh$/.test(words[0] || '')) return null;
-  const at = words.findIndex((w, k) => k > 0 && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(w));
-  return at > 0 && at + 1 < words.length ? words[at + 1] : null;
+  // `-c` counts only among the shell's own options, before its first operand (`sh x.sh -c y`
+  // passes `-c` to x.sh); the script is that first operand, wherever `-c` stood among the options
+  // (`-c -e '<s>'`). Each `o`/`O` in a short option and the long `--rcfile`, `--init-file`,
+  // `--emulate` take the next word; `--` ends the options.
+  let c = false;
+  for (let k = 1; k < words.length; k++) {
+    const w = words[k];
+    if (w === '--') return c && k + 1 < words.length ? words[k + 1] : null;
+    if (/^--(rcfile|init-file|emulate)$/.test(w)) { k++; continue; }
+    if (/^--./.test(w)) continue;
+    if (!/^[-+][a-zA-Z]+$/.test(w)) return c ? w : null;
+    if (w[0] === '-' && w.includes('c')) c = true;
+    k += (w.match(/[oO]/g) || []).length;
+  }
+  return null;
 }
 
 // The `NAME=value` pairs a command made only of assignments sets for the rest of its shell

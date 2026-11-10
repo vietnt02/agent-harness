@@ -899,6 +899,19 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
   }
 });
 
+test('shell-words: innerScript reads -c only among the shell\'s own options', () => {
+  const { innerScript } = require('../claude/hooks/lib/shell-words.cjs');
+  for (const [w, out] of [[['bash', '-c', 'x'], 'x'], [['sh', '-lc', 'x'], 'x'], [['bash', '-euo', 'pipefail', '-c', 'x'], 'x'],
+    [['bash', '--norc', '-c', 'x'], 'x'], [['bash', '-o', 'pipefail', '-c', 'x'], 'x'], [['sh', 'script.sh', '-c', 'git push'], null],
+    [['bash', './run.sh', '-c'], null], [['bash', 'x.sh'], null], [['eval', 'a', 'b'], 'a b'],
+    [['bash', '--rcfile', 'f', '-c', 'x'], 'x'], [['bash', '--init-file', 'f', '-c', 'x'], 'x'], [['zsh', '--emulate', 'sh', '-c', 'x'], 'x'],
+    [['bash', '--rcfile=f', '-c', 'x'], 'x'], [['bash', '-c', '--', 'x'], 'x'], [['bash', '-co', 'pipefail', 'x'], 'x'],
+    [['bash', '-oc', 'pipefail', 'x'], 'x'], [['bash', '--', '-c', 'x'], null], [['bash', '-O', 'extglob', '-c', 'x'], 'x'],
+    [['bash', '-c', 'x', 'sh', 'a'], 'x'], [['bash', '-c', '-e', 'x'], 'x'], [['sh', '-c', '-o', 'pipefail', 'x'], 'x'],
+    [['bash', '-c', '-e', '--', 'x'], 'x'], [['bash', '-o', 'pipefail', '-oc', 'x'], null]])
+    assert.equal(innerScript(w), out, JSON.stringify(w));
+});
+
 test('shell-words: a backslash in double quotes escapes only $ ` " \\', () => {
   const { commands } = require('../claude/hooks/lib/shell-words.cjs');
   assert.deepEqual([...commands('echo "a\\b \\$x \\" \\\\"')[0]], ['echo', 'a\\b $x " \\']);
