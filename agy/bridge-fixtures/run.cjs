@@ -63,24 +63,27 @@ let n = 0;
 // A conversation laid out as the given mode stores it; `worker` puts the Orca preamble first.
 function conversation(mode, worker, hasBrain = true) {
   const cid = `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
-  const firstInput = { type: 'USER_INPUT', content: worker ? `${PREAMBLE}\nTask: x` : 'Kiểm pipeline hôm nay' };
+  const firstInput = { type: 'USER_INPUT', content: worker ? `${PREAMBLE}\nTask: x` : 'Kiểm pipeline hôm nay', step_index: 0 };
   if (mode === 'cli') {
     const brain = path.join(root, 'cli', 'brain', cid);
     fs.mkdirSync(path.join(brain, '.system_generated', 'logs'), { recursive: true });
-    fs.writeFileSync(path.join(brain, '.system_generated', 'logs', 'transcript_full.jsonl'), JSON.stringify(firstInput) + '\n');
-    return { cid, vars: { '{CLI_BRAIN}': brain, '{CID}': cid, '{WS}': ws } };
+    const transcript = path.join(brain, '.system_generated', 'logs', 'transcript_full.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify(firstInput) + '\n');
+    return { cid, transcript, vars: { '{CLI_BRAIN}': brain, '{CID}': cid, '{WS}': ws } };
   }
   const gh = path.join(root, 'chat');
   const acp = path.join(gh, 'antigravity-acp');
   fs.mkdirSync(path.join(acp, 'conversations'), { recursive: true });
   fs.writeFileSync(path.join(acp, 'conversations', `${cid}.db`), '');
+  let transcript = '';
   if (hasBrain) {
     const logs = path.join(acp, 'brain', cid, '.system_generated', 'logs');
     fs.mkdirSync(logs, { recursive: true });
-    fs.writeFileSync(path.join(logs, 'transcript.jsonl'), JSON.stringify(firstInput) + '\n');
+    transcript = path.join(logs, 'transcript.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify(firstInput) + '\n');
   }
   fs.mkdirSync(path.join(gh, 'artifacts'), { recursive: true }); // the shared dir Orca names
-  return { cid, vars: { '{ACP}': acp, '{GH}': gh, '{CID}': cid, '{WS}': ws } };
+  return { cid, transcript, vars: { '{ACP}': acp, '{GH}': gh, '{CID}': cid, '{WS}': ws } };
 }
 
 function payload(mode, convo, toolCall, extra = {}) {
@@ -89,12 +92,21 @@ function payload(mode, convo, toolCall, extra = {}) {
   return { ...JSON.parse(text), toolCall, ...extra };
 }
 
-function bridge(p, tmp) {
-  const r = spawnSync('node', [BRIDGE, 'PreToolUse'], {
+function bridgeFull(p, tmp, event = 'PreToolUse') {
+  const r = spawnSync(process.execPath, [BRIDGE, event], {
     input: JSON.stringify(p), encoding: 'utf8', timeout: 20000, env: { ...process.env, TMPDIR: tmp, BRIDGE_FIXTURE: '1' },
   });
-  if (r.error || r.status !== 0) return `crash (${r.error ? r.error.message : `exit ${r.status}`})`;
-  try { return JSON.parse(r.stdout || '{}').decision || 'allow'; } catch (_) { return 'unparsable output'; }
+  if (r.error || r.status !== 0) return { decision: `crash (${r.error ? r.error.message : `exit ${r.status}`})`, reason: '' };
+  try {
+    const out = JSON.parse(r.stdout || '{}');
+    return { decision: out.decision || 'allow', reason: String(out.reason || '') };
+  } catch (_) {
+    return { decision: 'unparsable output', reason: '' };
+  }
+}
+
+function bridge(p, tmp) {
+  return bridgeFull(p, tmp, 'PreToolUse').decision;
 }
 
 // Worker mode as the bridge stored it for this conversation, wherever it put it.
@@ -114,9 +126,9 @@ const hasAgentKitLib = (lib) => fs.existsSync(path.join(os.homedir(), '.claude',
 const env = path.join(ws, '.env');
 const readme = path.join(ws, 'README.md');
 const cases = [
-  ['cli read_file Path .env', 'cli', { name: 'read_file', args: { Path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
-  ['cli read_file Path README', 'cli', { name: 'read_file', args: { Path: readme } }, 'allow', undefined, 'privacy-checker.cjs'],
-  ['cli run_command git status', 'cli', { name: 'run_command', args: { CommandLine: 'git status --short' } }, 'allow'],
+  ['cli read_file Path .env', 'cli', { id: 'toolu_01', name: 'read_file', args: { Path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
+  ['cli read_file Path README', 'cli', { id: 'toolu_01', name: 'read_file', args: { Path: readme } }, 'allow', undefined, 'privacy-checker.cjs'],
+  ['cli run_command git status', 'cli', { id: 'toolu_01', name: 'run_command', args: { CommandLine: 'git status --short' } }, 'allow'],
   ['chat view_file AbsolutePath .env', 'chat', { name: 'view_file', args: { AbsolutePath: env } }, 'deny', undefined, 'privacy-checker.cjs'],
   ['chat view_file absolute_path .env', 'chat', { name: 'view_file', args: { absolute_path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
   ['chat view_file absolute_path README', 'chat', { name: 'view_file', args: { absolute_path: readme } }, 'allow', undefined, 'privacy-checker.cjs'],
@@ -142,53 +154,97 @@ for (const [name, mode, toolCall, want, extra, requiredLib] of cases) {
 }
 
 // Umbrella sub-repo guard: a copy of the umbrella's real nap-context-repo-con.cjs in a fake umbrella
-// above the temp dir. Reading a sub-repo's AGENTS.md from a session whose workspace is outside the
-// umbrella (view_file has no Cwd) must count, so a later command in that sub-repo passes.
-// Path of an umbrella's nap-context-repo-con.cjs, per machine: local.json `{"napHook": "<abs path>"}`
-// (machine-local). Without one, the two umbrella cases are skipped.
-const NAP = (() => { try { return JSON.parse(fs.readFileSync(path.join(LOCAL_DIR, 'local.json'), 'utf8')).napHook || ''; } catch (_) { return ''; } })();
+// above the temp dir. First non-Read touch in a sub-repo denies once (naming AGENTS.md for agy) and
+// records that sub-repo so later commands in it pass until compaction; other sub-repos still deny once.
+// Path of an umbrella's nap-context-repo-con.cjs: NAP_HOOK_PATH, else local.json `{"napHook": "<abs path>"}`.
+const NAP = process.env.NAP_HOOK_PATH || (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(LOCAL_DIR, 'local.json'), 'utf8')).napHook || ''; } catch (_) { return ''; }
+})();
 if (NAP && fs.existsSync(NAP)) {
   const umbrella = path.join(root, 'umbrella');
   const repo = path.join(umbrella, 'repos', 'systems', 'demo');
-  fs.mkdirSync(path.join(umbrella, '.claude', 'hooks'), { recursive: true });
-  fs.copyFileSync(NAP, path.join(umbrella, '.claude', 'hooks', 'nap-context-repo-con.cjs'));
-  fs.mkdirSync(path.join(repo, '.git'), { recursive: true }); // the hook takes a sub-repo as a folder with .git
-  fs.writeFileSync(path.join(repo, 'AGENTS.md'), '# demo\n');
-  for (const [name, readFirst, want] of [['umbrella: read AGENTS.md from ~, then ls in sub-repo', true, 'allow'],
-    ['umbrella: ls in sub-repo without reading AGENTS.md', false, 'deny']]) {
+  const otherRepo = path.join(umbrella, 'repos', 'systems', 'other');
+  const hooksDst = path.join(umbrella, '.claude', 'hooks');
+  fs.mkdirSync(hooksDst, { recursive: true });
+  fs.copyFileSync(NAP, path.join(hooksDst, 'nap-context-repo-con.cjs'));
+  const libSrc = path.join(path.dirname(NAP), 'lib');
+  if (fs.existsSync(libSrc)) fs.cpSync(libSrc, path.join(hooksDst, 'lib'), { recursive: true });
+  for (const r of [repo, otherRepo]) {
+    fs.mkdirSync(path.join(r, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(r, 'CLAUDE.md'), '# rules\n');
+    fs.writeFileSync(path.join(r, 'AGENTS.md'), '# rules\n');
+  }
+  const home = { workspacePaths: [os.homedir()] };
+
+  {
+    const name = 'umbrella: first command in sub-repo denies once and names AGENTS.md';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('chat', false);
-    const home = { workspacePaths: [os.homedir()] };
-    if (readFirst) bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmp);
-    const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
-    report(got === want, name, got === want ? '' : `got ${got}, want ${want}`);
+    const first = bridgeFull(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const ok = first.decision === 'deny' && /demo[\\/]AGENTS\.md/.test(first.reason) && !/CLAUDE\.md/.test(first.reason) && /read_file/.test(first.reason);
+    report(ok, name, ok ? '' : `decision=${first.decision}, reason=${first.reason.slice(0, 120)}`);
   }
   {
-    const name = 'umbrella: read AGENTS.md with TMPDIR=A, then ls in sub-repo with TMPDIR=B';
+    const name = 'umbrella: cli payload.cwd without args.Cwd blocks once then passes';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('cli', false);
+    const cliCtx = { workspacePaths: [os.homedir()], cwd: repo };
+    const first = bridgeFull(payload('cli', convo, { id: 'toolu_01', name: 'run_command', args: { CommandLine: 'ls' } }, cliCtx), tmp);
+    const second = bridge(payload('cli', convo, { id: 'toolu_02', name: 'run_command', args: { CommandLine: 'pwd' } }, cliCtx), tmp);
+    const ok = first.decision === 'deny' && /demo[\\/]AGENTS\.md/.test(first.reason) && second === 'allow';
+    report(ok, name, ok ? '' : `first=${first.decision}, second=${second}`);
+  }
+  {
+    const name = 'umbrella: different command in same sub-repo passes (TMPDIR=A -> TMPDIR=B, state in brain) and other sub-repo still denies once';
     const tmpA = fs.mkdtempSync(path.join(root, 'tmp-a-'));
     const tmpB = fs.mkdtempSync(path.join(root, 'tmp-b-'));
     const convo = conversation('chat', false);
     const brainDir = path.join(convo.vars['{ACP}'], 'brain', convo.cid, '.system_generated');
-    const home = { workspacePaths: [os.homedir()] };
-    bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmpA);
-    const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmpB);
+    const first = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmpA);
+    const second = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: repo } }, home), tmpB);
+    const otherFirst = bridgeFull(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: otherRepo } }, home), tmpB);
+    const otherSecond = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: otherRepo } }, home), tmpB);
     const napBrainState = path.join(brainDir, 'claude-nap-context-repo-con');
     const napTmpA = path.join(tmpA, 'claude-nap-context-repo-con');
     const napTmpB = path.join(tmpB, 'claude-nap-context-repo-con');
     const stateInBrain = fs.existsSync(napBrainState) && !fs.existsSync(napTmpA) && !fs.existsSync(napTmpB);
-    const ok = got === 'allow' && stateInBrain;
-    report(ok, name, ok ? '' : `got ${got}, stateInBrain=${stateInBrain}`);
+    const ok = first === 'deny' && second === 'allow' && stateInBrain &&
+      otherFirst.decision === 'deny' && /other[\\/]AGENTS\.md/.test(otherFirst.reason) && !/demo/.test(otherFirst.reason) &&
+      otherSecond === 'allow';
+    report(ok, name, ok ? '' : `first=${first}, second=${second}, stateInBrain=${stateInBrain}, otherFirst=${otherFirst.decision}, otherSecond=${otherSecond}`);
+  }
+  {
+    const name = 'umbrella: after compaction (CHECKPOINT + PreInvocation), sub-repo denies once again';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('chat', false);
+    bridgeFull(payload('chat', convo, undefined, { ...home, toolCall: undefined }), tmp, 'PreInvocation');
+    const first = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const second = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: repo } }, home), tmp);
+    fs.appendFileSync(convo.transcript, JSON.stringify({ type: 'CHECKPOINT', step_index: 5 }) + '\n');
+    bridgeFull(payload('chat', convo, undefined, { ...home, toolCall: undefined }), tmp, 'PreInvocation');
+    const afterCompact = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls -a', Cwd: repo } }, home), tmp);
+    const afterCompactNext = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls -1', Cwd: repo } }, home), tmp);
+    const ok = first === 'deny' && second === 'allow' && afterCompact === 'deny' && afterCompactNext === 'allow';
+    report(ok, name, ok ? '' : `first=${first}, second=${second}, afterCompact=${afterCompact}, afterCompactNext=${afterCompactNext}`);
+  }
+  {
+    const name = 'umbrella: git read-only status passes without marking sub-repo loaded';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('chat', false);
+    const gitPass = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'git status --short', Cwd: repo } }, home), tmp);
+    const nextTouch = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const ok = gitPass === 'allow' && nextTouch === 'deny';
+    report(ok, name, ok ? '' : `gitPass=${gitPass}, nextTouch=${nextTouch}`);
   }
   {
     const name = 'umbrella: fallback to os.tmpdir() when brain dir is missing';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('chat', false, false);
-    const home = { workspacePaths: [os.homedir()] };
-    bridge(payload('chat', convo, { name: 'view_file', args: { AbsolutePath: path.join(repo, 'AGENTS.md') } }, home), tmp);
-    const got = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const first = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
+    const second = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: repo } }, home), tmp);
     const napTmp = path.join(tmp, 'claude-nap-context-repo-con');
-    const fellBack = got === 'allow' && fs.existsSync(napTmp);
-    report(fellBack, name, fellBack ? '' : `got ${got}, napInTmp=${fs.existsSync(napTmp)}`);
+    const fellBack = first === 'deny' && second === 'allow' && fs.existsSync(napTmp);
+    report(fellBack, name, fellBack ? '' : `first=${first}, second=${second}, napInTmp=${fs.existsSync(napTmp)}`);
   }
 } else {
   console.log(`SKIP  umbrella guard (${NAP ? `${NAP} not found` : 'no napHook in local.json'})`);
@@ -239,7 +295,7 @@ if (!failed && require.main === module) {
   } else if (!recent.length) {
     console.log('WAIT  no agy payload seen since the installed versions arrived; versions not recorded yet');
     code = 3;
-  } else {
+  } else if (!process.env.NAP_HOOK_PATH) {
     fs.writeFileSync(STAMP, JSON.stringify({ ...versions(), at: new Date().toISOString() }, null, 2) + '\n');
   }
 }
