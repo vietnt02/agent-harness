@@ -165,6 +165,21 @@ test('dispatch-split-guard: a split hint never blocks; a missing --effort still 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('dispatch-split-guard: a codex worker with no user pick is said once; the same command again passes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-dsg-'));
+  try {
+    const transcript = transcriptWith(dir, 'giao worker đi');
+    const session = sid('dsg-once');
+    const run = (command) => hook('dispatch-split-guard.cjs', { session_id: session, transcript_path: transcript, cwd: dir,
+      tool_name: 'Bash', tool_input: { command } });
+    const codex = 'orca orchestration worker-start --spec "Rà; chạy orca orchestration check --peek sau mỗi 10 lệnh" --agent codex --model gpt-luna';
+    const first = run(codex);
+    assert.equal(first.status, 2);
+    assert.match(first.stderr, /user chỉ định/);
+    assert.equal(run(codex).status, 0, 'the agent judged it and ran it again');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('turn-guard: a reply asking two things is sent back once', () => {
   const { manyAsks } = require('../claude/hooks/turn-guard.cjs');
   assert.equal(manyAsks('**Cần bạn:** đồng ý merge !67 không?'), null);
