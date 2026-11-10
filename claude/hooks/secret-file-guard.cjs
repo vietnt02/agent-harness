@@ -3,68 +3,40 @@
 
 /**
  * secret-file-guard.cjs - keeps secret values out of the conversation, in place of AgentKit's
- * privacy-block (turned off with `ak config prefs set hooks.privacy-block false`). The risk is a
- * value entering the transcript, so the guard judges what a call prints, not which file it names.
- * Scope: ordinary commands that would leak a secret by slip (`cat .env`, `grep KEY .env`), never
- * every route an agent set on reading one could take; a case is added only when it is an ordinary
- * command, and text that merely names a secret file must not be blocked.
- * - Which paths a call touches and which of them are secret: AgentKit's own checker
- *   (`~/.claude/hooks/lib/privacy-checker.cjs` `checkPrivacy`, required, never edited: editing a kit
- *   lib makes `ak update` abort), so key and credential patterns follow kit updates. No checker
- *   (missing, API changed, it throws): fail closed, every call naming a secret-looking path
- *   (SECRETISH) is denied with that reason, no quiet use allowed.
- * - A dotenv file (`.env`, `.env.local`, `local.env`) passes in a Bash command that uses it without
- *   printing it (quietUse), each simple command naming one judged on its own:
- *   loading it (`source`, `.`; not with `set -x`), `--env-file` for a program not asked to print
- *   (`config`, `env`, `printenv`, `-p`, `-e`, `--print`, `--eval` deny), testing or listing (`test`,
- *   `[`, `ls`, `stat`, `chmod`, `touch`, `rm`, `git check-ignore|ls-files|rm`), hashing or comparing
- *   (`sha256sum`, `shasum`, `md5`, `cmp -s`, `diff -q`), counting (`wc` without `--files0-from`,
- *   `grep -q|-c|-l|-L`, real option letters only), copying or linking between dotenv files only
- *   (`cp .env.example .env`), and writing (`>`, `>>`); and in the Write tool.
- * - Everything else the checker flags is denied: printing a dotenv (`cat`, `cut`, `grep` with
- *   lines, a pipe, `<`, `cat<.env`, an assignment `f=.env`), the Read and Edit tools, any other secret
- *   file, a command the checker cannot read.
- * - Viet approves one read: the Bash command carries `# secret-ok: "<his words>"`, 8 characters or
- *   more, found in one of his own prompts this session (worker-default-guard `userTexts`, which
- *   skips task notifications and other entries no human typed).
- * Known limits: a command that loads a dotenv then prints a variable (`source .env; echo $K`), or a
- * value the shell fails to parse (an unquoted `A=b c` prints `c: command not found`), is not seen;
- * secret-output-guardrail's reminder covers it.
- * Fails open on an internal error of the guard itself (a checker error fails closed, above).
+ * privacy-block (turned off with `ak config prefs set hooks.privacy-block false`).
+ * Closed blocklist: blocks ordinary calls that print a secret file's content into the conversation:
+ * - Reading or printing a secret file in Bash/PowerShell: `cat`, `head`, `tail`, `less`, `more`,
+ *   `bat`, `grep`/`egrep`/`fgrep`/`rg` that print matching lines, `cut`, `awk`/`gawk`, `sed`
+ *   without `-i`/`--in-place`, `<`/`<>` into one of those printing commands, `base64`, `xxd`,
+ *   `strings`.
+ * - The `Read` and `Edit`/`MultiEdit` tools on a secret file (`Write` passes).
+ * - Loading a secret file (`source`, `.`) in the same command as shell trace (`set -x`, `set -v`,
+ *   `set -o xtrace|verbose`) or a variable-printing command (`env` with no command to run,
+ *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` with `$`).
+ * Everything else naming a secret file (`set -a; . ./.env; set +a; <cmd>`, passing its path to a
+ * `python3`/`node` script, `--env-file`, `ssh -i <key>`, `cp .env.example .env`, prose in heredocs
+ * or quoted strings) passes.
+ * - Which paths are secret: AgentKit's `~/.claude/hooks/lib/privacy-checker.cjs` (`checkPrivacy`,
+ *   required, never edited). Missing, broken or throwing checker: fail closed on `SECRETISH`.
+ * - Viet approves one read: `# secret-ok: "<his words, 8+ chars>"` matched against `userTexts`.
+ * Known limits: a script (`python3 x.py ./.env`, `node app.js`) or unlisted program that prints a
+ * secret value itself, or an unquoted dotenv line that fails shell parsing, is not caught; this
+ * hook is a guardrail naming the risk on ordinary commands, never a wall.
+ * Fails open on an unexpected internal error of the guard itself (checker failure fails closed).
  */
 
 const os = require('os');
 const path = require('path');
-const { commands, program, innerScript, dropHeredocs } = require('./lib/shell-words.cjs');
+const { commands, program, dropHeredocs } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
 const SAFE = /\.(example|sample|template|dist)$/i;
 const SECRETISH = /(^|[\s/"'=<>])(\.env(\.[\w.-]+)?|[\w.-]+\.env|id_(rsa|dsa|ecdsa|ed25519)[\w.-]*|[\w.-]+\.(pem|key|p12|pfx|jks|keystore)|credentials(\.[\w-]+)?|secrets?\.ya?ml)(?=$|[\s"';&|)<>])/i;
-// Programs that never print a file's content, whatever their arguments.
-const QUIET = new Set(['source', '.', 'test', '[', 'ls', 'stat', 'chmod', 'touch', 'rm', 'sha256sum', 'shasum', 'md5', 'md5sum']);
-const ORCA_MESSAGE = /^(ask|reply|send|task-update|gate-create|gate-resolve)$/;
-const COPY = new Set(['cp', 'mv', 'ln']);
-const GIT_QUIET = new Set(['check-ignore', 'ls-files', 'rm']);
-// `--env-file` passes only for a program that runs a service or a script file, never one asked to
-// print or to run an inline script: `docker compose … <one of these>`, `node --env-file=<f> <file>`.
-const COMPOSE_QUIET = new Set(['up', 'down', 'stop', 'start', 'restart', 'pull', 'build', 'ps', 'rm', 'create']);
-const NODE_PRINTS = /^(-p|-e|-pe|--print|--eval|-i|--interactive)$/;
-// Shell options that echo what the shell reads or runs.
-const ECHOES = /(^|[\s;&|(])set\s+(\S+\s+)*?(-[a-z]*[xv]|-o\s+(xtrace|verbose))\b|SHELLOPTS=|(^|[\s;&|(])(\S*\/)?(ba|z|da|k)?sh\s+(\S+\s+)*?(-[a-z]*[xv][a-z]*|-o\s+(xtrace|verbose))(\s|$)/;
+const SIMPLE_PRINTERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'bat', 'cut', 'base64', 'xxd', 'strings']);
+const GREP_OPT_VAL = /^(--(max-count|after-context|before-context|context|label|include|exclude|exclude-dir|color|colour|directories|binary-files))$/;
+const REDIR = /(\d*<<<|\d*<<-?|\d*<>|&>>?|\d*>>?&?|\d*<&?)/;
 const APPROVAL = /#\s*secret-ok:\s*"([^"\n]{8,})"/;
-
-// The file a word names: `--env-file=.env` and `f=.env` name `.env`.
-const target = (w) => String(w).replace(/\\/g, '/').replace(/^APPROVED:/, '').replace(/^[\w-]*=/, '');
-const plainDotenv = (p) => {
-  const b = path.basename(target(p));
-  return b !== '' && DOTENV.test(b) && !SAFE.test(b);
-};
-// A shell word with redirects in it (`cat<.env`, `.env>out`, `2>>.env`) in pieces: [word, op, word, …].
-const pieces = (w) => String(w).split(/(\d*[<>]+&?)/);
-// The word names a dotenv, alone or as one piece of a redirect.
-const isDotenv = (w) => pieces(w).some((x, k) => k % 2 === 0 && plainDotenv(x));
-const envLike = (p) => DOTENV.test(path.basename(target(p))); // a dotenv or its template
 const norm = (s) => String(s).normalize('NFC').replace(/\s+/g, ' ').trim();
 
 function loadChecker() {
@@ -76,144 +48,170 @@ function loadChecker() {
   }
 }
 
-// The secret paths a call touches: { paths, uninspectable, reason, fallback }.
-function secretAccess(data, checker) {
-  const toolInput = data.tool_input || {};
-  if (checker) {
-    try {
-      const r = checker.checkPrivacy({ toolName: data.tool_name, toolInput, options: { cwd: data.cwd } });
-      if (!r.blocked) return { paths: [], uninspectable: false };
-      return { paths: (r.accesses || []).map((a) => a.filePath), uninspectable: Boolean(r.uninspectable), reason: r.reason };
-    } catch {
-      // fall through to the fail-closed check
-    }
-  }
-  const text = typeof toolInput.command === 'string' ? toolInput.command : String(toolInput.file_path || toolInput.path || '');
+function isDotenv(filePath) {
+  const b = path.basename(String(filePath).replace(/\\/g, '/').replace(/^APPROVED:/, ''));
+  return b !== '' && DOTENV.test(b) && !SAFE.test(b);
+}
+
+function fallbackPaths(text) {
   const paths = [];
   const re = new RegExp(SECRETISH.source, 'gi');
   for (let m; (m = re.exec(text)); ) if (!SAFE.test(m[2])) paths.push(m[2]);
-  return { paths, uninspectable: false, fallback: true };
+  return paths;
 }
 
-// The option letters of a grep word list, stopping where patterns begin (`-e`/`-f` values, `--`).
-function grepQuiet(args) {
+// Separate redirections from argv on one simple command: `<`/`<>` targets go to stdinFiles; output/heredoc targets drop.
+function splitRedirects(words) {
+  const argv = [];
+  const stdinFiles = [];
+  let pendingOp = null;
+  for (const w of words) {
+    if (/\s/.test(w) || /^<[^<>]+>$/.test(w)) {
+      if (pendingOp === null) argv.push(w);
+      else if (/^\d*<>$/.test(pendingOp) || /^\d*<$/.test(pendingOp)) stdinFiles.push(w);
+      pendingOp = null;
+      continue;
+    }
+    const parts = String(w).split(REDIR);
+    const standalone = parts.length === 3 && parts[0] === '' && parts[2] === '';
+    for (let k = 0; k < parts.length; k += 2) {
+      const text = parts[k];
+      if (text !== '') {
+        if (pendingOp !== null) {
+          if (/^\d*<>$/.test(pendingOp) || /^\d*<$/.test(pendingOp)) stdinFiles.push(text);
+          pendingOp = null;
+        } else {
+          argv.push(text);
+        }
+      }
+      if (k + 1 < parts.length) pendingOp = parts[k + 1];
+    }
+    if (!standalone) pendingOp = null;
+  }
+  return { argv, stdinFiles };
+}
+
+function grepFiles(args) {
+  const pos = [];
+  let hasPat = false;
+  let opts = true;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--') return false;
-    if (/^--(quiet|silent|count|files-with(out)?-match(es)?)$/.test(a)) return true;
-    if (/^--/.test(a) || !/^-[A-Za-z]/.test(a)) continue;
+    if (!opts) { pos.push(a); continue; }
+    if (a === '--') { opts = false; continue; }
+    if (/^--(quiet|silent|count|files-with(out)?-match(es)?)$/.test(a)) return null;
+    if (/^--regexp=/.test(a)) { hasPat = true; continue; }
+    if (a === '--regexp') { hasPat = true; i++; continue; }
+    if (GREP_OPT_VAL.test(a)) { i++; continue; }
+    if (a.startsWith('--')) continue;
+    if (!a.startsWith('-')) { pos.push(a); continue; }
     const letters = a.slice(1);
     for (let k = 0; k < letters.length; k++) {
-      if ('qclL'.includes(letters[k])) return true;
-      if (letters[k] === 'e' || letters[k] === 'f') {
-        if (k === letters.length - 1) i++; // `-e <pattern>`: the next word is the pattern
-        break; // `-e<pattern>`: the rest of this word is
-      }
+      const ch = letters[k];
+      if ('qclL'.includes(ch)) return null;
+      if (ch === 'e') { hasPat = true; if (k === letters.length - 1) i++; break; }
+      if ('mABCdf'.includes(ch)) { if (ch === 'f') hasPat = true; if (k === letters.length - 1) i++; break; }
     }
   }
-  return false;
+  return hasPat ? pos : pos.slice(1);
 }
 
-// True when one simple command that names a dotenv uses it without printing its values.
-function quietCommand(words, raw) {
-  const prog = program(words);
-  const name = prog[0] || '';
-  const args = prog.slice(1);
-  if (raw.some((w) => /^\w+=/.test(w) && isDotenv(w))) return false; // `f=.env`: used later, unseen
-  for (let i = 0; i < raw.length; i++) {
-    const w = raw[i];
-    const prev = raw[i - 1] || '';
-    if (/^\d*<$/.test(w) && isDotenv(raw[i + 1] || '')) return false; // `< .env` feeds it to the program
-    if (/[<>]/.test(w) && !/^\d*[<>]+&?$/.test(w)) {
-      // Inside one word: a dotenv only after `>` is written to; before `>` (`.env>x`) or after `<` it is read.
-      const ps = pieces(w);
-      // `<>` opens the file for reading too.
-      for (let k = 0; k < ps.length; k += 2) if (plainDotenv(ps[k]) && !(k > 0 && /^\d*>{1,2}&?$/.test(ps[k - 1]))) return false;
-      continue;
-    }
-    if (!isDotenv(w)) continue;
-    if (/^--env-file=/.test(w) || prev === '--env-file') {
-      if (envFileQuiet(name, args)) continue;
-      return false;
-    }
-    if (/^\d*>{1,2}$/.test(prev)) continue; // `> .env`: written to, not read
-    if (QUIET.has(name)) continue;
-    if (name === 'wc' && !args.some((a) => /^--files0-from/.test(a))) continue;
-    if (name === 'grep' && grepQuiet(args)) continue;
-    if (name === 'cmp' && args.includes('-s')) continue;
-    if (name === 'diff' && args.some((a) => /^(-q|--brief)$/.test(a))) continue;
-    if (name === 'git' && GIT_QUIET.has(gitSubcommand(args))) continue;
-    if (COPY.has(name) && copyQuiet(args)) continue;
-    return false;
-  }
-  return true;
-}
-
-// `docker compose [opts] <service verb>` or `node [opts] --env-file=<f> <script file>`.
-function envFileQuiet(name, args) {
-  if (name === 'docker' && args[0] === 'compose') return COMPOSE_QUIET.has(operandAfterOptions(args.slice(1)));
-  if (name === 'node') {
-    const ops = args.filter((a) => !a.startsWith('-'));
-    return !args.some((a) => NODE_PRINTS.test(a)) && ops.length > 0 && /\.(c|m)?js$|\.ts$/.test(ops[0]);
-  }
-  return false;
-}
-
-// The first word that is neither an option nor the value of one (`-p proj --env-file f up`: `up`).
-function operandAfterOptions(args) {
+function sedFiles(args) {
+  const pos = [];
+  let hasScript = false;
+  let opts = true;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--') return args[i + 1] || '';
-    if (/^--[\w-]+=/.test(a)) continue;
-    if (/^-/.test(a)) { if (!/^--?(d|detach|build|wait|no-deps|force-recreate|remove-orphans|quiet-pull|pull)$/.test(a)) i++; continue; }
-    return a;
-  }
-  return '';
-}
-
-// `git [-C dir] [-c k=v] <subcommand>`.
-function gitSubcommand(args) {
-  for (let i = 0; i < args.length; i++) {
-    if (/^-[Cc]$/.test(args[i])) { i++; continue; }
-    if (!args[i].startsWith('-')) return args[i];
-  }
-  return '';
-}
-
-// A copy or link that only lays a dotenv down from its template or another dotenv path
-// (`cp .env.example .env`, `ln -s ../.env .env`): the destination is a dotenv, never a template
-// or another file a later read would not be guarded on.
-function copyQuiet(args) {
-  const ops = args.filter((a) => !a.startsWith('-'));
-  if (ops.length !== 2) return false;
-  return envLike(ops[0]) && plainDotenv(ops[1]);
-}
-
-// True when every simple command naming a dotenv uses it without printing its values.
-function quietUse(command) {
-  const all = commands(command);
-  const names = all.some((ws) => ws.some(isDotenv)) || /\.env\b/i.test(command);
-  if (!names) return true;
-  // xtrace or verbose echo what a sourced dotenv sets.
-  if (ECHOES.test(command)) return false;
-  // A quiet program still prints the file's name: `cat $(ls .env)`, `ls .env | xargs cat` turn it
-  // back into a read. A plain pipe is judged per command (`cat .env | wc` fails at `cat`).
-  if (/\bxargs\b/.test(command)) return false;
-  // A heredoc body written to a file is text (backticks there are markdown): only substitutions that run count.
-  for (const sub of dropHeredocs(command).match(/\$\([^)]*\)|`[^`]*`|<\([^)]*\)/g) || []) if (/\.env\b/i.test(sub)) return false;
-  for (const words of all) {
-    const inner = innerScript(program(words));
-    if (inner !== null) {
-      // `bash -c '<s>'`, `eval <s>`: the script is judged as a command; `-x` echoes it.
-      const names = commands(inner).some((ws) => ws.some(isDotenv));
-      if (names && program(words).some((w) => /^-[a-z]*x/.test(w))) return false;
-      if (!quietUse(inner)) return false;
-      continue;
+    if (!opts) { pos.push(a); continue; }
+    if (a === '--') { opts = false; continue; }
+    if (/^--in-place(=|$)/.test(a)) return null;
+    if (/^--expression=/.test(a)) { hasScript = true; continue; }
+    if (a === '--expression') { hasScript = true; i++; continue; }
+    if (a.startsWith('--')) continue;
+    if (!a.startsWith('-')) { pos.push(a); continue; }
+    const letters = a.slice(1);
+    for (let k = 0; k < letters.length; k++) {
+      const ch = letters[k];
+      if (ch === 'i') return null;
+      if (ch === 'e' || ch === 'f') { hasScript = true; if (k === letters.length - 1) i++; break; }
     }
-    if (!words.some(isDotenv)) continue;
-    if (!quietCommand(words, words)) return false;
   }
-  return true;
+  return hasScript ? pos : pos.slice(1);
+}
+
+function awkFiles(args) {
+  const pos = [];
+  let hasProgFile = false;
+  let opts = true;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!opts) { pos.push(a); continue; }
+    if (a === '--') { opts = false; continue; }
+    if (a.startsWith('--')) continue;
+    if (!a.startsWith('-')) { pos.push(a); continue; }
+    const letters = a.slice(1);
+    for (let k = 0; k < letters.length; k++) {
+      const ch = letters[k];
+      if ('fFv'.includes(ch)) { if (ch === 'f') hasProgFile = true; if (k === letters.length - 1) i++; break; }
+    }
+  }
+  return (hasProgFile ? pos : pos.slice(1)).filter((w) => !/^\w+=/.test(w));
+}
+
+function printerFiles(name, args) {
+  if (SIMPLE_PRINTERS.has(name)) {
+    const out = [];
+    let opts = true;
+    for (const a of args) {
+      if (!opts) out.push(a);
+      else if (a === '--') opts = false;
+      else if (!a.startsWith('-')) out.push(a);
+    }
+    return out;
+  }
+  if (name === 'grep' || name === 'egrep' || name === 'fgrep' || name === 'rg') return grepFiles(args);
+  if (name === 'sed') return sedFiles(args);
+  if (name === 'awk' || name === 'gawk') return awkFiles(args);
+  return null;
+}
+
+function setsTrace(args) {
+  for (let i = 0; i < args.length && args[i] !== '--'; i++) {
+    if (args[i] === '-o' && /^(xtrace|verbose)$/.test(args[i + 1] || '')) return true;
+    if (/^-[a-zA-Z]*[xv]/.test(args[i]) && args[i] !== '-o') return true;
+  }
+  return false;
+}
+
+function printsVars(argv, prog) {
+  if (prog.length === 0) return argv.some((w) => !/^\w+=/.test(w) && path.basename(w.replace(/\\/g, '/')) === 'env');
+  const name = prog[0];
+  const args = prog.slice(1);
+  if (name === 'printenv') return true;
+  if (name === 'set') return args.length === 0;
+  if (name === 'export' || name === 'declare') return args.some((a) => /^-[a-zA-Z]*p/.test(a));
+  if (name === 'echo' || name === 'printf') return args.some((a) => a.includes('$'));
+  return false;
+}
+
+function printedSecrets(command, isSecret) {
+  const leaked = [];
+  const sourced = [];
+  let printsEnv = false;
+  for (const words of commands(command)) {
+    const { argv, stdinFiles } = splitRedirects(words);
+    const prog = program(argv);
+    const name = prog[0] || '';
+    const args = prog.slice(1);
+    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push(args[0]);
+    const files = printerFiles(name, args);
+    if (files !== null) {
+      for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);
+    }
+    if ((name === 'set' && setsTrace(args)) || printsVars(argv, prog)) printsEnv = true;
+  }
+  if (printsEnv && sourced.length > 0) leaked.push(...sourced);
+  return [...new Set(leaked)];
 }
 
 function approved(command, transcript, userTexts) {
@@ -223,42 +221,52 @@ function approved(command, transcript, userTexts) {
   return userTexts(transcript).some((t) => norm(t).includes(quote));
 }
 
-// The command with the text an Orca message sends (`ask --question "… .env"`, `reply --body …`)
-// replaced by a placeholder, so the checker judges the rest of it: the text is sent, no file read,
-// while a `cat` chained beside it is still seen. A value holding a substitution, or one not found
-// quoted as written (an escape), stays, and is judged as before.
-const ORCA_TEXT = /^--(question|body|subject|result|resolution|phase)$/;
-function withoutMessages(command) {
-  let out = command;
-  for (const words of commands(command)) {
-    const [name, sub, verb, ...args] = program(words);
-    if (name !== 'orca' || sub !== 'orchestration' || !ORCA_MESSAGE.test(verb || '')) continue;
-    args.forEach((v, k) => {
-      if (!ORCA_TEXT.test(args[k - 1] || '') || /\$\(|`/.test(v)) return;
-      for (const q of ['"', "'"]) {
-        const at = out.indexOf(`${q}${v}${q}`);
-        if (at >= 0) { out = `${out.slice(0, at)}MSG${out.slice(at + v.length + 2)}`; return; }
-      }
-    });
-  }
-  return out;
-}
-
 // The verdict on one call: { deny, paths, fallback, uninspectable, onlyDotenv, reason }.
 function judge(data, { checker = loadChecker(), userTexts = require('./worker-default-guard.cjs').userTexts } = {}) {
   const tool = data.tool_name || '';
-  const command = typeof (data.tool_input || {}).command === 'string' ? data.tool_input.command : '';
-  const judged = tool === 'Bash' && command ? withoutMessages(command) : command;
-  const access = secretAccess(judged === command ? data : { ...data, tool_input: { ...data.tool_input, command: judged } }, checker);
-  // A template the checker reports in markdown quotes (`` `x/.env.example` ``) holds no secret.
-  access.paths = access.paths.filter((p) => !SAFE.test(String(p).replace(/^[`'"]+|[`'"]+$/g, '')));
+  const toolInput = data.tool_input || {};
+  const isShell = tool === 'Bash' || tool === 'PowerShell';
+  const command = typeof toolInput.command === 'string' ? toolInput.command : '';
   const pass = { deny: false, paths: [] };
-  if (!access.uninspectable && access.paths.length === 0) return pass;
-  if (command && approved(command, data.transcript_path, userTexts)) return pass;
-  const onlyDotenv = !access.fallback && !access.uninspectable && access.paths.every(isDotenv);
-  if (onlyDotenv && tool === 'Bash' && quietUse(judged)) return pass;
-  if (onlyDotenv && tool === 'Write') return pass;
-  return { deny: true, paths: access.paths, fallback: Boolean(access.fallback), uninspectable: Boolean(access.uninspectable), onlyDotenv, reason: access.reason };
+
+  let checked = null;
+  if (checker) {
+    try {
+      checked = checker.checkPrivacy({
+        toolName: tool,
+        toolInput: isShell ? { ...toolInput, command: dropHeredocs(command) } : toolInput,
+        options: { cwd: data.cwd },
+      });
+    } catch {
+      checked = null;
+    }
+  }
+  if (!checked) {
+    const paths = fallbackPaths(isShell ? command : String(toolInput.file_path || toolInput.path || ''));
+    if (paths.length === 0 || (command && approved(command, data.transcript_path, userTexts))) return pass;
+    return { deny: true, paths, fallback: true, uninspectable: false, onlyDotenv: false, reason: undefined };
+  }
+  if (checked.uninspectable) {
+    if (command && approved(command, data.transcript_path, userTexts)) return pass;
+    return { deny: true, paths: [], fallback: false, uninspectable: true, onlyDotenv: false, reason: checked.reason };
+  }
+  if (!isShell) {
+    if (tool === 'Write') return pass;
+    const paths = (checked.blocked ? (checked.accesses || []).map((a) => a.filePath) : [])
+      .filter((p) => !SAFE.test(String(p).replace(/^[`'"]+|[`'"]+$/g, '')));
+    if (paths.length === 0) return pass;
+    return { deny: true, paths, fallback: false, uninspectable: false, onlyDotenv: paths.every(isDotenv), reason: checked.reason };
+  }
+
+  const isSecret = (filePath) => {
+    const clean = String(filePath).replace(/\\/g, '/').replace(/^APPROVED:/, '');
+    const base = path.basename(clean);
+    if (!base || clean.startsWith('-') || SAFE.test(base)) return false;
+    return Boolean(checker.checkPrivacy({ toolName: 'Read', toolInput: { file_path: clean }, options: { cwd: data.cwd } }).blocked);
+  };
+  const paths = printedSecrets(command, isSecret);
+  if (paths.length === 0 || approved(command, data.transcript_path, userTexts)) return pass;
+  return { deny: true, paths, fallback: false, uninspectable: false, onlyDotenv: paths.every(isDotenv), reason: undefined };
 }
 
 // '' to let the call run, else the reason it is denied.
@@ -266,7 +274,6 @@ function decide(data, opts = {}) {
   const tool = data.tool_name || '';
   const access = judge(data, opts);
   if (!access.deny) return '';
-  const onlyDotenv = access.onlyDotenv;
   if (access.fallback) {
     return (
       `secret-file-guard: AgentKit's privacy checker (${KIT_CHECKER}) did not load or failed, so every call naming a ` +
@@ -277,16 +284,16 @@ function decide(data, opts = {}) {
   const what = access.uninspectable ? access.reason || 'a command this guard cannot read' : access.paths.join(', ');
   return (
     `secret-file-guard: this ${tool} call would print a secret file into the conversation (${what}). ` +
-    (onlyDotenv
-      ? 'Use the file without printing it: `source <file>`, `--env-file=<file>`, `test -f`, `grep -q`/`grep -c \'^KEY=\' <file>` ' +
-        'to check a key is set; a script that needs its values: `node --env-file=<file> <script file>`. '
-      : 'Keys and credentials stay unread. ') +
+    (access.onlyDotenv
+      ? 'Use the file without printing it: `set -a; . ./.env; set +a; <command>`, `--env-file=<file>`, ' +
+        'or pass its path to a script that parses it without printing (`grep -q`/`grep -c \'^KEY=\' <file>` to check a key is set). '
+      : 'Keys and credentials stay unprinted; pass the path to a command or script that uses it without printing. ') +
     'If Viet must see a value, ask him; once he agrees, rerun the Bash command with the comment ' +
     '`# secret-ok: "<his exact words, 8+ characters>"`, and print only what he asked for.'
   );
 }
 
-module.exports = { decide, judge, quietUse, isDotenv, secretAccess };
+module.exports = { decide, judge, printedSecrets };
 if (require.main !== module) return;
 
 try {
