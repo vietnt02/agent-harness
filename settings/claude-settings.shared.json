@@ -147,15 +147,6 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/blocked-command-guard.cjs\""
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -236,17 +227,6 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
-          }
-        ]
-      }
-    ],
-    "PermissionDenied": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/blocked-command-guard.cjs\""
           }
         ]
       }

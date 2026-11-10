@@ -16,7 +16,7 @@
  * A claude worker whose `--model` is not a bare alias (opus, sonnet, fable, haiku) is blocked unless the
  * command holds a `# Model: user chỉ định <bản>` line: a full id outside Orca's catalog drops the
  * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude or codex worker at all
- * needs that `# Model: user chỉ định <bản>` line (a retry naming one too): workers are Gemini through
+ * needs that `# Model: user chỉ định <bản>` line (a retry naming one too; said once, lib/block-once.cjs): workers are Gemini through
  * antigravity unless the user names another (ntv-orca § 2, Chọn model); a rule naming only what a
  * worker is not let the coordinator copy the codex example of the orchestration skill.
  * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
@@ -416,7 +416,7 @@ function say() {
 
 process.stdin.on('end', () => {
   try {
-    const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd } = JSON.parse(raw);
+    const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd, session_id: sessionId } = JSON.parse(raw);
     const command = String(input?.command || '');
     if (!transcript || agentId || !toWorker(command)) process.exit(0);
     const writes = prodWrites(workerText(command, cwd));
@@ -446,11 +446,13 @@ process.stdin.on('end', () => {
         '`Approve for me` mode. A version the user named: add a `# Model: user chỉ định <bản>` line.\n');
       process.exit(2);
     }
+    // Quota, not a spoiled run: said once (lib/block-once.cjs), the same command run again passes.
     const agent = unnamedNonGemini(command, starts);
-    if (agent) {
+    const { firstTime, again } = require('./lib/block-once.cjs');
+    if (agent && firstTime(sessionId, 'dispatch-split-guard', command)) {
       process.stderr.write(`dispatch-split-guard: a ${agent} worker needs the user's pick on a \`# Model: user chỉ định <bản>\` ` +
         'line. Workers are Gemini: `--agent antigravity --model gemini-argon --effort high` for a complex or research task, ' +
-        '`gemini-3.8-flash` for a quick one (ntv-orca § 2, Chọn model).\n');
+        `\`gemini-3.8-flash\` for a quick one (ntv-orca § 2, Chọn model).${again(sessionId)}\n`);
       process.exit(2);
     }
     if (missingEffort(starts)) {
