@@ -1,5 +1,5 @@
 ---
-model: gemini-4-carbon
+model: gemini-carbon
 agent: antigravity
 effort: high
 ui: chưa rõ
@@ -8,7 +8,7 @@ speed: chưa rõ
 source: chưa có phiên nào; mặc định do user chốt khi model ra mắt
 ---
 
-# gemini-4-carbon
+# gemini-carbon
 
 Mặc định làm **worker** cho task phức tạp và research, và khi `gemini-flash` hết quota (`SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`): người chấm khác model với người làm.
 
