@@ -172,7 +172,8 @@ const PROD_VERBS = {
   cf: /^(update|edit|create|delete|put|patch|set|rm|remove|deploy|publish|purge)$/,
   wrangler: /^(deploy|publish|put|delete|execute|create|apply|rollback|bulk)$/,
 };
-const RUNNERS = { npx: 1, bunx: 1, pnpm: 1, yarn: 1 };
+const RUNNERS = { npx: 1, bunx: 1, pnpm: 1, yarn: 1, npm: 1 };
+const RUNNER_VALUE = /^(--filter|-F|-C|--dir|--prefix|-w|--workspace|-p|--package)$/;
 function verbsOf(args) {
   let i = 0;
   while (i < args.length && args[i].startsWith('-')) i += /=/.test(args[i]) ? 1 : 2;
@@ -183,25 +184,38 @@ function verbsOf(args) {
 function prodWrite(words) {
   let [cmd, ...args] = words;
   if (RUNNERS[cmd]) {
-    while (args.length && (args[0].startsWith('-') || /^(exec|dlx|run)$/.test(args[0]))) args = args.slice(1);
+    while (args.length && (args[0].startsWith('-') || /^(exec|dlx|run|x)$/.test(args[0]))) args = args.slice(RUNNER_VALUE.test(args[0]) ? 2 : 1);
     [cmd, ...args] = args;
+    cmd = String(cmd || '').replace(/(.)@.*$/, '$1');
   }
   const verbs = verbsOf(args);
   if (PROD_VERBS[cmd]) return verbs.some((w) => PROD_VERBS[cmd].test(w));
   return (cmd === 'gh' && verbs[0] === 'pr' && verbs[1] === 'merge') || (cmd === 'glab' && verbs[0] === 'mr' && verbs[1] === 'merge');
 }
 
-// The first production write that runs after another step of the same call (a `cd`, an assignment
+// The first production write that runs after another step of the same shell (a `cd`, an assignment
 // or `set` before it is no step; nor a `$(…)` feeding the write or an assignment, such as
 // `GH_TOKEN=$(gh auth token) gh pr merge`), as its text; null when each one runs alone. A second
-// production write counts the first as a step.
+// production write counts the first as a step. Each `(…)` / `$(…)` is read the same way on its own.
 function chainedProdWrite(command) {
+  const all = commands(command);
+  const scopes = [...new Set(all.map((r) => String(r.scope)))];
+  for (const scope of scopes) {
+    const hit = scanScope(all, scope);
+    if (hit) return hit;
+  }
+  return null;
+}
+function scanScope(all, scope) {
   let before = false;
-  let pending = false; // a command inside `$(…)` or `(…)` not yet known to feed the next one
-  const top = (raw) => !String(raw.scope).includes('.');
-  for (const raw of commands(command)) {
+  let pending = false; // a direct child `$(…)` / `(…)` not yet known to feed the next command
+  for (const raw of all) {
+    const sc = String(raw.scope);
+    if (sc !== scope) {
+      if (sc.startsWith(`${scope}.`)) pending = true;
+      continue;
+    }
     const words = program(raw);
-    if (!top(raw)) { pending = true; continue; }
     if (pending && !raw.some((w) => /\$\(|`/.test(w))) before = true;
     pending = false;
     const script = innerScript(words);

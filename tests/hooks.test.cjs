@@ -1098,6 +1098,7 @@ test('worktree-after-release: a refused release keeps its worktree; dirty file n
   const two = '{"ok":true}\n{"ok":false,"error":{"message":"Dispatch ctx_b is running; only a settled worker can release."}}';
   assert.equal(worktreeAfterRelease.refused('ctx_a', two, false), null, 'one refusal does not hide the other release');
   assert.match(worktreeAfterRelease.refused('ctx_b', two, false), /running/);
+  assert.match(worktreeAfterRelease.refused('ctx_a', 'error: unknown flag --x', false), /báo lỗi/, 'nothing released, several ids');
   const hook = path.join(HOOKS_DIR, 'worktree-after-release.cjs');
   const out = spawnSync(process.execPath, [hook], { encoding: 'utf8', input: JSON.stringify({
     tool_name: 'Bash', tool_input: { command: 'orca orchestration worker-release --dispatch ctx_0b4e4e10585e' },
@@ -1178,7 +1179,8 @@ test('note-recall: readOnly passes only commands that write nothing', () => {
     'awk -i inplace {print} f', 'sed "s/a/b/w out" f', 'sed -n "w out.txt" f', 'sed -i s/a/b/ f', 'find . -fls out', 'find . -delete',
     'git reflog expire --all', 'git fetch origin main:main', 'git diff --output=p.patch', 'git -c core.pager=x log', 'git push origin x',
     'gh api x -fkey=v', 'glab api -X POST x', 'gh api --method=PATCH x', 'glab mr merge 5', 'ssh h "sudo rm -rf /x"', 'ssh h',
-    'bash -c "ls; rm x"', 'echo $(rm -rf x)', 'python3 x.py'])
+    'bash -c "ls; rm x"', 'echo $(rm -rf x)', 'python3 x.py', 'curl -D h.txt u', 'curl --cookie-jar j u', 'curl --trace-ascii t u',
+    'sed "s|a|b|w out" f', 'rg --pre ./x.sh foo', 'date 010112002026'])
     assert.equal(noteRecall.readOnly(c), false, c);
 });
 
@@ -1405,6 +1407,11 @@ test('gate-line-guard: a production write runs alone, never after another step o
     'npm run build && wrangler d1 migrations apply DB --remote',
     'gh pr merge 1 --squash; gh pr merge 2 --squash',
     '(a | tail) && cf tunnels config update x',
+    '(cd app && npm run build | tail -3 && wrangler deploy)',
+    'echo $(npm run build && wrangler deploy)',
+    'npm run build && npx wrangler@latest deploy',
+    'x && npm exec -- wrangler deploy',
+    'x && pnpm --filter web exec wrangler deploy',
   ]) assert.ok(gateLineGuard.chainedProdWrite(c), c);
   for (const c of [
     'cf tunnels config update abc --body x',
@@ -1419,6 +1426,7 @@ test('gate-line-guard: a production write runs alone, never after another step o
     'export GH_TOKEN=$(gh auth token --user u); gh pr merge 31',
     'ls && cf --profile work dns records list --name update',
     'CLOUDFLARE_API_TOKEN=$(x) npx wrangler deploy',
+    '(cd app && wrangler deploy)',
   ]) assert.equal(gateLineGuard.chainedProdWrite(c), null, c);
   const r = spawnSync(process.execPath, [path.join(HOOKS_DIR, 'gate-line-guard.cjs')], { encoding: 'utf8', input: JSON.stringify({
     transcript_path: path.join(os.tmpdir(), 'no-such.jsonl'),

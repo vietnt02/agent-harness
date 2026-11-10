@@ -207,9 +207,9 @@ const FORGE_READS = { pr: /^(view|list|diff|checks|status)$/, mr: /^(view|list|d
   run: /^(view|list)$/, ci: /^(view|list|status)$/, repo: /^view$/, release: /^(view|list)$/ };
 const positional = (args) => args.filter((a) => !a.startsWith('-'));
 // curl flags that send a body, pick a method or write a file, long or packed into short ones (`-fsSLO`).
-const CURL_WRITE = /^--(request|data|json|form|upload-file|output|remote-name|config|post)/;
-const CURL_SHORT = /^-[a-zA-Z]*[XdFTOoK]/;
-const SED_WRITE = /(^|[;{}\n])\s*[\d,$]*\s*[we]\b|\/[gpiImM\d]*[we](\s|;|$)/;
+const CURL_WRITE = /^--(request|data|json|form|upload-file|output|remote-name|config|post|dump-header|cookie-jar|trace|stderr|libcurl|etag-save)/;
+const CURL_SHORT = /^-[a-zA-Z]*[XdFTOoKDc]/;
+const SED_WRITE = /(^|[;{}\n])\s*[\d,$]*\s*[we]\b|\/[gpiImM\d]*[we](\s|;|$)|s(.)(?:(?!\3).)*\3(?:(?!\3).)*\3[gpiImM\d]*[we](\s|;|$)/;
 function readOnly(command) {
   // `2>&1` and `>/dev/null` write no file; dropped first, since the parser splits `2>&1` at the `&`.
   const plain = String(command).replace(/\d?>&\d|(&|\d)?>>?\s*\/dev\/null(?![\w./-])/g, ' ');
@@ -228,7 +228,8 @@ function readOnly(command) {
     if (cmd === 'awk') return !args.some((a) => /system|\||getline|^-i/.test(a));
     if (cmd === 'sort') return !args.some((a) => /^(-o|--output)/.test(a) || /^-[a-zA-Z]*o/.test(a));
     if (cmd === 'uniq') return positional(args).length <= 1;
-    if (cmd === 'date' || cmd === 'hostname') return !args.some((a) => /^(-s|--set)/.test(a)) && (cmd === 'date' || !positional(args).length);
+    if (cmd === 'date' || cmd === 'hostname') return !args.some((a) => /^(-s|--set)/.test(a)) && (cmd === 'date' ? !positional(args).some((a) => /^\d/.test(a)) : !positional(args).length);
+    if (cmd === 'rg' && args.some((a) => /^--pre(=|$)/.test(a))) return false;
     if (cmd === 'git') {
       if (args[0] === '-c' || args.some((a) => /^--output(=|$)/.test(a))) return false;
       let i = 0;

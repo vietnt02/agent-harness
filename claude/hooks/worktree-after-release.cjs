@@ -66,12 +66,12 @@ function describe(dispatch, show) {
 }
 
 // What the command's output says about each dispatch: a line instead of the reminder when Orca
-// refused it (a worker not settled yet; an error naming no dispatch, read only when the call released
-// one dispatch, since it cannot be told apart between several), else null.
+// refused it (a worker not settled yet; an error naming no dispatch, when the call released one
+// dispatch or nothing reports success), else null.
 function refused(dispatch, output, alone = true) {
   const m = output.match(new RegExp(`Dispatch ${dispatch} is (\\S+); only a settled worker can release`));
   if (m) return `${dispatch}: chưa release (worker đang ${m[1]}, chưa settle); worktree giữ nguyên. Muốn dừng: \`orca orchestration worker-stop --dispatch ${dispatch}\`.`;
-  if (alone && /"ok"\s*:\s*false|^error:/m.test(output)) return `${dispatch}: worker-release báo lỗi; worktree giữ nguyên, đọc lỗi trước khi gỡ.`;
+  if ((alone || !/"ok"\s*:\s*true/.test(output)) && /"ok"\s*:\s*false|^error:/m.test(output)) return `${dispatch}: worker-release báo lỗi; worktree giữ nguyên, đọc lỗi trước khi gỡ.`;
   return null;
 }
 
