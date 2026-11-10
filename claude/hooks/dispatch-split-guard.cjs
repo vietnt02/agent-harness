@@ -451,7 +451,7 @@ process.stdin.on('end', () => {
     const { firstTime, again } = require('./lib/block-once.cjs');
     if (agent && firstTime(sessionId, 'dispatch-split-guard', command)) {
       process.stderr.write(`dispatch-split-guard: a ${agent} worker needs the user's pick on a \`# Model: user chỉ định <bản>\` ` +
-        'line. Workers are Gemini: `--agent antigravity --model <bare slug> --effort high`, the Argon line for a complex or ' +
+        'line. Workers are Gemini: `--agent antigravity --model <bare slug> --effort high`, the Carbon line for a complex or ' +
         'research task, the Flash line for a quick one; bare slugs come from `agy models` at dispatch (ntv-orca § 2, ' +
         `Chọn model).${again(sessionId)}\n`);
       process.exit(2);

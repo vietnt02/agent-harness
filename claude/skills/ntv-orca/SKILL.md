@@ -128,8 +128,8 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định, ghi dòng
   `# Model: user chỉ định <bản>` trong lệnh (`dispatch-split-guard` chặn khi thiếu). Chọn theo loại
   task trước, cỡ task sau: research (đọc nhiều tài liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) hay
-  task phức tạp → `agy gemini-4-argon high`, cỡ nào cũng vậy; đọc code có khuôn, làm theo spec rõ,
-  task nhanh, nhỏ đến trung bình → `gemini-flash`; flash hết quota → `gemini-4-argon`. Reviewer mặc
+  task phức tạp → `agy gemini-4-carbon high`, cỡ nào cũng vậy; đọc code có khuôn, làm theo spec rõ,
+  task nhanh, nhỏ đến trung bình → `gemini-flash`; flash hết quota → `gemini-4-carbon`. Reviewer mặc
   định `agy gemini-4-argon high`.
 - Không giao task dài cho model context ngắn (`gemini-flash`, `gpt-luna`): chia task nhỏ, mỗi task
   một worker mới, commit + push mỗi nhóm việc ≤ 30 phút.

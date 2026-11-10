@@ -6,12 +6,12 @@
 
 - **Giới hạn lệnh:** lệnh foreground tự cắt ở 600 giây; bước dài hơn phải chạy nền và ghi log.
 - **Kênh điều phối:** dùng `orca orchestration` (`SKILL.md` § 3).
-- **Context thực tế nhỏ hơn API gốc:** Flash 256K, Argon 1M. Gần đầy thì `agy` tự nén mà không báo lỗi — chia task nhỏ theo `SKILL.md` § 2.
+- **Context thực tế nhỏ hơn API gốc:** Flash 256K, Argon và Carbon 1M. Gần đầy thì `agy` tự nén mà không báo lỗi — chia task nhỏ theo `SKILL.md` § 2.
 
 ## Chọn model và Spawn Worker
 
 - **Phân vai (`SKILL.md` § 2, § 4):**
-  - Worker và Checker: `gemini-flash` (`--effort high`); worker research: `gemini-4-argon` (`--effort high`).
+  - Worker và Checker: `gemini-flash` (`--effort high`); worker task phức tạp hay research: `gemini-4-carbon` (`--effort high`).
   - Reviewer mặc định và Coordinator (khi user mở trực tiếp): `gemini-4-argon` (`--effort high`).
   - Không dùng model Claude qua `agy`. Luôn ghi kèm tên agent (`agy gemini-3.8-flash high`) trong manifest, spec và báo cáo để tránh nhầm quota với agent khác.
 - **Truyền đủ `--model` và `--effort`:** bỏ trống `--model` sẽ lấy model của Coordinator trong settings:
