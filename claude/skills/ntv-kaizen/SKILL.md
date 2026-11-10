@@ -57,7 +57,9 @@ description: "Record what this session showed a hook, script, skill or ambiguous
   reminder said once (context back, or `hooks/lib/block-once.cjs` when it must land before the
   command runs).
 - A hook is a guardrail for the commands agents actually write, never a wall: an agent always finds
-  another route, and only the permission mode stops one. Build it, and brief its reviewer, on those
+  another route, and only the permission mode stops one. Agents work toward the user's goal, not
+  against it: a hook names the risk on the ordinary command and the agent picks a safer route; that
+  is all it is for. Build it, and brief its reviewer, on those
   common commands; a fix is done when they hit and miss right. A reviewer's "it can be bypassed
   with …" is no blocker and opens no round: no attack simulation, no patching variant by variant.
 - A fix lands where it holds: a repo's convention in that repo (its PR), a fact about this machine
