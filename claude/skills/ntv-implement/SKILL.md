@@ -66,7 +66,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
   fails if that cause returns (a build guard, a test on that path); without it, it does not merge. A root cause not
   yet proven is reported `CHƯA kiểm`, and the change never merges described as the fix.
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
-  Orca worker `agy gemini-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
+  Orca worker `agy gemini-4-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
   subagent only when Viet names one. A change to Claude Code itself (`~/.claude` rules, skills,
   hooks, scripts; a kaizen session) is reviewed by a Claude subagent: only an agent running this
   harness can judge a hook's contract or how a rule is read; never Codex or agy. Its brief names the
