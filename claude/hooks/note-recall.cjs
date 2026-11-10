@@ -7,13 +7,14 @@
  * body text never count) block the call once, quoted in the message;
  * the same call run again after reading passes, and a line already shown stays quiet for
  * QUIET_MS. Blocking, not `additionalContext`: PreToolUse context reaches the model next to the
- * tool result, after the command ran. Fails open.
+ * tool result, after the command ran. A command that only reads (readOnly) gets the lines as
+ * context instead: reading before them harms nothing, and a block there costs a rerun. Fails open.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { commands, program } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript } = require('./lib/shell-words.cjs');
 const { toSlash } = require('./lib/platform.cjs');
 
 const NOTES_DIR = path.join(os.homedir(), '.claude', 'session-notes');
@@ -147,14 +148,17 @@ function shown(sid) {
   return out;
 }
 
-function check(sessionId, command, slug, now = Date.now()) {
+// `read`: a line shown to a read is kept apart from one shown to a write, so a read first never
+// spares the write that follows its block.
+function check(sessionId, command, slug, now = Date.now(), read = false) {
   const hits = recall(ownNotes(sessionId, slug, now), command);
   if (!hits.length) return null;
   const seen = shown(sessionId);
-  const fresh = hits.filter((h) => !(now - (seen[hash(h.line)] || 0) < QUIET_MS));
+  const key = (h) => hash(read ? `read:${h.line}` : h.line);
+  const fresh = hits.filter((h) => !(now - (seen[key(h)] || 0) < QUIET_MS));
   if (!fresh.length) return null;
   fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.appendFileSync(stateFile(sessionId), JSON.stringify([now, fresh.map((h) => hash(h.line))]) + '\n');
+  fs.appendFileSync(stateFile(sessionId), JSON.stringify([now, fresh.map(key)]) + '\n');
   return fresh;
 }
 
@@ -166,13 +170,21 @@ if (require.main === module) {
       const data = JSON.parse(raw);
       if (data.tool_name !== 'Bash' || !data.session_id || data.agent_id) process.exit(0);
       const slug = data.transcript_path ? path.basename(path.dirname(data.transcript_path)) : null;
-      const fresh = check(data.session_id, (data.tool_input || {}).command || '', slug);
+      const command = (data.tool_input || {}).command || '';
+      const read = readOnly(command);
+      const fresh = check(data.session_id, command, slug, Date.now(), read);
       if (fresh) {
         const files = [...new Set(fresh.map((h) => h.file))].join(', ');
-        process.stderr.write(
+        const quoted =
           `note-recall: the session note (${files}) already says this about the command you are running:\n` +
             fresh.slice(0, MAX_LINES).map((h) => `  - ${h.line.slice(0, 400)}`).join('\n') +
-            (fresh.length > MAX_LINES ? `\n  (+${fresh.length - MAX_LINES} more lines in the note)` : '') +
+            (fresh.length > MAX_LINES ? `\n  (+${fresh.length - MAX_LINES} more lines in the note)` : '');
+        if (read) {
+          process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse',
+            additionalContext: `${quoted}\nThis command only reads; follow these lines in the next step that changes something.` } }));
+          process.exit(0);
+        }
+        process.stderr.write(quoted +
             '\nRead it: if the note gives a route or a decision for this, follow it (change the command). ' +
             'If the command already matches it, run it again unchanged; these lines will not block again.\n'
         );
@@ -183,4 +195,59 @@ if (require.main === module) {
   });
 }
 
-module.exports = { tokens, recall, check };
+// True when every command in the line only reads: a known reader with no write flag and no output
+// redirect to a file. `ssh host '<script>'` and `bash -c '<script>'` are read by their script.
+// Anything not listed counts as a write, so an unknown command still blocks.
+const READERS = new Set(('cat head tail grep rg egrep fgrep ls wc cut tr jq diff cmp stat file ' +
+  'readlink realpath basename dirname pwd echo printf which type test true false dig nslookup host ' +
+  'ping whoami id column less nl od hexdump strings md5 shasum sha256sum ps df du').split(' '));
+const GIT_READS = new Set(['diff', 'log', 'show', 'status', 'fetch', 'rev-parse', 'grep', 'ls-files',
+  'ls-remote', 'blame', 'cat-file', 'shortlog', 'describe', 'merge-base', 'rev-list', 'show-ref']);
+const FORGE_READS = { pr: /^(view|list|diff|checks|status)$/, mr: /^(view|list|diff)$/, issue: /^(view|list)$/,
+  run: /^(view|list)$/, ci: /^(view|list|status)$/, repo: /^view$/, release: /^(view|list)$/ };
+const positional = (args) => args.filter((a) => !a.startsWith('-'));
+// curl flags that send a body, pick a method or write a file, long or packed into short ones (`-fsSLO`).
+const CURL_WRITE = /^--(request|data|json|form|upload-file|output|remote-name|config|post|dump-header|cookie-jar|trace|stderr|libcurl|etag-save)/;
+const CURL_SHORT = /^-[a-zA-Z]*[XdFTOoKDc]/;
+const SED_WRITE = /(^|[;{}\n])\s*[\d,$]*\s*[we]\b|\/[gpiImM\d]*[we](\s|;|$)|s(.)(?:(?!\3).)*\3(?:(?!\3).)*\3[gpiImM\d]*[we](\s|;|$)/;
+function readOnly(command) {
+  // `2>&1` and `>/dev/null` write no file; dropped first, since the parser splits `2>&1` at the `&`.
+  const plain = String(command).replace(/\d?>&\d|(&|\d)?>>?\s*\/dev\/null(?![\w./-])/g, ' ');
+  return commands(plain).map(program).every((words) => {
+    const [cmd, ...args] = words;
+    if (!cmd || cmd === 'cd') return true;
+    if (words.some((w) => w.includes('>'))) return false; // a redirect, glued or not (a quoted `>` blocks too)
+    const inner = innerScript(words);
+    if (inner !== null) return readOnly(inner);
+    if (cmd === 'ssh') {
+      const script = args.filter((a, k) => !a.startsWith('-') && !/^-[bcDEeFIiJLlmOopQRSWw]$/.test(args[k - 1] || '')).slice(1);
+      return script.length > 0 && readOnly(script.join(' '));
+    }
+    if (cmd === 'sed') return !args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place') || SED_WRITE.test(a));
+    if (cmd === 'find') return !args.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint|fls)/.test(a));
+    if (cmd === 'awk') return !args.some((a) => /system|\||getline|^-i/.test(a));
+    if (cmd === 'sort') return !args.some((a) => /^(-o|--output)/.test(a) || /^-[a-zA-Z]*o/.test(a));
+    if (cmd === 'uniq') return positional(args).length <= 1;
+    if (cmd === 'date' || cmd === 'hostname') return !args.some((a) => /^(-s|--set)/.test(a)) && (cmd === 'date' ? !positional(args).some((a) => /^\d/.test(a)) : !positional(args).length);
+    if (cmd === 'rg' && args.some((a) => /^--pre(=|$)/.test(a))) return false;
+    if (cmd === 'git') {
+      if (args[0] === '-c' || args.some((a) => /^--output(=|$)/.test(a))) return false;
+      let i = 0;
+      while (args[i] && args[i].startsWith('-')) i += args[i] === '-C' ? 2 : 1;
+      if (args[i] === 'fetch' && args.slice(i + 1).some((a) => a.includes(':'))) return false;
+      return GIT_READS.has(args[i]);
+    }
+    if (cmd === 'curl') return !args.some((a) => CURL_WRITE.test(a) || (!a.startsWith('--') && CURL_SHORT.test(a)));
+    if (cmd === 'gh' || cmd === 'glab') {
+      if (args[0] === 'api') {
+        const method = args.find((a, k) => ['-X', '--method'].includes(args[k - 1])) ||
+          (args.find((a) => /^(--method=|-X)\w/.test(a)) || '').replace(/^(--method=|-X)/, '') || 'GET';
+        return /^get$/i.test(method) && !args.some((a) => /^(-f|-F|--field|--raw-field|--input)/.test(a));
+      }
+      return Boolean(FORGE_READS[args[0]] && FORGE_READS[args[0]].test(args[1] || ''));
+    }
+    return READERS.has(cmd);
+  });
+}
+
+module.exports = { tokens, recall, check, readOnly };

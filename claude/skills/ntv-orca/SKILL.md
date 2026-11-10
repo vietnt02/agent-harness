@@ -28,7 +28,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | Chặng | Coordinator | Worker |
 |---|---|---|
 | 1. Nhận việc | Hiểu ý user, chốt phạm vi và tiêu chí xong (thứ user sẽ thấy). Ý chưa rõ thì hỏi user. | — |
-| 2. Giao | Viết spec (§ 2) từ những gì đang có, gửi user manifest một lần (câu hỏi của user: không cần, xem dưới), spawn. **Không tự rà trước khi giao.** | — |
+| 2. Giao | Viết spec (§ 2) từ những gì đang có, manifest đi chung lần hỏi duyệt kế hoạch (câu hỏi của user: không cần, xem dưới), spawn. **Không tự rà trước khi giao.** | — |
 | 3. Rà, lập kế hoạch | — | Đọc code, query dữ liệu thật trên toàn bộ dữ liệu, tìm nguyên nhân gốc. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
 | 4. Duyệt kế hoạch | Đối chiếu kế hoạch với ý user và với bằng chứng worker dán; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy → hỏi user. Duyệt hoặc trả lại kèm lý do. | Sửa kế hoạch, gửi lại. |
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
@@ -60,7 +60,8 @@ chặng 4 coordinator đối chiếu từng con số trong kế hoạch với ou
 user nói "supervised" → worker Orca. Việc chỉ đọc trong cùng repo của coordinator → subagent native
 được. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
 
-**Manifest — một `**Cần bạn:**` duy nhất trước khi spawn** (trừ worker rà chỉ-đọc cho câu hỏi, § 1), mỗi
+**Manifest — nằm trong chính `**Cần bạn:**` duyệt kế hoạch** (trừ worker rà chỉ-đọc cho câu hỏi, § 1): kế hoạch
+có giao worker thì chốt model, worktree ngay khi gửi; duyệt kế hoạch là duyệt manifest, không hỏi lại. Mỗi
 worker một dòng:
 
     **Cần bạn:** khối <X> — parallel <n> (cap <N>), <agent> <slug> <effort>.
@@ -156,7 +157,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   (đang chạy một lệnh dài, hoặc spec giao trước khi có câu kiểm hộp thư) → coordinator tự
   `worker-stop`, rồi `worker-start --spec-file` mới gồm spec cũ, nội dung tin và câu kiểm hộp thư,
   cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. Không có việc kế tiếp →
-  release ngay (`worker-release`; worker trong worktree mới không tự đóng), gỡ worktree sau khi lưu
+  release ngay (`worker-release`, chỉ worker đã `worker_done`, chưa thì `worker-stop`; worker trong worktree mới không tự đóng), gỡ worktree sau khi lưu
   báo cáo. Đừng release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
   luận. Im lặng, timeout hay `unverifiable` không bao giờ đủ để tự dừng, bỏ hay chạy lại worker

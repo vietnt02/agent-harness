@@ -11,16 +11,20 @@
  * Same gate for git writing into the user's main checkout (merge, pull, reset, checkout, …): a linked
  * worktree passes, since workers and approved work live in their own. Reading the latest code needs
  * only `git fetch` + `git show origin/<b>:<path>`. `git -c core.hooksPath=…` is gated everywhere.
+ * A known production write (`cf … update|create|delete…`, `wrangler deploy`, `gh pr merge`, `glab mr
+ * merge`) after another step in the same call is blocked whatever the Gate: `a | tail && cf …` runs
+ * the write even when `a` failed (a pipe returns its last command's status), so it runs alone.
  * Scope: this catches the slips of an agent that follows its rules, not an agent trying to get past
  * it (that is no security boundary; permissions are). Commands agents really write are read right
  * and never blocked by mistake; shell tricks that hide a git write (brace expansion, escaped
  * flags, deep nesting) are out of scope, since chasing them grows the parser and the false blocks.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { promptText } = require('./lib/user-intent.cjs');
-const { expandHome } = require('./lib/platform.cjs');
+const { expandHome, toSlash } = require('./lib/platform.cjs');
 const { commands, program, innerScript, assignments, expandVars } = require('./lib/shell-words.cjs');
 
 const TAIL_BYTES = 512 * 1024;
@@ -46,6 +50,16 @@ const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespa
 const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
+
+// True for a path inside a Claude Code session scratchpad (`<tmp>/claude-<uid>/<project>/<session>/
+// scratchpad`), made or not yet: a repo there is a fixture of the session, never the user's checkout.
+const TMP_ROOTS = [...new Set(['/tmp', '/private/tmp', os.tmpdir()].flatMap((r) => {
+  try { return [r, fs.realpathSync(r)]; } catch { return [r]; }
+}).map(toSlash))];
+const inScratchpad = (dir) => {
+  const d = toSlash(dir);
+  return TMP_ROOTS.some((r) => d.startsWith(`${r}/`) && /^\/claude-\d+\/[^/]+\/[^/]+\/scratchpad(\/|$)/.test(d.slice(r.length)));
+};
 
 // True when the directory is a repo's main checkout, not a linked worktree.
 function isMainCheckout(dir) {
@@ -94,7 +108,7 @@ function cdTarget(words, base, vars = {}) {
   const target = raw && expandVars(raw, vars);
   if (words[0] === 'popd' || !target || target === '-' || /^[+-]\d+$/.test(target)) return null;
   const dir = resolveDir(target, base);
-  return fs.existsSync(dir) ? dir : null;
+  return fs.existsSync(dir) || inScratchpad(dir) ? dir : null;
 }
 
 // True when a git write in the command may target a main checkout. Its directory: the `-C` paths,
@@ -122,7 +136,7 @@ function writesMainCheckout(command, cwd) {
     }
     return vars;
   };
-  const isMain = (dir) => dir === null || isMainCheckout(dir);
+  const isMain = (dir) => dir === null || (!inScratchpad(dir) && isMainCheckout(dir));
   for (const raw of commands(command)) {
     const words = program(raw);
     const vars = varsIn(raw.scope);
@@ -149,6 +163,78 @@ function writesMainCheckout(command, cwd) {
     if (isMain(git.dirs ? dir : null)) return true;
   }
   return false;
+}
+
+// A production write this hook knows, as one simple command's words (after program()). `npx`-style
+// runners are unwrapped; global flags before the verbs are skipped with their value, then verbs are
+// read up to the next flag, so a flag value never counts.
+const PROD_VERBS = {
+  cf: /^(update|edit|create|delete|put|patch|set|rm|remove|deploy|publish|purge)$/,
+  wrangler: /^(deploy|publish|put|delete|execute|create|apply|rollback|bulk)$/,
+};
+const RUNNERS = { npx: 1, bunx: 1, pnpm: 1, yarn: 1, npm: 1 };
+const RUNNER_VALUE = /^(--filter|-F|-C|--dir|--prefix|-w|--workspace|-p|--package)$/;
+function verbsOf(args) {
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-')) i += /=/.test(args[i]) ? 1 : 2;
+  const rest = args.slice(i);
+  const flag = rest.findIndex((a) => a.startsWith('-'));
+  return flag < 0 ? rest : rest.slice(0, flag);
+}
+function prodWrite(words) {
+  let [cmd, ...args] = words;
+  if (RUNNERS[cmd]) {
+    while (args.length && (args[0].startsWith('-') || /^(exec|dlx|run|x)$/.test(args[0]))) args = args.slice(RUNNER_VALUE.test(args[0]) ? 2 : 1);
+    [cmd, ...args] = args;
+    cmd = String(cmd || '').replace(/(.)@.*$/, '$1');
+  }
+  const verbs = verbsOf(args);
+  if (PROD_VERBS[cmd]) return verbs.some((w) => PROD_VERBS[cmd].test(w));
+  return (cmd === 'gh' && verbs[0] === 'pr' && verbs[1] === 'merge') || (cmd === 'glab' && verbs[0] === 'mr' && verbs[1] === 'merge');
+}
+
+// The first production write that runs after another step of the same shell (a `cd`, an assignment
+// or `set` before it is no step; nor a `$(…)` feeding the write or an assignment, such as
+// `GH_TOKEN=$(gh auth token) gh pr merge`), as its text; null when each one runs alone. A second
+// production write counts the first as a step. Each `(…)` / `$(…)` is read the same way on its own.
+function chainedProdWrite(command) {
+  const all = commands(command);
+  const scopes = [...new Set(all.map((r) => String(r.scope)))];
+  for (const scope of scopes) {
+    const hit = scanScope(all, scope);
+    if (hit) return hit;
+  }
+  return null;
+}
+function scanScope(all, scope) {
+  let before = false;
+  let pending = false; // a direct child `$(…)` / `(…)` not yet known to feed the next command
+  for (const raw of all) {
+    const sc = String(raw.scope);
+    if (sc !== scope) {
+      if (sc.startsWith(`${scope}.`)) pending = true;
+      continue;
+    }
+    const words = program(raw);
+    if (pending && !raw.some((w) => /\$\(|`/.test(w))) before = true;
+    pending = false;
+    const script = innerScript(words);
+    if (script !== null) {
+      const inner = chainedProdWrite(script);
+      if (inner) return inner;
+      if (before && commands(script).map(program).some(prodWrite)) return words.join(' ');
+      before = true;
+      continue;
+    }
+    if (prodWrite(words)) {
+      if (before) return words.join(' ');
+      before = true;
+      continue;
+    }
+    if (!words.length || assignments(raw) || ['cd', 'pushd', 'set', 'export', 'true', ':'].includes(words[0])) continue;
+    before = true;
+  }
+  return null;
 }
 
 function tailLines(file) {
@@ -182,7 +268,7 @@ function gatePrinted(lines) {
   return false;
 }
 
-module.exports = { resolveDir, isMainCheckout, writesMainCheckout, gatePrinted };
+module.exports = { resolveDir, inScratchpad, chainedProdWrite, isMainCheckout, writesMainCheckout, gatePrinted };
 if (require.main !== module) return;
 
 let raw = '';
@@ -194,6 +280,15 @@ process.stdin.on('end', () => {
     const { transcript_path: transcript, agent_id: agentId, tool_input: input, cwd } = JSON.parse(raw);
     const command = String(input?.command || '');
     if (!transcript || agentId) process.exit(0);
+    const chained = chainedProdWrite(command);
+    if (chained) {
+      process.stderr.write(
+        `gate-line-guard: \`${chained.slice(0, 120)}\` writes to production after another step in the same call. ` +
+          'A failed step before it can still let it run (a pipe returns its last command\'s status). ' +
+          'Run the earlier steps, read their output, then run the write alone in its own call.\n'
+      );
+      process.exit(2);
+    }
     const remote = REMOTE_WRITE.test(command);
     const git = !remote && (HOOKS_OFF.test(command) || writesMainCheckout(command, cwd || process.cwd()));
     if (!remote && !git) process.exit(0);
