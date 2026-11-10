@@ -121,6 +121,9 @@ const cases = [
   ['chat view_file absolute_path .env', 'chat', { name: 'view_file', args: { absolute_path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
   ['chat view_file absolute_path README', 'chat', { name: 'view_file', args: { absolute_path: readme } }, 'allow', undefined, 'privacy-checker.cjs'],
   ['chat run_command ls', 'chat', { name: 'run_command', args: { CommandLine: 'ls', Cwd: ws } }, 'allow'],
+  // A message that only names a secret file prints nothing: the same verdict as Claude's secret-file-guard.
+  ['chat run_command ask naming .env', 'chat', { name: 'run_command', args: { CommandLine: 'orca orchestration ask --question "chỉ sửa x.sql, không đọc .env"', Cwd: ws } }, 'allow', undefined, 'privacy-checker.cjs'],
+  ['chat run_command cat .env', 'chat', { name: 'run_command', args: { CommandLine: 'cat .env', Cwd: ws } }, 'deny', undefined, 'privacy-checker.cjs'],
   ['malformed: empty arg key', 'chat', { name: 'view_file', args: { '': 1, absolute_path: env } }, 'deny', undefined, 'privacy-checker.cjs'],
   ['malformed: transcriptPath number', 'chat', { name: 'view_file', args: { AbsolutePath: env } }, 'deny', { transcriptPath: 5 }, 'privacy-checker.cjs'],
 ];

@@ -43,6 +43,7 @@ const SAFE = /\.(example|sample|template|dist)$/i;
 const SECRETISH = /(^|[\s/"'=<>])(\.env(\.[\w.-]+)?|[\w.-]+\.env|id_(rsa|dsa|ecdsa|ed25519)[\w.-]*|[\w.-]+\.(pem|key|p12|pfx|jks|keystore)|credentials(\.[\w-]+)?|secrets?\.ya?ml)(?=$|[\s"';&|)<>])/i;
 // Programs that never print a file's content, whatever their arguments.
 const QUIET = new Set(['source', '.', 'test', '[', 'ls', 'stat', 'chmod', 'touch', 'rm', 'sha256sum', 'shasum', 'md5', 'md5sum']);
+const ORCA_MESSAGE = /^(ask|reply|send|worker-done|task-update|gate-create|gate-resolve)$/;
 const COPY = new Set(['cp', 'mv', 'ln']);
 const GIT_QUIET = new Set(['check-ignore', 'ls-files', 'rm']);
 // `--env-file` passes only for a program that runs a service or a script file, never one asked to
@@ -222,14 +223,32 @@ function approved(command, transcript, userTexts) {
   return userTexts(transcript).some((t) => norm(t).includes(quote));
 }
 
+// The text arguments of the Orca messages a command sends (`orca orchestration ask|reply|send …`):
+// never the value of a `--*-file` option (that sends the file), nor one holding a substitution.
+function orcaMessageText(command) {
+  const out = [];
+  for (const words of commands(command)) {
+    const [name, sub, verb, ...args] = program(words);
+    if (name !== 'orca' || sub !== 'orchestration' || !ORCA_MESSAGE.test(verb || '')) continue;
+    args.forEach((a, k) => {
+      if (/^--[\w-]*file(=|$)/.test(a) || /^--[\w-]*file$/.test(args[k - 1] || '') || /\$\(|`/.test(a)) return;
+      out.push(a);
+    });
+  }
+  return out;
+}
+
 // '' to let the call run, else the reason it is denied.
 function decide(data, { checker = loadChecker(), userTexts = require('./worker-default-guard.cjs').userTexts } = {}) {
   const tool = data.tool_name || '';
   const access = secretAccess(data, checker);
   // A template the checker reports in markdown quotes (`` `x/.env.example` ``) holds no secret.
   access.paths = access.paths.filter((p) => !SAFE.test(String(p).replace(/^[`'"]+|[`'"]+$/g, '')));
-  if (!access.uninspectable && access.paths.length === 0) return '';
   const command = typeof (data.tool_input || {}).command === 'string' ? data.tool_input.command : '';
+  // The checker reports an Orca message's text (`ask --question "… .env"`) as a path: it is text sent, no file read.
+  const texts = tool === 'Bash' ? orcaMessageText(command) : [];
+  access.paths = access.paths.filter((p) => !texts.some((t) => t.includes(String(p))));
+  if (!access.uninspectable && access.paths.length === 0) return '';
   if (command && approved(command, data.transcript_path, userTexts)) return '';
   const onlyDotenv = !access.fallback && !access.uninspectable && access.paths.every(isDotenv);
   if (onlyDotenv && tool === 'Bash' && quietUse(command)) return '';

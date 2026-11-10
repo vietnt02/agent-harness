@@ -1290,7 +1290,25 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `cat ${E} # secret-ok: "cho đọc file env nhé"`, 'ls -la',
     // A heredoc body written to a file only names it: backticks there are markdown, not a substitution.
     `cat > README.md <<'EOF'\n| names of \`/root/app/${E}\` |\nEOF`, `cat > a.md <<EOF\nsee ${E} and \\$(not run) here\nEOF`,
+    // An Orca message carries text and reads no file (a worker's plan naming the file it will not open).
+    `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`, `orca orchestration reply --id m1 --body "đừng in ${E}"`,
+    `orca orchestration worker-done --summary "đã bỏ qua ${E}"`,
   ]) assert.equal(run('Bash', cmd), '', cmd);
+  // AgentKit's checker reports a quoted phrase whole (seen on `ask --question "… <dotenv>"`).
+  const phrase = {
+    checkPrivacy: ({ toolInput }) => {
+      const hits = (toolInput.command.match(/"[^"]*"|\S+/g) || []).map((w) => w.replace(/^"|"$/g, '')).filter((w) => /\.env\b/.test(w));
+      return hits.length ? { blocked: true, accesses: hits.map((filePath) => ({ filePath })) } : { blocked: false };
+    },
+  };
+  assert.equal(run('Bash', `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`, { checker: phrase, userTexts }), '');
+  for (const cmd of [`orca orchestration send --to x --body-file ${E}`, `orca orchestration ask --question "x" && cat ${E}`,
+    `orca orchestration ask --question "$(cat ${E})"`, `echo "không đọc ${E}"`])
+    assert.match(run('Bash', cmd, { checker: phrase, userTexts }), /secret-file-guard/, cmd);
+  // The message route still sends a file named by a `--*-file` option, and runs a substitution.
+  for (const cmd of [`orca orchestration send --to x --body-file ${E}`, `orca orchestration send --body-file=${E}`,
+    `orca orchestration ask --question "$(cat ${E})"`, `orca orchestration ask --question "x" && cat ${E}`])
+    assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   // The checker reports a template in markdown quotes: no secret in it.
   const quoted = { checkPrivacy: () => ({ blocked: true, accesses: [{ filePath: `\`deploy/${E}.example\`` }] }) };
   assert.equal(run('Bash', `cat > a.md <<EOF\nsee \\\`deploy/${E}.example\\\`\nEOF`, { checker: quoted, userTexts }), '');
