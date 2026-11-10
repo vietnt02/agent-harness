@@ -441,10 +441,15 @@ function handlePreToolUse(payload) {
     try {
       // From this checkout (the bridge is linked from it), so bridge and guard always change together.
       const local = path.join(__dirname, '..', 'claude', 'hooks', 'secret-file-guard.cjs');
-      const { decide } = require(fs.existsSync(local) ? local : path.join(HOOKS_DIR, 'secret-file-guard.cjs'));
-      // Its own wording names Claude's approval comment, which no agy worker can use: only the verdict is kept.
-      const why = decide({ tool_name: claudeTool, tool_input: { file_path: filePath, command }, cwd }, { userTexts: () => [] });
-      if (why) reason = `PRIVACY BLOCK: this call would print a secret file (${(why.match(/\(([^)]*)\)/) || [, 'a secret path'])[1]}).`;
+      const { judge } = require(fs.existsSync(local) ? local : path.join(HOOKS_DIR, 'secret-file-guard.cjs'));
+      // The guard's own wording names Claude's approval comment, which no agy worker can use: only its verdict is kept.
+      const v = judge({ tool_name: claudeTool, tool_input: { file_path: filePath, command }, cwd }, { userTexts: () => [] });
+      if (v.deny) {
+        const what = v.uninspectable ? v.reason || 'a command the guard cannot read' : v.paths.join(', ');
+        reason = v.fallback
+          ? `PRIVACY BLOCK: the privacy checker did not load, so every call naming a secret-looking path is denied (${what}).`
+          : `PRIVACY BLOCK: this call would print a secret file (${what}).`;
+      }
     } catch (_) {
       const { checkPrivacy } = require(path.join(HOOKS_DIR, 'lib', 'privacy-checker.cjs'));
       const priv = checkPrivacy({ toolName: claudeTool, toolInput: { file_path: filePath, command }, options: { allowBash: true, cwd } });

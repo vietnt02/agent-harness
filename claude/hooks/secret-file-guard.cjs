@@ -43,7 +43,7 @@ const SAFE = /\.(example|sample|template|dist)$/i;
 const SECRETISH = /(^|[\s/"'=<>])(\.env(\.[\w.-]+)?|[\w.-]+\.env|id_(rsa|dsa|ecdsa|ed25519)[\w.-]*|[\w.-]+\.(pem|key|p12|pfx|jks|keystore)|credentials(\.[\w-]+)?|secrets?\.ya?ml)(?=$|[\s"';&|)<>])/i;
 // Programs that never print a file's content, whatever their arguments.
 const QUIET = new Set(['source', '.', 'test', '[', 'ls', 'stat', 'chmod', 'touch', 'rm', 'sha256sum', 'shasum', 'md5', 'md5sum']);
-const ORCA_MESSAGE = /^(ask|reply|send|worker-done|task-update|gate-create|gate-resolve)$/;
+const ORCA_MESSAGE = /^(ask|reply|send|task-update|gate-create|gate-resolve)$/;
 const COPY = new Set(['cp', 'mv', 'ln']);
 const GIT_QUIET = new Set(['check-ignore', 'ls-files', 'rm']);
 // `--env-file` passes only for a program that runs a service or a script file, never one asked to
@@ -223,36 +223,50 @@ function approved(command, transcript, userTexts) {
   return userTexts(transcript).some((t) => norm(t).includes(quote));
 }
 
-// The text arguments of the Orca messages a command sends (`orca orchestration ask|reply|send …`):
-// never the value of a `--*-file` option (that sends the file), nor one holding a substitution.
-function orcaMessageText(command) {
-  const out = [];
+// The command with the text an Orca message sends (`ask --question "… .env"`, `reply --body …`)
+// replaced by a placeholder, so the checker judges the rest of it: the text is sent, no file read,
+// while a `cat` chained beside it is still seen. A value holding a substitution, or one not found
+// quoted as written (an escape), stays, and is judged as before.
+const ORCA_TEXT = /^--(question|body|subject|result|resolution|phase)$/;
+function withoutMessages(command) {
+  let out = command;
   for (const words of commands(command)) {
     const [name, sub, verb, ...args] = program(words);
     if (name !== 'orca' || sub !== 'orchestration' || !ORCA_MESSAGE.test(verb || '')) continue;
-    args.forEach((a, k) => {
-      if (/^--[\w-]*file(=|$)/.test(a) || /^--[\w-]*file$/.test(args[k - 1] || '') || /\$\(|`/.test(a)) return;
-      out.push(a);
+    args.forEach((v, k) => {
+      if (!ORCA_TEXT.test(args[k - 1] || '') || /\$\(|`/.test(v)) return;
+      for (const q of ['"', "'"]) {
+        const at = out.indexOf(`${q}${v}${q}`);
+        if (at >= 0) { out = `${out.slice(0, at)}MSG${out.slice(at + v.length + 2)}`; return; }
+      }
     });
   }
   return out;
 }
 
-// '' to let the call run, else the reason it is denied.
-function decide(data, { checker = loadChecker(), userTexts = require('./worker-default-guard.cjs').userTexts } = {}) {
+// The verdict on one call: { deny, paths, fallback, uninspectable, onlyDotenv, reason }.
+function judge(data, { checker = loadChecker(), userTexts = require('./worker-default-guard.cjs').userTexts } = {}) {
   const tool = data.tool_name || '';
-  const access = secretAccess(data, checker);
+  const command = typeof (data.tool_input || {}).command === 'string' ? data.tool_input.command : '';
+  const judged = tool === 'Bash' && command ? withoutMessages(command) : command;
+  const access = secretAccess(judged === command ? data : { ...data, tool_input: { ...data.tool_input, command: judged } }, checker);
   // A template the checker reports in markdown quotes (`` `x/.env.example` ``) holds no secret.
   access.paths = access.paths.filter((p) => !SAFE.test(String(p).replace(/^[`'"]+|[`'"]+$/g, '')));
-  const command = typeof (data.tool_input || {}).command === 'string' ? data.tool_input.command : '';
-  // The checker reports an Orca message's text (`ask --question "… .env"`) as a path: it is text sent, no file read.
-  const texts = tool === 'Bash' ? orcaMessageText(command) : [];
-  access.paths = access.paths.filter((p) => !texts.some((t) => t.includes(String(p))));
-  if (!access.uninspectable && access.paths.length === 0) return '';
-  if (command && approved(command, data.transcript_path, userTexts)) return '';
+  const pass = { deny: false, paths: [] };
+  if (!access.uninspectable && access.paths.length === 0) return pass;
+  if (command && approved(command, data.transcript_path, userTexts)) return pass;
   const onlyDotenv = !access.fallback && !access.uninspectable && access.paths.every(isDotenv);
-  if (onlyDotenv && tool === 'Bash' && quietUse(command)) return '';
-  if (onlyDotenv && tool === 'Write') return '';
+  if (onlyDotenv && tool === 'Bash' && quietUse(judged)) return pass;
+  if (onlyDotenv && tool === 'Write') return pass;
+  return { deny: true, paths: access.paths, fallback: Boolean(access.fallback), uninspectable: Boolean(access.uninspectable), onlyDotenv, reason: access.reason };
+}
+
+// '' to let the call run, else the reason it is denied.
+function decide(data, opts = {}) {
+  const tool = data.tool_name || '';
+  const access = judge(data, opts);
+  if (!access.deny) return '';
+  const onlyDotenv = access.onlyDotenv;
   if (access.fallback) {
     return (
       `secret-file-guard: AgentKit's privacy checker (${KIT_CHECKER}) did not load or failed, so every call naming a ` +
@@ -272,7 +286,7 @@ function decide(data, { checker = loadChecker(), userTexts = require('./worker-d
   );
 }
 
-module.exports = { decide, quietUse, isDotenv, secretAccess };
+module.exports = { decide, judge, quietUse, isDotenv, secretAccess };
 if (require.main !== module) return;
 
 try {

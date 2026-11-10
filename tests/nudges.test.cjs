@@ -200,7 +200,7 @@ test('worker-stall: a worker waiting on its ask is running, not stale; a reply e
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ws-'));
   // Shapes copied from an agy worker's transcript (worker-read --source transcript): the ask is sent
   // through a shell tool, and the coordinator's reply arrives as a user message.
-  const asked = { role: 'assistant', blocks: [{ type: 'tool-call', name: 'execute', input: { command: "python3 << 'PYEOF'\n…" } },
+  const asked = { role: 'assistant', timestamp: Date.now(), blocks: [{ type: 'tool-call', name: 'execute', input: { command: "python3 << 'PYEOF'\n…" } },
     { type: 'tool-result', output: 'STDOUT: Question msg_cb35a07c0e9b sent. Next: End your turn; Orca wakes you with the answer.\n\nSTDERR: \n\nEXIT: 0' }] };
   const said = { role: 'assistant', blocks: [{ type: 'text', text: 'Đã gửi kế hoạch, chờ coordinator duyệt.' }] };
   const reply = { role: 'user', blocks: [{ type: 'text', text: '──── From: RUN:RUN_1 (status) ──── Subject: Re: Question Duyệt kế hoạch' }] };
@@ -209,8 +209,10 @@ test('worker-stall: a worker waiting on its ask is running, not stale; a reply e
     const later = Date.now() + 11 * 60000;
     const deps = (msgs) => ({ show: () => ({ state: 'ready', workspace: `id::${dir}` }), now: later,
       newErrors: (d) => w.newErrors(d, page(msgs), state), waitingAsk: (d) => w.waitingAsk(d, state) });
-    assert.equal(w.status(o, deps([asked, said])), 'running waiting-coordinator state=ready');
-    assert.equal(w.status(o, deps([])), 'running waiting-coordinator state=ready', 'still waiting on the next run');
+    assert.match(w.status(o, deps([asked, said])), /^running waiting-coordinator 1\dm state=ready$/);
+    assert.match(w.status(o, deps([])), /^running waiting-coordinator/, 'still waiting on the next run');
+    assert.match(w.status(o, { ...deps([]), now: Date.now() + 61 * 60000 }), /^stale ask-unanswered>60m/, 'a wait has a ceiling');
+    assert.throws(() => w.status(o, { ...deps([]), show: () => ({ state: 'ready', workspace: 'id::/no/such/dir' }) }), /no worktree/);
     assert.match(w.status(o, deps([reply])), /^stale idle>10m/, 'the reply ends the wait');
   } finally {
     fs.rmSync(state, { recursive: true, force: true });

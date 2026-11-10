@@ -1292,7 +1292,7 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     `cat > README.md <<'EOF'\n| names of \`/root/app/${E}\` |\nEOF`, `cat > a.md <<EOF\nsee ${E} and \\$(not run) here\nEOF`,
     // An Orca message carries text and reads no file (a worker's plan naming the file it will not open).
     `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`, `orca orchestration reply --id m1 --body "đừng in ${E}"`,
-    `orca orchestration worker-done --summary "đã bỏ qua ${E}"`,
+    `orca orchestration send --type worker_done --subject "xong" --body 'đã bỏ qua ${E}'`,
   ]) assert.equal(run('Bash', cmd), '', cmd);
   // AgentKit's checker reports a quoted phrase whole (seen on `ask --question "… <dotenv>"`).
   const phrase = {
@@ -1302,9 +1302,19 @@ test('secret-file-guard: a dotenv used without printing passes; printing it or a
     },
   };
   assert.equal(run('Bash', `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`, { checker: phrase, userTexts }), '');
-  for (const cmd of [`orca orchestration send --to x --body-file ${E}`, `orca orchestration ask --question "x" && cat ${E}`,
-    `orca orchestration ask --question "$(cat ${E})"`, `echo "không đọc ${E}"`])
-    assert.match(run('Bash', cmd, { checker: phrase, userTexts }), /secret-file-guard/, cmd);
+  // A message naming the file never hides a real read of it in the same command, with either checker or none.
+  const beside = [`orca orchestration ask --question "x" && cat ${E}`, `orca orchestration ask --question "$(cat ${E})"`,
+    `orca orchestration ask --question "x ${E}"; cat ${E}`, `orca orchestration ask --question "x ${E}" && cat ${E}`,
+    `cat ${E} && orca orchestration ask --question "đã đọc ${E}"`, `cat ${E} | orca orchestration send --subject s --body "about ${E}"`,
+    `orca orchestration ask --question "${E}" > /dev/null; grep KEY ${E}`, `orca orchestration ask --question "x ${E}"; bash -c "cat ${E}"`,
+    `orca orchestration ask --question "see app/${E}"; cat ${E}`, `orca orchestration ask --question "q" --options "${E}"; cat ${E}`,
+    `orca orchestration send --subject "${E}" --body x < ${E}`];
+  assert.match(run('Bash', `echo "không đọc ${E}"`, { checker: phrase, userTexts }), /secret-file-guard/, 'echo stays as narrowed');
+  for (const cmd of beside) {
+    assert.match(run('Bash', cmd, { checker: phrase, userTexts }), /secret-file-guard/, `phrase: ${cmd}`);
+    assert.match(run('Bash', cmd), /secret-file-guard/, `token: ${cmd}`);
+    assert.match(run('Bash', cmd, { checker: null, userTexts }), /secret-file-guard/, `no checker: ${cmd}`);
+  }
   // The message route still sends a file named by a `--*-file` option, and runs a substitution.
   for (const cmd of [`orca orchestration send --to x --body-file ${E}`, `orca orchestration send --body-file=${E}`,
     `orca orchestration ask --question "$(cat ${E})"`, `orca orchestration ask --question "x" && cat ${E}`])

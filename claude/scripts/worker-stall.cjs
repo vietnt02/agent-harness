@@ -3,7 +3,8 @@
  * worker-stall.cjs - one line for one Orca worker, in the "<state> [context]" form watch.sh judges:
  *   done <state>     the worker's Task ended (succeeded, failed, stopped, cancelled, abandoned)
  *   running <why>    a file in its worktree changed within --idle-min minutes, and no API error streak;
- *                    or `waiting-coordinator`: its last `orca orchestration ask` has no reply yet
+ *                    or `waiting-coordinator`: its last `orca orchestration ask` has no reply yet, for
+ *                    at most --ask-max minutes (then `stale ask-unanswered>…`)
  *   stale <why>      nothing in its worktree changed for --idle-min minutes, or the worker's messages
  *                    since the last run hold >= --api-errors 502/503/429-type errors
  * A worker that is only reading for a long time also shows `stale`: a cue to look (worker-read twice,
@@ -14,7 +15,7 @@
  * last one; user messages (the brief, the spec) never count. It never reads `orca orchestration
  * check`, so it takes no message from the coordinator's inbox.
  *
- *   node ~/.claude/scripts/worker-stall.cjs --dispatch <ctx_id> [--idle-min 10] [--api-errors 3]
+ *   node ~/.claude/scripts/worker-stall.cjs --dispatch <ctx_id> [--idle-min 10] [--api-errors 3] [--ask-max 60]
  */
 'use strict';
 const fs = require('fs');
@@ -29,10 +30,10 @@ const MAX_PAGES = 40;
 const ASK_SENT = /\bQuestion msg_\w+ sent\b/;
 
 function args(argv) {
-  const out = { dispatch: '', idle: 10, errors: 3 };
+  const out = { dispatch: '', idle: 10, errors: 3, askMax: 60 };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i + 1];
-    if (argv[i] === '--dispatch') { out.dispatch = v || ''; i++; } else if (argv[i] === '--idle-min') { out.idle = Number(v); i++; } else if (argv[i] === '--api-errors') { out.errors = Number(v); i++; } else if (argv[i] === '-h' || argv[i] === '--help') { out.help = true; } else { out.bad = argv[i]; }
+    if (argv[i] === '--dispatch') { out.dispatch = v || ''; i++; } else if (argv[i] === '--idle-min') { out.idle = Number(v); i++; } else if (argv[i] === '--api-errors') { out.errors = Number(v); i++; } else if (argv[i] === '--ask-max') { out.askMax = Number(v); i++; } else if (argv[i] === '-h' || argv[i] === '--help') { out.help = true; } else { out.bad = argv[i]; }
   }
   return out;
 }
@@ -61,7 +62,7 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
   // ends the run with what it counted: a busy worker must not turn the watch into an error.
   let counting = true;
   let reset = false;
-  let waiting = Boolean(state.waiting);
+  let waiting = state.waiting || false; // false, or the time the ask was first seen
   for (let page = 0; page < MAX_PAGES; page++) {
     const a = ['orchestration', 'worker-read', '--dispatch', dispatch, '--source', 'transcript', '--limit', '50', '--json'];
     if (cursor) a.push('--cursor', cursor);
@@ -77,7 +78,7 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
     if (counting) for (const m of msgs) if (API_ERROR.test(workerText(m))) count++;
     for (const m of msgs) {
       if (m && m.role === 'user') waiting = false;
-      else if (ASK_SENT.test(workerText(m))) waiting = true;
+      else if (ASK_SENT.test(workerText(m))) waiting = waiting || Number(m.timestamp) || Date.now();
     }
     const next = t.nextCursor || r.cursor;
     // `limited` stays true on the last page when Orca clipped oversized text: an empty page or a
@@ -108,9 +109,9 @@ function changedSince(dir, sinceMs) {
   return null;
 }
 
-// Whether the last newErrors run saw the worker waiting on its ask.
+// Since when the last newErrors run saw the worker waiting on its ask (ms), or false.
 function waitingAsk(dispatch, stateDir = path.join(os.tmpdir(), 'claude-worker-stall')) {
-  try { return Boolean(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).waiting); } catch (_) { return false; }
+  try { return Number(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).waiting) || false; } catch (_) { return false; }
 }
 
 function status(o, deps = {}) {
@@ -120,9 +121,14 @@ function status(o, deps = {}) {
   if (DONE.has(state)) return `done ${state}`;
   const errors = (deps.newErrors || newErrors)(o.dispatch);
   if (errors >= o.errors) return `stale api-errors=${errors} state=${state}`;
-  if ((deps.waitingAsk || waitingAsk)(o.dispatch)) return `running waiting-coordinator state=${state}`;
   const workspace = String(r.workspace || '').split('::').pop();
   if (!workspace || !fs.existsSync(workspace)) throw new Error(`no worktree on disk for ${o.dispatch} (state=${state})`);
+  const since = (deps.waitingAsk || waitingAsk)(o.dispatch);
+  if (since) {
+    const mins = Math.floor(((deps.now || Date.now()) - since) / 60000);
+    const max = o.askMax || 60;
+    return mins >= max ? `stale ask-unanswered>${max}m state=${state}` : `running waiting-coordinator ${mins}m state=${state}`;
+  }
   const recent = changedSince(workspace, (deps.now || Date.now()) - o.idle * 60000);
   return recent ? `running changed=${recent} state=${state}` : `stale idle>${o.idle}m state=${state}`;
 }
@@ -132,8 +138,8 @@ if (require.main !== module) return;
 
 const o = args(process.argv.slice(2));
 if (o.help) { process.stdout.write(fs.readFileSync(__filename, 'utf8').split('*/')[0]); process.exit(0); }
-if (o.bad || !o.dispatch || !(o.idle > 0) || !(o.errors > 0)) {
-  process.stderr.write('usage: worker-stall.cjs --dispatch <ctx_id> [--idle-min <minutes > 0>] [--api-errors <n > 0>]\n');
+if (o.bad || !o.dispatch || !(o.idle > 0) || !(o.errors > 0) || !(o.askMax > 0)) {
+  process.stderr.write('usage: worker-stall.cjs --dispatch <ctx_id> [--idle-min <minutes > 0>] [--api-errors <n > 0>] [--ask-max <minutes > 0>]\n');
   process.exit(2);
 }
 try {
