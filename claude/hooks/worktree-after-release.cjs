@@ -5,13 +5,17 @@
  * command; `orca worktree rm` is asynchronous, so removal is checked later, not here.
  * When a dispatch the command names cannot be read, prints that instead of the reminder (a silent
  * hook hid an Orca JSON change before); fails open on anything else.
+ * Reads the command's output, not only the command: a dispatch Orca refused to release (still
+ * running, `dispatch_inactive`) keeps its worktree, so it gets `worker-stop`, never `worktree rm`.
  */
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const { samePath } = require('./lib/platform.cjs');
+const { commands, program } = require('./lib/shell-words.cjs');
 
+// Trailing whitespace only: `git status --porcelain` starts a line with a space (` M path`).
 const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  execFileSync(cmd, args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).replace(/\s+$/, '');
 
 // The `<id>::<path>` worktree of a worker-show result: the concise view (Orca 1.4.248) has it as
 // `workspace`, the full one (and older versions) as `worker.worktreeId`.
@@ -41,8 +45,8 @@ function openReviews(dir) {
   return prs.map((p) => `#${p.number}`);
 }
 
-function describe(dispatch) {
-  const dir = linkedWorktree(dispatch);
+function describe(dispatch, show) {
+  const dir = linkedWorktree(dispatch, show);
   if (!dir) return null;
   const keep = [];
   const dirty = run('git', ['status', '--porcelain'], dir).split('\n').filter(Boolean);
@@ -61,29 +65,48 @@ function describe(dispatch) {
     : `${dispatch}: gỡ worktree ${dir}: ${rm}`;
 }
 
-module.exports = { linkedWorktree, worktreeOf, describe, openReviews };
+// What the command's output says about each dispatch: a line instead of the reminder when Orca
+// refused it (a worker not settled yet, or an error naming no dispatch), else null.
+function refused(dispatch, output) {
+  const m = output.match(new RegExp(`Dispatch ${dispatch} is (\\S+); only a settled worker can release`));
+  if (m) return `${dispatch}: chưa release (worker đang ${m[1]}, chưa settle); worktree giữ nguyên. Muốn dừng: \`orca orchestration worker-stop --dispatch ${dispatch}\`.`;
+  if (/"ok"\s*:\s*false|^error:/m.test(output)) return `${dispatch}: worker-release báo lỗi; worktree giữ nguyên, đọc lỗi trước khi gỡ.`;
+  return null;
+}
+
+module.exports = { linkedWorktree, worktreeOf, describe, openReviews, refused };
 if (require.main !== module) return;
 
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 process.stdin.on('end', () => {
   try {
-    const { tool_name: tool, tool_input: input = {} } = JSON.parse(raw);
+    const { tool_name: tool, tool_input: input = {}, tool_response: res = {} } = JSON.parse(raw);
+    const output = typeof res === 'string' ? res : `${res.stdout || ''}\n${res.stderr || ''}`;
     const command = input.command || '';
-    if (tool !== 'Bash' || !/\borca\s+orchestration\s+worker-release\b/.test(command)) process.exit(0);
-    const lines = [...new Set(command.match(/ctx_[0-9a-f]+/g) || [])]
+    if (tool !== 'Bash') process.exit(0);
+    // Only a release that runs: text naming one (a heredoc, a spec, an echo) is no release.
+    const released = commands(command).map(program)
+      .filter(([cmd, sub, verb]) => cmd === 'orca' && sub === 'orchestration' && verb === 'worker-release')
+      .flatMap((w) => w.join(' ').match(/ctx_[0-9a-f]+/g) || []);
+    const notes = [];
+    const lines = [...new Set(released)]
       .map((d) => {
+        const no = refused(d, output);
+        if (no) { notes.push(no); return null; }
         try { return describe(d); } catch (e) {
           return `${d}: không đọc được worktree (${String(e.message || e).slice(0, 120)}); tự tìm bằng ` +
             `\`orca orchestration worker-show --dispatch ${d} --json --full\` rồi gỡ nó.`;
         }
       })
       .filter(Boolean);
+    const parts = notes.map((l) => `- ${l}`);
     if (lines.length) {
-      const context =
-        'worktree-after-release: release chỉ đóng terminal, worktree vẫn còn trên đĩa.\n' +
-        lines.map((l) => `- ${l}`).join('\n') +
-        '\n`orca worktree rm` gỡ bất đồng bộ (`ok: true` = đã nhận lệnh): kiểm lại `git worktree list` khoảng 2 phút sau.';
+      parts.unshift('release chỉ đóng terminal, worktree vẫn còn trên đĩa.', ...lines.map((l) => `- ${l}`));
+      parts.push('`orca worktree rm` gỡ bất đồng bộ (`ok: true` = đã nhận lệnh): kiểm lại `git worktree list` khoảng 2 phút sau.');
+    }
+    if (parts.length) {
+      const context = `worktree-after-release: ${parts.join('\n')}`;
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: context } }));
     }
   } catch (_) { /* fail-open */ }

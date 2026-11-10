@@ -1087,6 +1087,80 @@ test('worktree-after-release: reads the worktree from either worker-show shape, 
   }
 });
 
+test('worktree-after-release: a refused release keeps its worktree; dirty file names stay whole', () => {
+  // Both texts as Orca printed them (plain and --json).
+  const plain = 'error: dispatch_inactive: Dispatch ctx_0b4e4e10585e is ready; only a settled worker can release. Use worker-stop to cancel an active worker.';
+  const json = '{"ok":false,"error":{"code":"dispatch_inactive","message":"Dispatch ctx_6ed1b7b55ec6 is start_unknown; only a settled worker can release."}}';
+  assert.match(worktreeAfterRelease.refused('ctx_0b4e4e10585e', plain), /worker-stop --dispatch ctx_0b4e4e10585e/);
+  assert.match(worktreeAfterRelease.refused('ctx_6ed1b7b55ec6', json), /start_unknown/);
+  assert.match(worktreeAfterRelease.refused('ctx_1', '{"ok":false,"error":"Unknown flag --run"}'), /báo lỗi/);
+  assert.equal(worktreeAfterRelease.refused('ctx_1', '{"ok":true,"result":{"state":"released"}}'), null);
+  const hook = path.join(HOOKS_DIR, 'worktree-after-release.cjs');
+  const out = spawnSync(process.execPath, [hook], { encoding: 'utf8', input: JSON.stringify({
+    tool_name: 'Bash', tool_input: { command: 'orca orchestration worker-release --dispatch ctx_0b4e4e10585e' },
+    tool_response: { stdout: plain, stderr: '' } }) }).stdout;
+  assert.match(out, /worker-stop/);
+  assert.doesNotMatch(out, /worktree rm/);
+  for (const command of ['echo "orca orchestration worker-release --dispatch ctx_ab12"',
+    "cat > spec.md <<'E'\norca orchestration worker-release --dispatch ctx_ab12\nE",
+    "node -e \"run('orca orchestration worker-release --dispatch ctx_ab12')\""]) {
+    const quiet = spawnSync(process.execPath, [hook], { encoding: 'utf8', input: JSON.stringify({
+      tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: '', stderr: '' } }) }).stdout;
+    assert.equal(quiet, '', command);
+  }
+
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'war-')));
+  try {
+    const main = path.join(tmp, 'main');
+    execFileSync('git', ['init', '-q', main]);
+    fs.writeFileSync(path.join(main, 'automations.md'), 'a');
+    execFileSync('git', ['-C', main, 'add', '-A']);
+    execFileSync('git', ['-C', main, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x']);
+    const wt = path.join(tmp, 'wt');
+    execFileSync('git', ['-C', main, 'worktree', 'add', '-q', wt]);
+    fs.writeFileSync(path.join(wt, 'automations.md'), 'b');
+    const line = worktreeAfterRelease.describe('ctx_1', () => JSON.stringify({ ok: true, result: { workspace: `id::${wt}` } }));
+    assert.match(line, /1 file chưa commit \(automations\.md\)/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('note-recall: a command that only reads gets the note lines as context; a write is still blocked once', () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nr-')));
+  const hook = path.join(HOOKS_DIR, 'note-recall.cjs');
+  try {
+    const dir = path.join(home, '.claude', 'session-notes', 'proj');
+    fs.mkdirSync(dir, { recursive: true });
+    const note = (sid) => fs.writeFileSync(path.join(dir, `${sid}.md`), `---\nsession: ${sid}\nstatus: open\nscope: x\n---\n\n` +
+      '## Đang làm\n\n- x\n\n## Đang có hiệu lực\n\n- Full width: "ok giữ như thế này đi" → sửa cdp/ _sized, nâng VERSION, user merge.\n' +
+      '- Người làm: Claude — app-os, ssh box1 — "làm đi"\n\n## Đã xong\n\n## Resume\n');
+    const run = (sid, command) => spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: home },
+      input: JSON.stringify({ tool_name: 'Bash', session_id: sid, transcript_path: path.join(home, 'projects', 'proj', `${sid}.jsonl`), tool_input: { command } }) });
+    for (const [sid, command] of [
+      ['s-read-1', 'git fetch -q && git diff origin/main...HEAD -- cdp VERSION'],
+      ['s-read-2', 'ssh box1 "cat /var/snap/app/x.conf 2>&1 | tail -3"'],
+    ]) {
+      note(sid);
+      const r = run(sid, command);
+      assert.equal(r.status, 0, command);
+      assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /only reads/, command);
+    }
+    for (const [sid, command] of [
+      ['s-write-1', 'git commit -qm x -- cdp VERSION'],
+      ['s-write-2', 'ssh box1 "sudo rm -rf /var/snap/app/x"'],
+    ]) {
+      note(sid);
+      const r = run(sid, command);
+      assert.equal(r.status, 2, command);
+      assert.match(r.stderr, /note-recall:/, command);
+      assert.equal(run(sid, command).status, 0, `${command}: once`);
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('worker-start-receipt: only a dispatch the command runs is read back', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const ws = 'worker' + '-start';
@@ -1264,6 +1338,59 @@ test('session-notes: once every note of the session is done, the kaizen summary 
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('gate-line-guard: a repo in the session scratchpad is a fixture, made or not yet; other repos stay gated', () => {
+  const root = fs.realpathSync(os.tmpdir());
+  const base = path.join(root, `claude-${process.pid}`);
+  const sp = path.join(base, 'proj', 'sess', 'scratchpad');
+  const other = path.join(base, 'proj', 'sess', 'not-scratch');
+  const S = sp.split(path.sep).join('/');
+  try {
+    for (const d of [path.join(sp, 'repo'), path.join(other, 'repo')]) {
+      execFileSync('git', ['init', '-q', d]);
+      execFileSync('git', ['-C', d, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--allow-empty']);
+    }
+    const writes = (command, cwd = root) => gateLineGuard.writesMainCheckout(command, cwd);
+    for (const c of [
+      `cd "${S}" && rm -rf g && mkdir g && cd g && git init -q && git -c user.name=t commit -qm i`,
+      `S="${S}"; cd $S/new && git commit -qm i`,
+      `git -C "${S}/repo" commit -qm x --allow-empty`,
+    ]) assert.equal(writes(c), false, c);
+    assert.equal(writes('git commit -qm x --allow-empty', path.join(sp, 'repo')), false, 'cwd in the scratchpad');
+    for (const c of [
+      `git -C "${other.split(path.sep).join('/')}/repo" commit -qm x`,
+      `cd "${S}/../not-scratch/repo" && git reset --hard`,
+      `cd "${S}" && cd "${root.split(path.sep).join('/')}/no-such-dir" && git checkout main`,
+    ]) assert.equal(writes(c), true, c);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('gate-line-guard: a production write runs alone, never after another step of the same call', () => {
+  for (const c of [
+    "ssh box1 'sudo app.enable-https lets-encrypt 2>&1 | tail -3' && cf tunnels config update abc --body x",
+    'git fetch && gh pr merge 30 --squash',
+    'a | tail; glab mr merge 5',
+    'bash -c "x | tail && cf dns records create z"',
+    'make build && wrangler deploy',
+  ]) assert.ok(gateLineGuard.chainedProdWrite(c), c);
+  for (const c of [
+    'cf tunnels config update abc --body x',
+    'cd repo && gh pr merge 30',
+    'X=1; cf dns records delete r',
+    'cf tunnels config update a && cf tunnels list',
+    'cf dns records list --name update',
+    "ssh h 'a | tail'",
+    'gh pr view 30 && gh pr checks 30',
+    'echo "a | tail && cf tunnels config update x"',
+  ]) assert.equal(gateLineGuard.chainedProdWrite(c), null, c);
+  const r = spawnSync(process.execPath, [path.join(HOOKS_DIR, 'gate-line-guard.cjs')], { encoding: 'utf8', input: JSON.stringify({
+    transcript_path: path.join(os.tmpdir(), 'no-such.jsonl'),
+    tool_input: { command: '# Gate: mở bởi "ok" → khối X\nssh h "a | tail -3" && cf tunnels config update abc' } }) });
+  assert.equal(r.status, 2, 'a Gate line does not let a chained write through');
+  assert.match(r.stderr, /run the write alone/);
 });
 
 test('gate-line-guard: a Gate line in an earlier Bash call of the turn counts, not one before the prompt', () => {
