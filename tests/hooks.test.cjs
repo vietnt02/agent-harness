@@ -899,6 +899,14 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
   }
 });
 
+test('shell-words: innerScript reads -c only among the shell\'s own options', () => {
+  const { innerScript } = require('../claude/hooks/lib/shell-words.cjs');
+  for (const [w, out] of [[['bash', '-c', 'x'], 'x'], [['sh', '-lc', 'x'], 'x'], [['bash', '-euo', 'pipefail', '-c', 'x'], 'x'],
+    [['bash', '--norc', '-c', 'x'], 'x'], [['bash', '-o', 'pipefail', '-c', 'x'], 'x'], [['sh', 'script.sh', '-c', 'git push'], null],
+    [['bash', './run.sh', '-c'], null], [['bash', 'x.sh'], null], [['eval', 'a', 'b'], 'a b']])
+    assert.equal(innerScript(w), out, JSON.stringify(w));
+});
+
 test('shell-words: a backslash in double quotes escapes only $ ` " \\', () => {
   const { commands } = require('../claude/hooks/lib/shell-words.cjs');
   assert.deepEqual([...commands('echo "a\\b \\$x \\" \\\\"')[0]], ['echo', 'a\\b $x " \\']);
