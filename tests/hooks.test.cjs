@@ -1139,7 +1139,7 @@ test('note-recall: a command that only reads gets the note lines as context; a w
     const note = (sid) => fs.writeFileSync(path.join(dir, `${sid}.md`), `---\nsession: ${sid}\nstatus: open\nscope: x\n---\n\n` +
       '## Đang làm\n\n- x\n\n## Đang có hiệu lực\n\n- Full width: "ok giữ như thế này đi" → sửa cdp/ _sized, nâng VERSION, user merge.\n' +
       '- Người làm: Claude — app-os, ssh box1 — "làm đi"\n\n## Đã xong\n\n## Resume\n');
-    const run = (sid, command) => spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: home },
+    const run = (sid, command) => spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: home, TEMP: home, TMP: home },
       input: JSON.stringify({ tool_name: 'Bash', session_id: sid, transcript_path: path.join(home, 'projects', 'proj', `${sid}.jsonl`), tool_input: { command } }) });
     for (const [sid, command] of [
       ['s-read-1', 'git fetch -q && git diff origin/main...HEAD -- cdp VERSION'],
