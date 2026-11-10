@@ -28,14 +28,27 @@ const { DECISION_RE } = require('./lib/user-intent.cjs');
 const { NOTE_SECTIONS, overCaps, strayHeadings } = require('./lib/session-note-cap.cjs');
 // How much of an over-cap note a compact shows; the order to Read and rewrite it comes with it.
 const VIEW_CHARS = 1500;
-const { dropHeredocs } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript } = require('./lib/shell-words.cjs');
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-notes');
 const KEEP_DONE_MS = 14 * 24 * 60 * 60 * 1000;
 const slugify = (p) => p.replace(/[^A-Za-z0-9]/g, '-');
-// Only at command position (after env prefixes like GH_TOKEN=$(...)), so the words inside a heredoc or grep do not count.
-const STATE_RE =
-  /(^|[;&|(\n])\s*(\w+=(\$\([^)]*\)|\S+)\s+)*(gh\s+pr\s+(merge|close|create|ready)|glab\s+mr\s+(merge|close|create|update)|git\s+(-C\s+\S+\s+)?push)\b/;
+// A command that changes a PR/MR or a pushed branch: only one that runs (shell-words), so the words
+// in a quote, a heredoc, a grep or a `node -e` script never count; `bash -c` is read by its script.
+const STATE_VERBS = { gh: ['pr', /^(merge|close|create|ready)$/], glab: ['mr', /^(merge|close|create|update)$/], git: [null, /^push$/] };
+function changesState(command) {
+  return commands(command).map(program).some((words) => {
+    const inner = innerScript(words);
+    if (inner !== null) return changesState(inner);
+    const [cmd, ...args] = words;
+    const verbs = STATE_VERBS[cmd];
+    if (!verbs) return false;
+    let i = 0;
+    while (i < args.length && args[i].startsWith('-')) i += /=/.test(args[i]) ? 1 : 2;
+    const [noun, verb] = verbs[0] ? [args[i], args[i + 1]] : [null, args[i]];
+    return noun === verbs[0] && verbs[1].test(verb || '');
+  });
+}
 
 const mdFiles = (dir) => {
   try {
@@ -158,7 +171,7 @@ function strayNote(data, own, root = ROOT) {
   }
 }
 
-module.exports = { overCapView, readNote, cutLines, closedNote, kaizenReminder, strayNote };
+module.exports = { changesState, overCapView, readNote, cutLines, closedNote, kaizenReminder, strayNote };
 if (require.main !== module) return;
 
 try {
@@ -222,7 +235,7 @@ try {
           'rewrite "## Đang làm" and fold the closed topic into one "## Đã xong" line. An opinion, question or acknowledgement: write nothing.'
       );
     }
-    if (data.hook_event_name === 'PostToolUse' && STATE_RE.test(dropHeredocs((data.tool_input || {}).command || ''))) {
+    if (data.hook_event_name === 'PostToolUse' && changesState((data.tool_input || {}).command || '')) {
       post.push(`A PR/MR or branch state just changed: update the IDs under "## Resume" in the session note (${files}), not append; an older note: rewrite it into the four sections of rules/mine/session-notes.md first.`);
     }
     const closed = data.hook_event_name === 'PostToolUse' ? closedNote(own, id) : [];
