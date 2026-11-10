@@ -1321,6 +1321,18 @@ test('worker-default-guard: userTexts skips entries no human typed (task notific
   }
 });
 
+test('session-notes: only a PR/MR or push that runs asks to update Resume, never text naming one', () => {
+  const { changesState } = require('../claude/hooks/session-notes.cjs');
+  for (const c of ['GH_TOKEN=$(gh auth token --user u) gh pr merge 31 -R o/r --merge', 'git push -q -u origin x', 'git -C repo push',
+    'gh -R o/r pr create --title x', 'glab mr update 5', 'bash -c "git push"', 'cd x && git push', 'git --no-pager push', 'git -C d --no-pager push',
+    'gh pr -R o/r merge 1', 'glab -R g/p mr merge 3', 'git -c k=v push', 'bash -lc "git push"', 'eval "git push"', 'xargs -n1 gh pr close',
+    `gh pr create --title t --body "$(cat <<'EOF'\nthen gh pr merge\nEOF\n)"`])
+    assert.equal(changesState(c), true, c);
+  for (const c of [`node -e "const B=['a && gh pr merge 1']"`, 'echo "git push"', 'grep -n "gh pr merge" f', 'gh pr view 31', 'git pull',
+    'cat <<E\ngit push\nE', 'python3 - <<E\nx="&& glab mr merge"\nE', 'glab mr approve 3', `x="$(cat <<'EOF'\ngit push\nEOF\n)"`])
+    assert.equal(changesState(c), false, c);
+});
+
 test('session-notes: once every note of the session is done, the kaizen summary is ordered once', () => {
   const notes = require('../claude/hooks/session-notes.cjs');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'note-close-'));
