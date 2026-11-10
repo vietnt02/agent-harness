@@ -1,8 +1,10 @@
 {
-  "_source": "PreToolUse payloads captured 2026-11-02: agy CLI 1.4.12 (cli) and Orca chat runtime agy 1.4.3 (chat), Orca 1.4.246",
+  "_source": "PreToolUse payloads captured: agy CLI 1.5.5 (cli, 2026-11-11) and Orca chat runtime agy 1.4.1/1.4.3 (chat)",
   "cli": {
     "artifactDirectoryPath": "{CLI_BRAIN}",
     "conversationId": "{CID}",
+    "cwd": "{WS}",
+    "hookEventName": "PreToolUse",
     "lastUserInput": "Dùng công cụ đọc file để đọc README.md, rồi chạy lệnh shell: git status --short. Sau đó trả lời một chữ: ok",
     "modelName": "gemini-3.8-flash-low",
     "stepIdx": 2,
@@ -10,6 +12,7 @@
       "args": {
         "Path": "{WS}/README.md"
       },
+      "id": "toolu_01",
       "name": "read_file"
     },
     "transcriptPath": "{CLI_BRAIN}/.system_generated/logs/transcript_full.jsonl",

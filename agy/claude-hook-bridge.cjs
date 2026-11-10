@@ -10,8 +10,8 @@
  *   - No longer injects ~/.claude/CLAUDE.md, ~/.claude/rules/mine/*.md, or session-notes.cjs
  *     (core instructions live in ~/.gemini/config/AGENTS.md).
  *   - Resets sub-repo context state on compaction (`nap-context-repo-con`).
- *   - Surfaces pending post-tool context (`worktree-after-release`, `worker-start-receipt`,
- *     `nap-context-repo-con` behindNote) and `secret-keywords` reminders.
+ *   - Surfaces pending post-tool context (`worktree-after-release`, `worker-start-receipt`)
+ *     and `secret-keywords` reminders.
  * - PreToolUse:
  *   - Both Direct & Worker:
  *     1. `privacy-checker` (.env, credentials, private keys across read_file/write_file/edit_file/run_command)
@@ -20,7 +20,7 @@
  *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_airflow)
  *     5. `open-browser-guard` (blocks `open <url/.html>` outside Orca browser and `orca goto`/`tab create` without `--worktree`)
  *   - Direct interactive session (non-Orca worker):
- *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, requires reading a sub-repo's full `AGENTS.md` before running commands/edits/searches in `repos/*`)
+ *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, blocks once per sub-repo/worktree per session before non-Read tools in `repos/*`, reminding to read `AGENTS.md`)
  *     7. `tier-c-guard` (blocks `gh pr merge`, `glab mr merge`, `airflow dags trigger|pause|unpause` when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
  *     9. `gate-line-guard` (blocks remote SSH/scp/rsync writes, `git -c core.hooksPath=...`, and git mutations on a main checkout unless `Gate:` is present in the command or turn text)
@@ -302,7 +302,7 @@ function runClaudeHook(scriptName, claudePayload, timeoutMs = 8000) {
 function handlePreInvocation(payload) {
   if (isDispatchedWorker(payload)) return;
 
-  const cwd = (payload.workspacePaths && payload.workspacePaths[0]) || process.cwd();
+  const cwd = payload.cwd || (payload.workspacePaths && payload.workspacePaths[0]) || process.cwd();
   const state = loadState(payload);
   const injectSteps = [];
   let stateChanged = false;
@@ -321,28 +321,25 @@ function handlePreInvocation(payload) {
     if (lastCheckpointIdx !== -1 && lastUser) break;
   }
 
-  // Clear sub-repo loaded set after compaction so sub-repo AGENTS.md is re-read if needed
-  const prevCheckpointIdx = typeof state.lastCheckpointIdx === 'number' ? state.lastCheckpointIdx : -1;
-  if (lastCheckpointIdx > prevCheckpointIdx) {
+  // Clear sub-repo loaded set after compaction so sub-repo AGENTS.md is reminded again if needed
+  if (typeof state.lastCheckpointIdx !== 'number') {
     state.lastCheckpointIdx = lastCheckpointIdx;
     stateChanged = true;
-    if (prevCheckpointIdx !== -1 && payload.conversationId) {
-      const nap = findUmbrellaNapHook(cwd);
-      if (nap) {
-        try {
-          process.env.CLAUDE_PROJECT_DIR = nap.root;
-          const stateDir = getStateDir(payload);
-          if (stateDir !== os.tmpdir() && !process.env.NAP_CONTEXT_STATE_DIR) {
-            process.env.NAP_CONTEXT_STATE_DIR = path.join(stateDir, 'claude-nap-context-repo-con');
-          }
-          const { handle } = require(nap.hookPath);
-          handle({ session_id: payload.conversationId, hook_event_name: 'PreCompact' });
-        } catch (_) {}
-      }
+  } else if (lastCheckpointIdx > state.lastCheckpointIdx) {
+    state.lastCheckpointIdx = lastCheckpointIdx;
+    stateChanged = true;
+    if (payload.conversationId) {
+      const stateDir = getStateDir(payload);
+      const napStateDir = process.env.NAP_CONTEXT_STATE_DIR ||
+        path.join(stateDir !== os.tmpdir() ? stateDir : os.tmpdir(), 'claude-nap-context-repo-con');
+      const safeKey = `${payload.conversationId}-main`.replace(/[^A-Za-z0-9_-]/g, '_');
+      try {
+        fs.rmSync(path.join(napStateDir, `${safeKey}.json`), { force: true });
+      } catch (_) {}
     }
   }
 
-  // Pending context from previous tool calls (worktree-after-release, worker-start, behindNote)
+  // Pending context from previous tool calls (worktree-after-release, worker-start)
   if (state.pendingEphemeral) {
     injectSteps.push({ ephemeralMessage: state.pendingEphemeral });
     delete state.pendingEphemeral;
@@ -422,7 +419,7 @@ function handlePreToolUse(payload) {
   const agyTool = toolCall.name || '';
   const args = normalizeArgs(toolCall.args);
   const claudeTool = TOOL_MAP[agyTool] || agyTool;
-  const cwd = args.Cwd || (payload.workspacePaths && payload.workspacePaths[0]) || process.cwd();
+  const cwd = args.Cwd || payload.cwd || (payload.workspacePaths && payload.workspacePaths[0]) || process.cwd();
   const filePath =
     args.Path ||
     args.AbsolutePath ||
@@ -561,9 +558,7 @@ function handlePreToolUse(payload) {
   if (worker) return;
 
   // 6. Umbrella sub-repo context guard (`nap-context-repo-con.cjs`)
-  if (payload.conversationId && `${cwd}\n${filePath}\n${command}\n${args.Query || ''}\n${args.Pattern || ''}`.includes('repos')) {
-    // From the file's own folder first: view_file carries no Cwd, so `cwd` is the workspace (often ~),
-    // above the umbrella, and the read of a sub-repo's AGENTS.md would never be recorded.
+  if (claudeTool !== 'Read' && payload.conversationId && `${cwd}\n${filePath}\n${command}\n${args.Query || ''}\n${args.Pattern || ''}`.includes('repos')) {
     const nap = (filePath && path.isAbsolute(filePath) && findUmbrellaNapHook(path.dirname(filePath))) ||
       findUmbrellaNapHook(cwd);
     if (nap) {
@@ -574,43 +569,30 @@ function handlePreToolUse(payload) {
           process.env.NAP_CONTEXT_STATE_DIR = path.join(stateDir, 'claude-nap-context-repo-con');
         }
         const { handle: napHandle } = require(nap.hookPath);
-        if (claudeTool === 'Read') {
-          const limit = args.EndLine ?? args.Limit ?? null;
-          const offset = args.StartLine ?? args.ByteOffset ?? args.Offset ?? null;
-          const out = napHandle({
-            session_id: payload.conversationId,
-            hook_event_name: 'PostToolUse',
-            tool_name: 'Read',
-            cwd,
-            tool_input: { file_path: filePath, limit, offset },
-          });
-          const note = out?.hookSpecificOutput?.additionalContext;
-          if (note) queueEphemeral(payload, note);
-        } else {
-          const out = napHandle({
-            session_id: payload.conversationId,
-            hook_event_name: 'PreToolUse',
-            tool_name: claudeTool === 'Bash' ? 'Bash' : 'Grep',
-            cwd,
-            tool_input: {
-              command,
-              path: filePath,
-              pattern: args.Query || args.Pattern || '',
-            },
-          });
-          if (out?.hookSpecificOutput?.permissionDecision === 'deny') {
-            const rawReason = String(out.hookSpecificOutput.permissionDecisionReason || '');
-            const agyReason = rawReason
-              .replace(/Dùng tool Read\b/g, 'Dùng tool read_file')
-              .replace(/\(không truyền limit\/offset\)/g, '(không truyền StartLine/EndLine/ByteOffset)');
-            process.stdout.write(
-              JSON.stringify({
-                decision: 'deny',
-                reason: agyReason,
-              })
-            );
-            return;
-          }
+        const out = napHandle({
+          session_id: payload.conversationId,
+          hook_event_name: 'PreToolUse',
+          tool_name: claudeTool === 'Bash' ? 'Bash' : 'Grep',
+          cwd,
+          tool_input: {
+            command,
+            path: filePath,
+            pattern: args.Query || args.Pattern || '',
+          },
+        });
+        if (out?.hookSpecificOutput?.permissionDecision === 'deny') {
+          const rawReason = String(out.hookSpecificOutput.permissionDecisionReason || '');
+          const agyReason = rawReason
+            .replace(/(\bRead |, )([^,\n]+?[/\\])CLAUDE\.md\b/g, (_, prefix, dir) =>
+              `${prefix}${fs.existsSync(`${dir}AGENTS.md`) ? `${dir}AGENTS.md` : `${dir}CLAUDE.md`}`)
+            .replace(/\bRead\b/g, 'Dùng tool read_file đọc');
+          process.stdout.write(
+            JSON.stringify({
+              decision: 'deny',
+              reason: agyReason,
+            })
+          );
+          return;
         }
       } catch (_) {}
     }
