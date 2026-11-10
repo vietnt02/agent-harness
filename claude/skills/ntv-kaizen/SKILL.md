@@ -1,9 +1,17 @@
 ---
 name: ntv-kaizen
-description: "Record what this session showed a hook, script, skill or ambiguous rule must fix (harness defects, serious breaks no hook stops, ambiguous rules; never a clear rule merely broken) as files on the Desktop for Viet's next kaizen session, once at session end: when the session note turns `status: done` (the session-notes hook says so), or when Viet asks for it. During the work no file is written: a mistake is fixed in the task's output and named in the report. Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
+description: "A hook is a guardrail for the commands agents actually write, never a wall: no attack simulation, no patching variant by variant. Record what this session showed a hook, script, skill or ambiguous rule must fix (harness defects, serious breaks no hook stops, ambiguous rules; never a clear rule merely broken) as files on the Desktop for Viet's next kaizen session, once at session end: when the session note turns `status: done` (the session-notes hook says so), or when Viet asks for it. During the work no file is written: a mistake is fixed in the task's output and named in the report. Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
 ---
 
 # /ntv-kaizen
+
+A hook is a guardrail for the commands agents actually write, never a wall: an agent always finds
+another route, and only the permission mode stops one. Agents work toward the user's goal, not
+against it: a hook names the risk on the ordinary command and the agent picks a safer route; that is
+all it is for. Build a hook, and brief its reviewer, on those common commands; a fix is done when they
+hit and miss right. A reviewer's "it can be bypassed with …" is no blocker and opens no round: no
+attack simulation, no patching variant by variant. A kaizen that grows a hook for a new variant is
+the loop this stops.
 
 ## Record a mistake
 
@@ -20,7 +28,9 @@ description: "Record what this session showed a hook, script, skill or ambiguous
      read, a tier B/C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
    - a rule sentence two fair readings of which lead to two different actions; the fix rewords
      that sentence, never adds one.
-   Anything else is no file: a clear rule broken without such harm, Viet's intent misread (both
+   Anything else is no file: a command shape a hook missed (a hook catches the common path,
+   never every route; only the permission mode is a wall), a clear rule broken without such
+   harm, Viet's intent misread (both
    fixed in the session, step 1), or a break of Claude Code's built-in instructions (system
    prompt, tool descriptions) that no rule file repeats, whatever its consequence: Viet cannot
    change them.
@@ -53,7 +63,7 @@ description: "Record what this session showed a hook, script, skill or ambiguous
   a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a
   send, a secret, a production write, a session the user cannot type into); anything else is a
   reminder said once (context back, or `hooks/lib/block-once.cjs` when it must land before the
-  command runs). Never chase every route around a check.
+  command runs).
 - A fix lands where it holds: a repo's convention in that repo (its PR), a fact about this machine
   or Viet's setup in `~/.claude/knowledge/`, a skill only what holds on any machine;
   `tests/skills-generic.test.cjs` fails on the common marks (a home or app-data path, an Orca ID, a

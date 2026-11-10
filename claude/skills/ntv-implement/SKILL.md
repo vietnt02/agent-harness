@@ -69,7 +69,8 @@ description: "How Claude does execution work itself: before Claude itself edits 
   Orca worker `agy gemini-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
   subagent only when Viet names one. A change to Claude Code itself (`~/.claude` rules, skills,
   hooks, scripts; a kaizen session) is reviewed by a Claude subagent: only an agent running this
-  harness can judge a hook's contract or how a rule is read; never Codex or agy.
+  harness can judge a hook's contract or how a rule is read; never Codex or agy. Its brief names the
+  commands agents actually write, never a hunt for routes around the hook (`ntv-kaizen`).
 
 ## Manufacture the condition, don't wait for it
 
