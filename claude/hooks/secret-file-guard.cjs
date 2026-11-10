@@ -5,11 +5,12 @@
  * secret-file-guard.cjs - keeps secret values out of the conversation, in place of AgentKit's
  * privacy-block (turned off with `ak config prefs set hooks.privacy-block false`).
  * Closed blocklist: blocks ordinary calls that print a secret file's content into the conversation:
- * - Reading or printing a secret file in Bash/PowerShell: `cat`, `head`, `tail`, `less`, `more`,
- *   `bat`, `grep`/`egrep`/`fgrep`/`rg` that print matching lines, `cut`, `awk`/`gawk`, `sed`
- *   without `-i`/`--in-place`, `<`/`<>` into one of those printing commands, `base64`, `xxd`,
- *   `strings`.
- * - The `Read` and `Edit`/`MultiEdit` tools on a secret file (`Write` passes).
+ * - Reading or printing a secret file in Bash/PowerShell (command names matched case-insensitively):
+ *   `cat`, `head`, `tail`, `less`, `more`, `bat`, `get-content`/`gc`/`type`,
+ *   `grep`/`egrep`/`fgrep`/`rg`/`select-string`/`sls` that print matching lines, `cut`,
+ *   `awk`/`gawk`, `sed` without `-i`/`--in-place`, `<`/`<>` into one of those printing commands,
+ *   `base64`, `xxd`, `strings`.
+ * - The `Read` and `Edit`/`MultiEdit` tools on a secret file (`Write` and `.pub` public keys pass).
  * - Loading a secret file (`source`, `.`) in the same command as shell trace (`set -x`, `set -v`,
  *   `set -o xtrace|verbose`) or a variable-printing command (`env` with no command to run,
  *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` with `$`).
@@ -19,9 +20,10 @@
  * - Which paths are secret: AgentKit's `~/.claude/hooks/lib/privacy-checker.cjs` (`checkPrivacy`,
  *   required, never edited). Missing, broken or throwing checker: fail closed on `SECRETISH`.
  * - Viet approves one read: `# secret-ok: "<his words, 8+ chars>"` matched against `userTexts`.
- * Known limits: a script (`python3 x.py ./.env`, `node app.js`) or unlisted program that prints a
- * secret value itself, or an unquoted dotenv line that fails shell parsing, is not caught; this
- * hook is a guardrail naming the risk on ordinary commands, never a wall.
+ * Known limits: a script (`python3 x.py ./.env`, `node app.js`) or unlisted subcommand (`git diff` /
+ * `git show` on a dotenv) that prints secret values itself, command substitution feeding a dotenv
+ * into `export`/`env` without `source`/`.`, or an unquoted dotenv line that fails shell parsing, is
+ * not caught; this hook is a guardrail naming the risk on ordinary commands, never a wall.
  * Fails open on an unexpected internal error of the guard itself (checker failure fails closed).
  */
 
@@ -31,9 +33,12 @@ const { commands, program, dropHeredocs } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
-const SAFE = /\.(example|sample|template|dist)$/i;
+const SAFE = /\.(example|sample|template|dist|pub)$/i;
 const SECRETISH = /(^|[\s/"'=<>])(\.env(\.[\w.-]+)?|[\w.-]+\.env|id_(rsa|dsa|ecdsa|ed25519)[\w.-]*|[\w.-]+\.(pem|key|p12|pfx|jks|keystore)|credentials(\.[\w-]+)?|secrets?\.ya?ml)(?=$|[\s"';&|)<>])/i;
-const SIMPLE_PRINTERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'bat', 'cut', 'base64', 'xxd', 'strings']);
+const SIMPLE_PRINTERS = new Set([
+  'cat', 'head', 'tail', 'less', 'more', 'bat', 'cut', 'base64', 'xxd', 'strings',
+  'get-content', 'gc', 'type', 'select-string', 'sls',
+]);
 const GREP_OPT_VAL = /^(--(max-count|after-context|before-context|context|label|include|exclude|exclude-dir|color|colour|directories|binary-files))$/;
 const REDIR = /(\d*<<<|\d*<<-?|\d*<>|&>>?|\d*>>?&?|\d*<&?)/;
 const APPROVAL = /#\s*secret-ok:\s*"([^"\n]{8,})"/;
@@ -184,8 +189,8 @@ function setsTrace(args) {
 }
 
 function printsVars(argv, prog) {
-  if (prog.length === 0) return argv.some((w) => !/^\w+=/.test(w) && path.basename(w.replace(/\\/g, '/')) === 'env');
-  const name = prog[0];
+  if (prog.length === 0) return argv.some((w) => !/^\w+=/.test(w) && path.basename(w.replace(/\\/g, '/')).toLowerCase() === 'env');
+  const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
   const args = prog.slice(1);
   if (name === 'printenv') return true;
   if (name === 'set') return args.length === 0;
@@ -201,7 +206,7 @@ function printedSecrets(command, isSecret) {
   for (const words of commands(command)) {
     const { argv, stdinFiles } = splitRedirects(words);
     const prog = program(argv);
-    const name = prog[0] || '';
+    const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
     const args = prog.slice(1);
     if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push(args[0]);
     const files = printerFiles(name, args);

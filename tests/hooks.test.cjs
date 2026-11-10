@@ -1274,14 +1274,17 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
   const checker = {
     checkPrivacy: ({ toolInput }) => {
       const text = toolInput.command || toolInput.file_path || '';
-      const paths = (text.match(/[^\s"'<>]*(\.env[\w.]*|id_ed25519|\.(?:pem|key)|credentials[\w.]*|secrets?\.ya?ml)\b/g) || [])
-        .filter((p) => !/\.(example|sample|template|dist)$/.test(p));
+      const paths = (text.match(/[^\s"'<>]*(\.env[\w.]*|id_ed25519[\w.]*|\.(?:pem|key)|credentials[\w.]*|secrets?\.ya?ml)\b/gi) || [])
+        .filter((p) => !/\.(example|sample|template|dist)$/i.test(p));
       return paths.length ? { blocked: true, accesses: paths.map((filePath) => ({ filePath })) } : { blocked: false };
     },
   };
   const userTexts = () => ['cho đọc file env nhé', 'ok'];
   const run = (tool_name, x, opts = { checker, userTexts }) =>
-    guard.decide({ tool_name, tool_input: tool_name === 'Bash' ? { command: x } : { file_path: x }, transcript_path: '/t' }, opts);
+    guard.decide(
+      { tool_name, tool_input: tool_name === 'Bash' || tool_name === 'PowerShell' ? { command: x } : { file_path: x }, transcript_path: '/t' },
+      opts,
+    );
 
   const allowed = [
     `set -a && . ./${E} && set +a && python3 -I x.py`,
@@ -1292,6 +1295,7 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     `cat > spec.md <<EOF\nFile ${E}, \`${E}\` and ${E}.\nEOF`,
     `cat > spec.md <<'EOF'\nFile ${E} and server.pem in prose.\nEOF`,
     'ssh -i ~/.ssh/id_ed25519 host',
+    'cat ~/.ssh/id_ed25519.pub',
     `source ${E} && psql -c "select 1"`,
     `source ${E} && env FOO=1 python3 x.py`,
     'env FOO=1 python3 x.py',
@@ -1310,7 +1314,7 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
   for (const cmd of allowed) assert.equal(run('Bash', cmd), '', cmd);
 
   const blocked = [
-    `cat ${E}`, `cat < ${E}`, `cat<${E}`, `<${E} cat`, `cat <> ${E}`,
+    `cat ${E}`, `CAT ${E}`, `cat < ${E}`, `cat<${E}`, `<${E} cat`, `cat <> ${E}`,
     `head -n 5 ${E}`, `head < ${E}`, `tail ${E}`, `less ${E}`, `more ${E}`, `bat ${E}`,
     `grep KEY ${E}`, `grep -e KEY ${E}`, `grep -- -c ${E}`, `grep -e -c ${E}`, `grep KEY < ${E}`,
     `cut -d= -f2 ${E}`,
@@ -1323,13 +1327,20 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     `set -x; source ${E}`, `source ${E}; set -x`, `set -v; source ${E}`, `set -o xtrace; . ./${E}`,
     `cat > a.md <<EOF\n$(cat ${E})\nEOF`, `cat > a.md <<EOF\n\`cat ${E}\`\nEOF`, `bash <<'EOF'\ncat ${E}\nEOF`,
     `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`,
-    'cat server.pem', 'head credentials.json',
+    'cat server.pem', 'cat ~/.ssh/id_ed25519', 'head credentials.json',
   ];
   for (const cmd of blocked) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   assert.match(run('Bash', `cat ${E}`), /set -a; \. \.\/\.env; set \+a;/);
 
+  for (const ps of [`Get-Content ${E}`, `gc ${E}`, `TYPE ${E}`, `Select-String KEY ${E}`, `sls -Pattern KEY -Path ${E}`])
+    assert.match(run('PowerShell', ps), /secret-file-guard/, ps);
+  for (const ps of ['Get-ChildItem', `Get-ChildItem ${E}`])
+    assert.equal(run('PowerShell', ps), '', ps);
+
   assert.match(run('Read', E), /secret-file-guard/);
   assert.match(run('Read', 'server.pem'), /secret-file-guard/);
+  assert.match(run('Read', '~/.ssh/id_ed25519'), /secret-file-guard/);
+  assert.equal(run('Read', '~/.ssh/id_ed25519.pub'), '');
   assert.match(run('Edit', E), /secret-file-guard/);
   assert.equal(run('Write', E), '');
   assert.equal(run('Write', 'server.pem'), '');
@@ -1352,7 +1363,10 @@ test('secret-file-guard: reality check against installed AgentKit privacy-checke
   const E = '.e' + 'nv';
   const userTexts = () => [];
   const run = (tool_name, x) =>
-    guard.decide({ tool_name, tool_input: tool_name === 'Bash' ? { command: x } : { file_path: x }, transcript_path: '/t' }, { userTexts });
+    guard.decide(
+      { tool_name, tool_input: tool_name === 'Bash' || tool_name === 'PowerShell' ? { command: x } : { file_path: x }, transcript_path: '/t' },
+      { userTexts },
+    );
 
   for (const cmd of [
     `set -a && . ./${E} && set +a && python3 -I x.py`,
@@ -1362,11 +1376,17 @@ test('secret-file-guard: reality check against installed AgentKit privacy-checke
     `cp ${E}.example ${E}`,
     `cat > spec.md <<EOF\nFile ${E}, \`${E}\` and ${E}.\nEOF`,
     'ssh -i ~/.ssh/id_ed25519 host',
+    'cat ~/.ssh/id_ed25519.pub',
   ]) assert.equal(run('Bash', cmd), '', cmd);
 
-  for (const cmd of [`cat ${E}`, `grep KEY ${E}`, `source ${E}; echo $K`, 'cat server.pem', 'head credentials.json'])
+  for (const cmd of [`cat ${E}`, `grep KEY ${E}`, `source ${E}; echo $K`, 'cat server.pem', 'cat ~/.ssh/id_ed25519', 'head credentials.json'])
     assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
+  assert.match(run('PowerShell', `Get-Content ${E}`), /secret-file-guard/);
+  assert.equal(run('PowerShell', 'Get-ChildItem'), '');
+  assert.equal(run('PowerShell', `Get-ChildItem ${E}`), '');
   assert.match(run('Read', E), /secret-file-guard/);
+  assert.match(run('Read', '~/.ssh/id_ed25519'), /secret-file-guard/);
+  assert.equal(run('Read', '~/.ssh/id_ed25519.pub'), '');
 });
 
 test('worker-default-guard: userTexts skips entries no human typed (task notifications, other sessions)', () => {
