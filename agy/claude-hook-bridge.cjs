@@ -433,20 +433,34 @@ function handlePreToolUse(payload) {
   const command = args.CommandLine || '';
   const worker = isDispatchedWorker(payload);
 
-  // 1. Privacy check (.env / credentials / private keys)
+  // 1. Privacy check (.env / credentials / private keys): the same verdict as Claude's
+  // secret-file-guard, which judges a call by what it prints, so text that only names a secret
+  // file (an `orca orchestration ask` body) is no read. That guard missing: the kit's checker.
   try {
-    const { checkPrivacy } = require(path.join(HOOKS_DIR, 'lib', 'privacy-checker.cjs'));
-    const priv = checkPrivacy({
-      toolName: claudeTool,
-      toolInput: { file_path: filePath, command },
-      options: { allowBash: true, cwd },
-    });
-    if (priv.blocked) {
+    let reason = '';
+    try {
+      // From this checkout (the bridge is linked from it), so bridge and guard always change together.
+      const local = path.join(__dirname, '..', 'claude', 'hooks', 'secret-file-guard.cjs');
+      const { judge } = require(fs.existsSync(local) ? local : path.join(HOOKS_DIR, 'secret-file-guard.cjs'));
+      // The guard's own wording names Claude's approval comment, which no agy worker can use: only its verdict is kept.
+      const v = judge({ tool_name: claudeTool, tool_input: { file_path: filePath, command }, cwd }, { userTexts: () => [] });
+      if (v.deny) {
+        const what = v.uninspectable ? v.reason || 'a command the guard cannot read' : v.paths.join(', ');
+        reason = v.fallback
+          ? `PRIVACY BLOCK: the privacy checker did not load, so every call naming a secret-looking path is denied (${what}).`
+          : `PRIVACY BLOCK: this call would print a secret file (${what}).`;
+      }
+    } catch (_) {
+      const { checkPrivacy } = require(path.join(HOOKS_DIR, 'lib', 'privacy-checker.cjs'));
+      const priv = checkPrivacy({ toolName: claudeTool, toolInput: { file_path: filePath, command }, options: { allowBash: true, cwd } });
+      if (priv.blocked) reason = `PRIVACY BLOCK: ${priv.filePath} may contain secrets (API keys, passwords, tokens).`;
+    }
+    if (reason) {
       process.stdout.write(
         JSON.stringify({
           decision: 'deny',
           reason:
-            `PRIVACY BLOCK: ${priv.filePath} may contain secrets (API keys, passwords, tokens). ` +
+            `${reason} ` +
             'Get approval before touching it: dispatched, ask the coordinator; direct, ask the person. ' +
             'Once approved, read it with a shell command. Otherwise continue without this file.',
         })
