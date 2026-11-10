@@ -1,9 +1,17 @@
 ---
 name: ntv-kaizen
-description: "Record what this session showed a hook, script, skill or ambiguous rule must fix (harness defects, serious breaks no hook stops, ambiguous rules; never a clear rule merely broken) as files on the Desktop for Viet's next kaizen session, once at session end: when the session note turns `status: done` (the session-notes hook says so), or when Viet asks for it. During the work no file is written: a mistake is fixed in the task's output and named in the report. Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
+description: "A hook is a guardrail for the commands agents actually write, never a wall: no attack simulation, no patching variant by variant. Record what this session showed a hook, script, skill or ambiguous rule must fix (harness defects, serious breaks no hook stops, ambiguous rules; never a clear rule merely broken) as files on the Desktop for Viet's next kaizen session, once at session end: when the session note turns `status: done` (the session-notes hook says so), or when Viet asks for it. During the work no file is written: a mistake is fixed in the task's output and named in the report. Also load it before the first edit when Viet types /ntv-kaizen or asks to read, check or discuss the kaizen files on the Desktop (`kaizen-*.md`, \"check kaizen ở desktop\"): that is a kaizen session, which applies each file and then deletes it."
 ---
 
 # /ntv-kaizen
+
+A hook is a guardrail for the commands agents actually write, never a wall: an agent always finds
+another route, and only the permission mode stops one. Agents work toward the user's goal, not
+against it: a hook names the risk on the ordinary command and the agent picks a safer route; that is
+all it is for. Build a hook, and brief its reviewer, on those common commands; a fix is done when they
+hit and miss right. A reviewer's "it can be bypassed with …" is no blocker and opens no round: no
+attack simulation, no patching variant by variant. A kaizen that grows a hook for a new variant is
+the loop this stops.
 
 ## Record a mistake
 
@@ -56,12 +64,6 @@ description: "Record what this session showed a hook, script, skill or ambiguous
   send, a secret, a production write, a session the user cannot type into); anything else is a
   reminder said once (context back, or `hooks/lib/block-once.cjs` when it must land before the
   command runs).
-- A hook is a guardrail for the commands agents actually write, never a wall: an agent always finds
-  another route, and only the permission mode stops one. Agents work toward the user's goal, not
-  against it: a hook names the risk on the ordinary command and the agent picks a safer route; that
-  is all it is for. Build it, and brief its reviewer, on those
-  common commands; a fix is done when they hit and miss right. A reviewer's "it can be bypassed
-  with …" is no blocker and opens no round: no attack simulation, no patching variant by variant.
 - A fix lands where it holds: a repo's convention in that repo (its PR), a fact about this machine
   or Viet's setup in `~/.claude/knowledge/`, a skill only what holds on any machine;
   `tests/skills-generic.test.cjs` fails on the common marks (a home or app-data path, an Orca ID, a
