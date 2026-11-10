@@ -36,6 +36,7 @@ const slugify = (p) => p.replace(/[^A-Za-z0-9]/g, '-');
 // A command that changes a PR/MR or a pushed branch: only one that runs (shell-words), so the words
 // in a quote, a heredoc, a grep or a `node -e` script never count; `bash -c` is read by its script.
 const STATE_VERBS = { gh: ['pr', /^(merge|close|create|ready)$/], glab: ['mr', /^(merge|close|create|update)$/], git: [null, /^push$/] };
+const TAKES_VALUE = /^(-C|-c|--git-dir|--work-tree|--namespace|--exec-path|-R|--repo|--title|-t|--body|-b|--base|-B|--head|-H|--source-branch|--target-branch|--description|-d|--label|-l|--assignee|-a|--reviewer|-r|--milestone|-m)$/;
 function changesState(command) {
   return commands(command).map(program).some((words) => {
     const inner = innerScript(words);
@@ -43,9 +44,13 @@ function changesState(command) {
     const [cmd, ...args] = words;
     const verbs = STATE_VERBS[cmd];
     if (!verbs) return false;
-    let i = 0;
-    while (i < args.length && args[i].startsWith('-')) i += /=/.test(args[i]) ? 1 : 2;
-    const [noun, verb] = verbs[0] ? [args[i], args[i + 1]] : [null, args[i]];
+    // Flags are skipped wherever they stand, with their value only for the flags known to take one.
+    const plain = [];
+    for (let i = 0; i < args.length; i++) {
+      if (!args[i].startsWith('-')) { plain.push(args[i]); continue; }
+      if (TAKES_VALUE.test(args[i])) i++;
+    }
+    const [noun, verb] = verbs[0] ? plain : [null, plain[0]];
     return noun === verbs[0] && verbs[1].test(verb || '');
   });
 }
