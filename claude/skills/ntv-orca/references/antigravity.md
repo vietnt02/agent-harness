@@ -1,19 +1,18 @@
 # Antigravity (`agy`) — Chọn model, spawn worker và gỡ lỗi
 
-`agy` chạy chế độ **Chat** trong Orca (cả phiên Coordinator mở tay lẫn `worker-start --agent antigravity`). Cấu hình máy, đường dẫn runtime, symlink và hook bridge: `~/.claude/knowledge/orca.md` § Antigravity.
+`agy` chạy chế độ **CLI** (terminal) trong Orca (Settings → Agents → antigravity: CLI), cả phiên Coordinator mở tay lẫn `worker-start --agent antigravity`. Cấu hình máy, đường dẫn runtime, symlink và hook bridge: `~/.claude/knowledge/orca.md` § Antigravity.
 
-## Điều Coordinator phải biết về runtime Chat
+## Điều Coordinator phải biết về runtime
 
-- **Tách biệt với CLI:** mỗi phiên chat chạy `agy_acp_server` riêng của Orca. Thư mục cấu hình của runtime phải trỏ về cấu hình chung để nạp `AGENTS.md`, skills và hook (`~/.claude/knowledge/orca.md`; hook `worker-start-receipt` tự kiểm khi spawn).
 - **Giới hạn lệnh:** lệnh foreground tự cắt ở 600 giây; bước dài hơn phải chạy nền và ghi log.
-- **Kênh điều phối:** dùng `orca orchestration` (`SKILL.md` § 3); worker chat từ chối `orca terminal *`.
+- **Kênh điều phối:** dùng `orca orchestration` (`SKILL.md` § 3).
 - **Context thực tế nhỏ hơn API gốc:** Flash 256K, Argon 1M. Gần đầy thì `agy` tự nén mà không báo lỗi — chia task nhỏ theo `SKILL.md` § 2.
 
 ## Chọn model và Spawn Worker
 
 - **Phân vai (`SKILL.md` § 2, § 4):**
-  - Worker và Checker: `gemini-flash` (`--effort high`); worker research: `gemini-argon` (`--effort high`).
-  - Reviewer mặc định và Coordinator (khi user mở trực tiếp): `gemini-argon` (`--effort high`).
+  - Worker và Checker: `gemini-flash` (`--effort high`); worker research: `gemini-4-argon` (`--effort high`).
+  - Reviewer mặc định và Coordinator (khi user mở trực tiếp): `gemini-4-argon` (`--effort high`).
   - Không dùng model Claude qua `agy`. Luôn ghi kèm tên agent (`agy gemini-3.8-flash high`) trong manifest, spec và báo cáo để tránh nhầm quota với agent khác.
 - **Truyền đủ `--model` và `--effort`:** bỏ trống `--model` sẽ lấy model của Coordinator trong settings:
   ```bash

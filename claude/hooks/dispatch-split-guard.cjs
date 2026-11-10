@@ -451,13 +451,14 @@ process.stdin.on('end', () => {
     const { firstTime, again } = require('./lib/block-once.cjs');
     if (agent && firstTime(sessionId, 'dispatch-split-guard', command)) {
       process.stderr.write(`dispatch-split-guard: a ${agent} worker needs the user's pick on a \`# Model: user chỉ định <bản>\` ` +
-        'line. Workers are Gemini: `--agent antigravity --model gemini-argon --effort high` for a complex or research task, ' +
-        `\`gemini-3.8-flash\` for a quick one (ntv-orca § 2, Chọn model).${again(sessionId)}\n`);
+        'line. Workers are Gemini: `--agent antigravity --model <bare slug> --effort high`, the Argon line for a complex or ' +
+        'research task, the Flash line for a quick one; bare slugs come from `agy models` at dispatch (ntv-orca § 2, ' +
+        `Chọn model).${again(sessionId)}\n`);
       process.exit(2);
     }
     if (missingEffort(starts)) {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
-        'e.g. `--model gemini-3.8-flash --effort high` (ntv-orca § 2, Chọn model); without it agy ' +
+        'its `agy models` row minus the `-low|-medium|-high` suffix (ntv-orca § 2, Chọn model); without it agy ' +
         'runs Medium. A model with one level gets exactly that level (`agy models`).\n');
       process.exit(2);
     }

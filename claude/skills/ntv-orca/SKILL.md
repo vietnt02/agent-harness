@@ -128,9 +128,9 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định, ghi dòng
   `# Model: user chỉ định <bản>` trong lệnh (`dispatch-split-guard` chặn khi thiếu). Chọn theo loại
   task trước, cỡ task sau: research (đọc nhiều tài liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) hay
-  task phức tạp → `agy gemini-argon high`, cỡ nào cũng vậy; đọc code có khuôn, làm theo spec rõ,
-  task nhanh, nhỏ đến trung bình → `gemini-flash`; flash hết quota → `gemini-argon`. Reviewer mặc
-  định `agy gemini-argon high`.
+  task phức tạp → `agy gemini-4-argon high`, cỡ nào cũng vậy; đọc code có khuôn, làm theo spec rõ,
+  task nhanh, nhỏ đến trung bình → `gemini-flash`; flash hết quota → `gemini-4-argon`. Reviewer mặc
+  định `agy gemini-4-argon high`.
 - Không giao task dài cho model context ngắn (`gemini-flash`, `gpt-luna`): chia task nhỏ, mỗi task
   một worker mới, commit + push mỗi nhóm việc ≤ 30 phút.
 - Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter. Slug: agy `agy models`;
@@ -166,7 +166,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 ## 4. Cổng
 
 **Review.** Diff logic từ 30 dòng (trừ test, doc, lockfile), hoặc task chạm tiền, thư gửi khách, dữ
-liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-argon high`, worker riêng) trước khi
+liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-4-argon high`, worker riêng) trước khi
 merge. Reviewer nhận diff, Scope, mục Nghiệm thu và hai câu hỏi cố định: lượt chạy xấu nhất (số
 item tối đa × thời gian đo trên lần chạy thật) có lọt trần thời gian của runtime không; và tiến trình
 nào khác (nút bấm, lịch, webhook) ghi hay gửi cho cùng bản ghi trong cùng khoảng thời gian. Spec reviewer đòi dán nguyên findings kèm output
