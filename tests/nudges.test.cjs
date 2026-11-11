@@ -383,6 +383,44 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
     assert.match(w.status(o, { ...deps, now: Date.now() }), /^running changed=a\.txt agy-step=0m state=running$/);
     assert.throws(() => w.status(o, { ...deps, newErrors: () => { throw Object.assign(new Error('Command failed: dispatch_not_found'), { stderr: 'dispatch_not_found' }); } }), /dispatch_not_found/, 'any other read error still fails');
     assert.match(w.status(o, { ...deps, newErrors: () => 0, now: Date.now() }), /^running changed=a\.txt state=running$/, 'a worker with a transcript keeps its line');
+    // agy keeps its DB in WAL mode. Closed by agy, a DB has no -wal; any reader's open then leaves an
+    // empty -wal stamped with the read time, which is no step. While agy holds it open, the -wal has
+    // the latest steps and its time is the last step.
+    const walDb = (name, workspace) => {
+      const p = path.join(convs, `${name}.db`);
+      const db = new DatabaseSync(p);
+      db.exec('PRAGMA journal_mode=WAL; CREATE TABLE trajectory_metadata_blob (id text DEFAULT "main", data blob, PRIMARY KEY (id))');
+      db.prepare('INSERT INTO trajectory_metadata_blob (data) VALUES (?)').run(Buffer.from(`\n\x12${workspace}\x12`));
+      return { p, db };
+    };
+    const ws2 = path.join(root, 'repo-closed');
+    fs.mkdirSync(ws2);
+    const closed = walDb('closed', ws2);
+    closed.db.close();
+    const t = Date.now() + 5 * 60000;
+    fs.utimesSync(closed.p, t / 1000, t / 1000);
+    const at = Date.now() + 65 * 60000;
+    const deps2 = { ...deps, show: () => ({ state: 'running', workspace: `id::${ws2}` }), now: at };
+    assert.match(w.status(o, deps2), / agy-step=60m /);
+    assert.ok(fs.existsSync(`${closed.p}-wal`) && fs.statSync(`${closed.p}-wal`).size === 0, 'the first read left an empty -wal');
+    assert.match(w.status(o, deps2), / agy-step=60m /, 'the empty -wal it left is no step');
+    const ws3 = path.join(root, 'repo-open');
+    fs.mkdirSync(ws3);
+    const open = walDb('open', ws3);
+    try {
+      const tw = at - 2.5 * 60000;
+      assert.ok(fs.statSync(`${open.p}-wal`).size > 0, 'agy holding the DB open keeps steps in -wal');
+      fs.utimesSync(`${open.p}-wal`, tw / 1000, tw / 1000);
+      fs.utimesSync(open.p, t / 1000, t / 1000);
+      assert.match(w.status(o, { ...deps, show: () => ({ state: 'running', workspace: `id::${ws3}` }), now: at }), / agy-step=2m /);
+    } finally { open.db.close(); }
+    // A DB last written before the worktree existed is another, older worker's: the scan stops there.
+    const ws4 = path.join(root, 'repo-new');
+    fs.mkdirSync(ws4);
+    if (fs.statSync(ws4).birthtimeMs > 0) {
+      conv('older', ws4, fs.statSync(ws4).birthtimeMs - 60000);
+      assert.match(w.status(o, { ...deps, show: () => ({ state: 'running', workspace: `id::${ws4}` }) }), / agy-step=none /);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

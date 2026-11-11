@@ -115,15 +115,20 @@ function changedSince(dir, sinceMs) {
 }
 
 // Last write (ms) to the newest agy conversation DB whose trajectory metadata names `workspace`, or
-// null. The DB runs in WAL mode, so its -wal file holds the latest steps; a path continued by another
-// path character (`<workspace>-2`) is another worktree.
+// null. The DB runs in WAL mode, so a -wal file with content holds the latest steps; an empty one is
+// what any reader's open leaves behind once agy has closed the DB, so it says nothing. A path continued
+// by another path character (`<workspace>-2`) is another worktree. A DB last written before the
+// worktree was created cannot be its worker's, so the newest-first scan stops there and costs only
+// the conversations since then.
 function agyLastStep(workspace, dir = AGY_CONVERSATIONS) {
   let DatabaseSync;
   try { ({ DatabaseSync } = require('node:sqlite')); } catch (_) { return null; }
-  const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { return 0; } };
+  const mtime = (p, emptyCounts = true) => { try { const st = fs.statSync(p); return emptyCounts || st.size > 0 ? st.mtimeMs : 0; } catch (_) { return 0; } };
+  let born = 0;
+  try { born = fs.statSync(workspace).birthtimeMs || 0; } catch (_) { /* no birth time: scan all */ }
   let files = [];
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.db')); } catch (_) { return null; }
-  const dbs = files.map((f) => path.join(dir, f)).map((p) => ({ p, m: Math.max(mtime(p), mtime(`${p}-wal`)) })).sort((a, b) => b.m - a.m);
+  const dbs = files.map((f) => path.join(dir, f)).map((p) => ({ p, m: Math.max(mtime(p), mtime(`${p}-wal`, false)) })).sort((a, b) => b.m - a.m);
   const needle = Buffer.from(workspace);
   const names = (buf) => {
     for (let i = buf.indexOf(needle); i >= 0; i = buf.indexOf(needle, i + 1)) {
@@ -132,6 +137,7 @@ function agyLastStep(workspace, dir = AGY_CONVERSATIONS) {
     return false;
   };
   for (const { p, m } of dbs) {
+    if (m < born) break;
     let db;
     try {
       db = new DatabaseSync(p, { readOnly: true });

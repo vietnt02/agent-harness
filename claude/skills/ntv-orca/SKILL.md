@@ -29,7 +29,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 |---|---|---|
 | 1. Nhận việc | Hiểu ý user, chốt phạm vi và tiêu chí xong (thứ user sẽ thấy). Ý chưa rõ thì hỏi user. | — |
 | 2. Rà, giao | **Không tự rà:** đích chưa rõ thì giao subagent rà (dưới), bản đồ nó trả về đi vào spec. Viết spec (§ 2), manifest đi chung lần hỏi duyệt kế hoạch, spawn. | — |
-| 3. Lập kế hoạch | — | Đọc đúng chỗ bản đồ trong spec chỉ, query dữ liệu thật trên toàn bộ dữ liệu. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
+| 3. Lập kế hoạch | — | Đọc đúng chỗ bản đồ hay đích spec nêu, query dữ liệu thật trên toàn bộ dữ liệu. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
 | 4. Duyệt kế hoạch | Đối chiếu kế hoạch với ý user và với bằng chứng worker dán; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy → hỏi user. Duyệt hoặc trả lại kèm lý do. | Sửa kế hoạch, gửi lại. |
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Spawn reviewer khi cần (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; worker sửa theo finding đã quyết. |
@@ -58,9 +58,9 @@ chặng 4 coordinator đối chiếu từng con số trong kế hoạch với ou
 
 ## 2. Giao việc
 
-**Orca hay subagent native:** việc kết thúc bằng commit/PR, chạm repo khác, phải sống qua phiên, hay
-user nói "supervised" → worker Orca. Việc chỉ đọc (rà, dò dữ liệu, tìm nguyên nhân gốc), ở repo nào
-cũng vậy → subagent `ntv-scout` chạy nền. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
+**Orca hay subagent native:** việc chỉ đọc (rà, dò dữ liệu, tìm nguyên nhân gốc), ở repo nào cũng
+vậy → subagent `ntv-scout` chạy nền. Việc còn lại kết thúc bằng commit/PR, chạm repo khác, phải sống
+qua phiên, hay user nói "supervised" → worker Orca. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
 
 **Manifest — nằm trong chính `**Cần bạn:**` duyệt kế hoạch**: kế hoạch
 có giao worker thì chốt model, worktree ngay khi gửi; duyệt kế hoạch là duyệt manifest, không hỏi lại. Mỗi

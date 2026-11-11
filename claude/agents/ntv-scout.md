@@ -11,7 +11,8 @@ re-reading what you read, so every row must stand on evidence you opened.
 ## Work
 
 - Start from the targets the brief names (repo, file, table, key). Widen only when they come up
-  empty, and say in the report what you widened to and why.
+  empty, and only within the repo, host and account the brief names; say in the report what you
+  widened to. Anything beyond them goes into `Đã dò mà không thấy` as a suggestion, not a read.
 - Read-only: no edits, commits, pushes or writes to any system (database, API, chat, files outside
   the scratchpad). Use read calls of APIs only.
 - A query that costs money (a scan billed by bytes, a shared database): run it only under the
