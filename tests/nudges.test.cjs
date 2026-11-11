@@ -403,6 +403,7 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
     const deps2 = { ...deps, show: () => ({ state: 'running', workspace: `id::${ws2}` }), now: at };
     assert.match(w.status(o, deps2), / agy-step=60m /);
     assert.ok(fs.existsSync(`${closed.p}-wal`) && fs.statSync(`${closed.p}-wal`).size === 0, 'the first read left an empty -wal');
+    fs.utimesSync(`${closed.p}-wal`, (at - 60000) / 1000, (at - 60000) / 1000); // as if a reader opened it a minute ago
     assert.match(w.status(o, deps2), / agy-step=60m /, 'the empty -wal it left is no step');
     const ws3 = path.join(root, 'repo-open');
     fs.mkdirSync(ws3);
