@@ -4,8 +4,8 @@ agent: antigravity
 effort: high
 ui: chưa rõ
 backend: chưa rõ
-speed: chưa rõ
-source: chưa có phiên nào; mặc định do user chốt khi model ra mắt
+speed: chậm (effort high: mỗi lượt nghĩ 20–45 giây)
+source: 1 phiên (2 worker rà chỉ-đọc dữ liệu)
 ---
 
 # gemini-carbon
@@ -15,7 +15,7 @@ Mặc định làm **worker** cho task phức tạp và research, và khi `gemin
 ## Giao gì / Không giao gì
 
 - **Giao:** Task phức tạp (nhiều bước, chạy lệnh, sửa code có test chứng minh), research đọc nhiều nguồn.
-- **Không giao / Điểm yếu:** Chưa có quan sát trên repo của user; ghi vào đây sau mỗi phiên. Không làm reviewer.
+- **Không giao / Điểm yếu:** Không giao chặng rà chỉ-đọc (việc của subagent rà, `SKILL.md` § 1): không có kế hoạch duyệt trước thì dò rộng ra ngoài đích spec nêu, mỗi lượt nghĩ lâu, viết lại nhiều lần lệnh `python3 -c` hỏng dấu nháy. Không làm reviewer.
 
 ## Phải nói rõ trong spec — câu chèn sẵn vào `--spec`
 

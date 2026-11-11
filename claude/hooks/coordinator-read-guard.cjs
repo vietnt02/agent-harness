@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
  * coordinator-read-guard.cjs - the coordinator answers a question with at most one confirming read
- * and hands a chain of reads to a worker (ntv-orca § 1, "Câu hỏi của user"). A rule alone did not
- * hold: answering "is X already there?" the coordinator ran its own grep/show/query chain across
- * child repos, the work a read-only worker does on a quota that costs less.
+ * and hands a chain of reads to the read-only subagent `ntv-scout` (ntv-orca § 1, "Câu hỏi của user").
+ * A rule alone did not hold: answering "is X already there?" the coordinator ran its own
+ * grep/show/query chain across child repos, each read paid at the size of its own large context.
  * - UserPromptSubmit: starts a new turn (resets the count). A turn Orca's wake prompt opens handles a
  *   worker's report, so its reads (the gate: diff, checks) are not counted.
  * - PreToolUse(Bash|Read|Grep|Glob): a call that reads a watched place once the turn holds two,
  *   unless the turn already ran `orca orchestration worker-start`, gets a nudge back as context, once per
  *   turn: the read still runs (a read costs quota, not output), the model is reminded a chain of reads
- *   belongs to a worker. Two reads pass quietly: the
+ *   belongs to the scout subagent. Two reads pass quietly: the
  *   one confirming read the skill allows, plus one of slack, since a hook cannot tell a confirm
  *   from the start of a chain. A call that passes leaves a pending mark (one file per call).
  * - PostToolUse / PostToolUseFailure (same tools): the call ran, so its pending mark becomes a
@@ -290,9 +290,9 @@ function decide(data, { list = watched(), notesDir, now = Date.now(), pendingMs 
   {
     return (
       `this is read ${count + 1} of a watched place (${target}) in this turn with no worker; it runs. ` +
-      'A chain of reads is cheaper on a read-only Orca worker (ntv-orca § 1, "Câu hỏi của user"): if more ' +
-      'are coming, dispatch one (no manifest: the question opens a block for it) and tell the user it is ' +
-      'checking. Said once this turn. If the user named Claude for this work, add ' +
+      'A chain of reads is cheaper in the read-only subagent `ntv-scout` (ntv-orca § 1, "Câu hỏi của user"): ' +
+      'if more are coming, spawn it in the background (no manifest: the question opens a block for it) and ' +
+      'tell the user it is checking. Said once this turn. If the user named Claude for this work, add ' +
       '`Người làm: Claude — <place> — "<their sentence>"` under `## Đang có hiệu lực` of the session note first: <place> is the repo, ' +
       'the command or host (`ssh`, a host name), several comma-separated, or `*` when they named Claude for the whole session.'
     );

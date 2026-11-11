@@ -657,7 +657,9 @@ test('coordinator-read-guard: a third read of a watched place in one turn needs 
       turn();
       assert.equal(call('Bash', { command: 'git -C repos/app grep -n foo' }), '');
       assert.equal(call('Read', { file_path: path.join(repos, 'app', 'a.sql') }), '');
-      assert.match(call('Grep', { pattern: 'x', path: 'repos/app' }), /read 3 of a watched place/);
+      const nudge = call('Grep', { pattern: 'x', path: 'repos/app' });
+      assert.match(nudge, /read 3 of a watched place/);
+      assert.match(nudge, /subagent `ntv-scout`/, 'the nudge names the route ntv-orca § 1 gives');
     });
 
     await t.test('a call another hook denied (no PostToolUse) is not counted', () => {
