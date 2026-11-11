@@ -50,6 +50,16 @@ test('rules-budget after Bash: a rule file over budget gets no nudge; CI holds t
     const res = hook('rules-budget.cjs', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sid('rb') }, home);
     assert.equal(res.status, 0, res.stderr);
     assert.equal(res.stdout.trim(), '');
+    // What it still guards: a session note's sections (rules/agent-harness/session-notes.md).
+    const note = path.join(home, '.claude', 'session-notes', 'slug', 'n.md');
+    fs.mkdirSync(path.dirname(note), { recursive: true });
+    const write = (content) => hook('rules-budget.cjs', { hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: note, content } }, home);
+    const head = '---\nsession: s\nstatus: open\nscope: x\n---\n\n';
+    const ok = write(`${head}## Đang làm\n\n- a\n\n## Resume\n\n- b\n`);
+    assert.equal(ok.status, 0, ok.stderr);
+    const stray = write(`${head}## Đang làm\n\n- a\n\n## Lịch sử\n\n- b\n`);
+    assert.equal(stray.status, 2);
+    assert.match(stray.stderr, /## Lịch sử/);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 

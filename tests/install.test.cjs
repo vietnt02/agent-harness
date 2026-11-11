@@ -211,9 +211,20 @@ test('2b. a link to a file the repo moved is removed; the moved file is linked; 
   const mine = path.join(home, '.claude', 'rules', 'mine', 'identities.md');
   fs.writeFileSync(mine, 'mine');
 
+  // A dead link inside a directory the user linked in is not walked into.
+  const linkedDir = path.join(home, 'my-skill');
+  fs.mkdirSync(linkedDir);
+  fs.symlinkSync(path.join(repoDir, 'claude', 'skills', 'gone', 'SKILL.md'), path.join(linkedDir, 'SKILL.md'), 'file');
+  fs.mkdirSync(path.join(home, '.claude', 'skills'), { recursive: true });
+  fs.symlinkSync(linkedDir, path.join(home, '.claude', 'skills', 'my-skill'), 'dir');
+
+  const dry = runInstall(home, ['--dry-run']);
+  assert.strictEqual(dry.status, 0, dry.stderr);
+  assert.ok(fs.lstatSync(moved).isSymbolicLink(), 'a dry run removes nothing');
   const res = runInstall(home);
   assert.strictEqual(res.status, 0, res.stderr);
   assert.throws(() => fs.lstatSync(moved), /ENOENT/, 'the dead link into the repo is gone');
+  assert.ok(fs.lstatSync(path.join(linkedDir, 'SKILL.md')).isSymbolicLink(), 'a linked directory is not walked into');
   assert.ok(fs.lstatSync(own).isSymbolicLink(), 'a link pointing outside the repo is the user\'s');
   assert.strictEqual(fs.readFileSync(mine, 'utf8'), 'mine', 'a personal rule file is untouched');
   const now = path.join(home, '.claude', 'rules', 'agent-harness', 'communication-style.md');
