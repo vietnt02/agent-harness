@@ -10,8 +10,8 @@ keywords: [orca, orchestration, worker, coordinator, dispatch, review, gate]
 # Orca — vai coordinator (PM/SA)
 
 Coordinator là PM/SA của dự án, không phải người đi code. Nó giữ hai đầu: **ý của user** ở đầu vào
-và **cổng** ở đầu ra (duyệt kế hoạch, merge, production). Phần giữa — đọc, tìm, thiết kế, làm — là
-việc của worker. Coordinator tự làm nghĩa là tốn quota Claude của phiên điều phối và bỏ trống
+và **cổng** ở đầu ra (duyệt kế hoạch, merge, production). Phần giữa: đọc, tìm là việc của subagent
+rà; thiết kế, làm là việc của worker. Coordinator tự làm nghĩa là tốn quota Claude của phiên điều phối và bỏ trống
 vai giữ cổng.
 
 - **Lệnh và cờ:** `orca <lệnh> --help`; quy trình giám sát, nhắn tin, gỡ lỗi:
@@ -28,8 +28,8 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | Chặng | Coordinator | Worker |
 |---|---|---|
 | 1. Nhận việc | Hiểu ý user, chốt phạm vi và tiêu chí xong (thứ user sẽ thấy). Ý chưa rõ thì hỏi user. | — |
-| 2. Giao | Viết spec (§ 2) từ những gì đang có, manifest đi chung lần hỏi duyệt kế hoạch (câu hỏi của user: không cần, xem dưới), spawn. **Không tự rà trước khi giao.** | — |
-| 3. Rà, lập kế hoạch | — | Đọc code, query dữ liệu thật trên toàn bộ dữ liệu, tìm nguyên nhân gốc. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
+| 2. Rà, giao | **Không tự rà:** đích chưa rõ thì giao subagent rà (dưới), bản đồ nó trả về đi vào spec. Viết spec (§ 2), manifest đi chung lần hỏi duyệt kế hoạch, spawn. | — |
+| 3. Lập kế hoạch | — | Đọc đúng chỗ bản đồ trong spec chỉ, query dữ liệu thật trên toàn bộ dữ liệu. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
 | 4. Duyệt kế hoạch | Đối chiếu kế hoạch với ý user và với bằng chứng worker dán; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy → hỏi user. Duyệt hoặc trả lại kèm lý do. | Sửa kế hoạch, gửi lại. |
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Spawn reviewer khi cần (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; worker sửa theo finding đã quyết. |
@@ -38,9 +38,11 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
 coordinator trả lời từ thứ đang có, hoặc chạy **một** lệnh xác nhận một đích đã biết (một file, một
-trạng thái). Cần hơn một lệnh, hay chạm nhiều repo → giao ngay một worker rà chỉ-đọc (model không
-phải Claude, không cần manifest: câu hỏi đã mở khối cho nó, `CLAUDE.md` § Delegation) và báo user "đã giao rà, khoảng N phút". Đây là cách `CLAUDE.md` § Verification ("run the reads that answer it") áp ở vai
-coordinator: lần đọc vẫn chạy, nhưng do worker chạy.
+trạng thái). Cần hơn một lệnh, hay chạm nhiều repo → giao ngay subagent rà `ntv-scout` chạy nền
+(không cần manifest: câu hỏi đã mở khối cho nó, `CLAUDE.md` § Delegation): brief nêu câu hỏi, đích
+đã biết, trần chi phí nếu có query tính tiền. Đây là cách `CLAUDE.md` § Verification ("run the reads
+that answer it") áp ở vai coordinator: lần đọc vẫn chạy, nhưng trong context gọn của subagent, không
+trong context lớn của coordinator.
 
 **Coordinator tự làm, không giao, chỉ khi:** sửa harness `~/.claude` trong phiên user mở cho
 harness/kaizen hoặc khối gọi tên nó (gặp lỗi harness lúc làm việc khác → ghi kaizen, `ntv-kaizen`); đổi một giá trị có sẵn, không
@@ -51,16 +53,16 @@ theo dõi CI, ghi production (`ntv-implement` § Who works).
 gốc (cơ chế sinh ra cả lớp lỗi) và gửi kế hoạch mới; coordinator duyệt. Hết vòng mà vẫn sai → đổi
 worker hoặc đổi model. Lỗi do skill chỉ sai bước hoặc luật mơ hồ thì ghi kaizen (`ntv-kaizen`); spec thiếu thì sửa spec.
 
-**Mọi dòng model đều rà và lập kế hoạch.** `gemini-flash`/`gpt-luna` không tự phản biện spec, nên ở
+**Mọi dòng model đều lập kế hoạch.** `gemini-flash`/`gpt-luna` không tự phản biện spec, nên ở
 chặng 4 coordinator đối chiếu từng con số trong kế hoạch với output thô worker dán.
 
 ## 2. Giao việc
 
 **Orca hay subagent native:** việc kết thúc bằng commit/PR, chạm repo khác, phải sống qua phiên, hay
-user nói "supervised" → worker Orca. Việc chỉ đọc trong cùng repo của coordinator → subagent native
-được. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
+user nói "supervised" → worker Orca. Việc chỉ đọc (rà, dò dữ liệu, tìm nguyên nhân gốc), ở repo nào
+cũng vậy → subagent `ntv-scout` chạy nền. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
 
-**Manifest — nằm trong chính `**Cần bạn:**` duyệt kế hoạch** (trừ worker rà chỉ-đọc cho câu hỏi, § 1): kế hoạch
+**Manifest — nằm trong chính `**Cần bạn:**` duyệt kế hoạch**: kế hoạch
 có giao worker thì chốt model, worktree ngay khi gửi; duyệt kế hoạch là duyệt manifest, không hỏi lại. Mỗi
 worker một dòng:
 
@@ -80,7 +82,8 @@ worker một dòng:
 - Manifest chỉ phủ tầng A của worker. Tầng B hỏi riêng một lần, tầng C hỏi ngay trước khi làm
   (`CLAUDE.md` § Irreversible actions). Bot không người không bao giờ mở B hay C.
 
-**Spec** gồm: câu của user; những gì coordinator đang có (link, lỗi, dữ liệu đã thấy); giả thuyết và
+**Spec** gồm: câu của user; những gì coordinator đang có (link, lỗi, dữ liệu đã thấy, bản đồ của
+subagent rà: `file:dòng`, bảng, cột); giả thuyết và
 hướng đề xuất; khối `Scope:` (chép đúng dòng manifest của worker đó, worker in một dòng `Scope:`
 trước mutation đầu tiên, ngoài scope thì `ask`); mục **Nghiệm thu** (kết quả user thấy, chuẩn đối
 chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
@@ -104,7 +107,7 @@ Worktree mới chỉ thấy thứ đã **push** lên ref base (thường `origin
 thì push trước, copy vào worktree, hoặc đưa thẳng vào spec (`--spec-file`). Không có lỗi nào báo
 khi worker dựng trên base cũ.
 
-**Worktree:** mỗi worker một worktree riêng, kể cả worker chỉ đọc. Repo có quy ước worktree trong
+**Worktree:** mỗi worker một worktree riêng. Repo có quy ước worktree trong
 `AGENTS.md`/`docs/` thì theo quy ước đó (thường `git worktree add` rồi `--worktree path:<abs>`);
 không có thì `--worktree new-child`. Worktree `path:` không chạy Setup Script: chạy tay trước khi
 spawn (script: `knowledge/orca.md`). Worker cần harness của repo con (MCP, hook, skill) phải chạy
@@ -124,7 +127,8 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 **Chọn model** (user chốt; mỗi dòng một file trong `references/models/`):
 
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
-  lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify).
+  lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify), và chặng rà
+  là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định, ghi dòng
   `# Model: user chỉ định <bản>` trong lệnh (`dispatch-split-guard` chặn khi thiếu). Chọn theo loại
   task trước, cỡ task sau: research (đọc nhiều tài liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) hay
@@ -150,7 +154,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   đó và tới trong TTL cache (codex 30 phút, Claude 1 giờ) → giao bằng `send --to dispatch:<id>`
   (thành Task mới). Việc định gửi bằng `send` phải xét lại **Chọn model** (§ 2) như một lần giao
   mới: khác loại task, hoặc làm task vượt mức § 2 cho model context ngắn → worker mới (ngoài
-  manifest đã duyệt thì hỏi lại, § 2; worker rà chỉ-đọc cho câu hỏi thì không cần). Tin `send` tới
+  manifest đã duyệt thì hỏi lại, § 2). Tin `send` tới
   worker Chat đang trong lượt: ngắt lượt đó hay nằm Queued tới lần `check --peek` kế tiếp mà spec
   đòi (§ 2) là tuỳ bản Orca (`~/.claude/knowledge/orca.md`); khung chat của worker cho thấy lượt
   mới, `worker-read --source transcript` thì không. Tin gấp mà worker không làm theo trong vài phút
