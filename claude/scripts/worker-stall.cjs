@@ -8,7 +8,9 @@
  *   stale <why>      nothing in its worktree changed for --idle-min minutes, or the worker's messages
  *                    since the last run hold >= --api-errors 502/503/429-type errors
  * A worker that is only reading for a long time also shows `stale`: a cue to look (worker-read twice,
- * a few minutes apart), never to stop or rerun it (ntv-orca § 3). Anything it cannot read exits 1 with
+ * a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker run in a terminal has
+ * no Orca transcript: no error count then, and the line adds `agy-step=<n>m`, the age of the last
+ * write to its own conversation DB (the newest one naming its worktree), so a long read shows. Anything it cannot read exits 1 with
  * stderr, never a state line, so watch.sh counts it as an error instead of waiting on it.
  * It reads worker-show, file times in the worktree and worker-read from a cursor kept between runs
  * ($TMPDIR/claude-worker-stall/<dispatch>.json), so each run reads only the messages new since the
@@ -28,6 +30,9 @@ const API_ERROR = /HTTP[ /0-9.]*\b(502|503|429)\b|\b(502|503|429)[ :-]*(Bad Gate
 const MAX_PAGES = 40;
 // What Orca prints for a sent ask, in the worker's tool output: `Question msg_<id> sent.`
 const ASK_SENT = /\bQuestion msg_\w+ sent\b/;
+// What Orca says when a dispatch has no structured transcript (an agy worker run in a terminal).
+const NO_TRANSCRIPT = /transcript_required|provider_unsupported|session_not_reported/;
+const AGY_CONVERSATIONS = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'conversations');
 
 function args(argv) {
   const out = { dispatch: '', idle: 10, errors: 3, askMax: 60 };
@@ -109,6 +114,33 @@ function changedSince(dir, sinceMs) {
   return null;
 }
 
+// Last write (ms) to the newest agy conversation DB whose trajectory metadata names `workspace`, or
+// null. The DB runs in WAL mode, so its -wal file holds the latest steps; a path continued by another
+// path character (`<workspace>-2`) is another worktree.
+function agyLastStep(workspace, dir = AGY_CONVERSATIONS) {
+  let DatabaseSync;
+  try { ({ DatabaseSync } = require('node:sqlite')); } catch (_) { return null; }
+  const mtime = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { return 0; } };
+  let files = [];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.db')); } catch (_) { return null; }
+  const dbs = files.map((f) => path.join(dir, f)).map((p) => ({ p, m: Math.max(mtime(p), mtime(`${p}-wal`)) })).sort((a, b) => b.m - a.m);
+  const needle = Buffer.from(workspace);
+  const names = (buf) => {
+    for (let i = buf.indexOf(needle); i >= 0; i = buf.indexOf(needle, i + 1)) {
+      if (!/[\w./-]/.test(String.fromCharCode(buf[i + needle.length] ?? 0))) return true;
+    }
+    return false;
+  };
+  for (const { p, m } of dbs) {
+    let db;
+    try {
+      db = new DatabaseSync(p, { readOnly: true });
+      if (db.prepare('SELECT data FROM trajectory_metadata_blob').all().some((r) => r.data && names(Buffer.from(r.data)))) return m;
+    } catch (_) { /* locked or another schema: not this worker's */ } finally { try { db?.close(); } catch (_) { /* closed */ } }
+  }
+  return null;
+}
+
 // Since when the last newErrors run saw the worker waiting on its ask (ms), or false.
 function waitingAsk(dispatch, stateDir = path.join(os.tmpdir(), 'claude-worker-stall')) {
   try { return Number(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).waiting) || false; } catch (_) { return false; }
@@ -119,21 +151,32 @@ function status(o, deps = {}) {
   const r = show(o.dispatch);
   const state = r.state || 'unknown';
   if (DONE.has(state)) return `done ${state}`;
-  const errors = (deps.newErrors || newErrors)(o.dispatch);
+  let errors = 0;
+  let terminal = false;
+  try { errors = (deps.newErrors || newErrors)(o.dispatch); } catch (e) {
+    if (!NO_TRANSCRIPT.test(`${e.stderr || ''}${e.message || ''}`)) throw e;
+    terminal = true;
+  }
   if (errors >= o.errors) return `stale api-errors=${errors} state=${state}`;
   const workspace = String(r.workspace || '').split('::').pop();
   if (!workspace || !fs.existsSync(workspace)) throw new Error(`no worktree on disk for ${o.dispatch} (state=${state})`);
+  const now = deps.now || Date.now();
+  let step = '';
+  if (terminal) {
+    const last = (deps.agyLastStep || agyLastStep)(workspace);
+    step = last ? ` agy-step=${Math.max(0, Math.floor((now - last) / 60000))}m` : ' agy-step=none';
+  }
   const since = (deps.waitingAsk || waitingAsk)(o.dispatch);
   if (since) {
     const mins = Math.floor(((deps.now || Date.now()) - since) / 60000);
     const max = o.askMax || 60;
     return mins >= max ? `stale ask-unanswered>${max}m state=${state}` : `running waiting-coordinator ${mins}m state=${state}`;
   }
-  const recent = changedSince(workspace, (deps.now || Date.now()) - o.idle * 60000);
-  return recent ? `running changed=${recent} state=${state}` : `stale idle>${o.idle}m state=${state}`;
+  const recent = changedSince(workspace, now - o.idle * 60000);
+  return recent ? `running changed=${recent}${step} state=${state}` : `stale idle>${o.idle}m${step} state=${state}`;
 }
 
-module.exports = { args, status, newErrors, waitingAsk, workerText, changedSince, API_ERROR, ASK_SENT };
+module.exports = { args, status, newErrors, waitingAsk, workerText, changedSince, agyLastStep, API_ERROR, ASK_SENT };
 if (require.main !== module) return;
 
 const o = args(process.argv.slice(2));
