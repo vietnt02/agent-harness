@@ -7,7 +7,7 @@
  *
  * Behavior (Unified Mode):
  * - PreInvocation:
- *   - No longer injects ~/.claude/CLAUDE.md, ~/.claude/rules/**/*.md, or session-notes.cjs
+ *   - No longer injects ~/.claude/CLAUDE.md, every .md under ~/.claude/rules/, or session-notes.cjs
  *     (core instructions live in ~/.gemini/config/AGENTS.md).
  *   - Resets sub-repo context state on compaction (`nap-context-repo-con`).
  *   - Surfaces pending post-tool context (`worktree-after-release`, `worker-start-receipt`)
