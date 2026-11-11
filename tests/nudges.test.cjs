@@ -42,23 +42,14 @@ test('block-once: the first run of a command is held, the same command again pas
   assert.equal(firstTime('', 'h', 'x'), true, 'no session: always held');
 });
 
-test('rules-budget after Bash: a nudge once, only for a rule file just written', () => {
+test('rules-budget after Bash: a rule file over budget gets no nudge; CI holds those budgets', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-rb-'));
   try {
     fs.mkdirSync(path.join(home, '.claude', 'rules', 'mine'), { recursive: true });
-    const md = path.join(home, '.claude', 'CLAUDE.md');
-    fs.writeFileSync(md, 'x'.repeat(8300));
-    const s = sid('rb');
-    const run = (session) => hook('rules-budget.cjs', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: session }, home);
-    const first = run(s);
-    assert.equal(first.status, 0, first.stderr);
-    assert.match(context(first), /CLAUDE\.md 8300\/8200/);
-    assert.equal(run(s).stdout.trim(), '', 'the same version is told once');
-    const old = (Date.now() - 60 * 60 * 1000) / 1000;
-    fs.utimesSync(md, old, old);
-    const other = run(sid('rb2'));
-    assert.equal(other.status, 0);
-    assert.equal(other.stdout.trim(), '', 'a file left over budget long ago is not this session\'s business');
+    fs.writeFileSync(path.join(home, '.claude', 'CLAUDE.md'), 'x'.repeat(20000));
+    const res = hook('rules-budget.cjs', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sid('rb') }, home);
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.stdout.trim(), '');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 

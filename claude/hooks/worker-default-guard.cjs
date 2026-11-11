@@ -4,7 +4,7 @@
  * workers (CLAUDE.md § Delegation); Claude edits a repo itself only in the cases ntv-implement
  * § Who works lists, and says which first. An edit to a file inside a git repo outside ~/.claude
  * gets a reminder back as context (once per repo per session; the edit still runs: who edits costs
- * quota, not output) until this session's note (rules/mine/session-notes.md) holds, under
+ * quota, not output) until this session's note (rules/agent-harness/session-notes.md) holds, under
  * `## Đang có hiệu lực`, a line `Người làm: Claude — <repo folder> — <evidence>` naming that repo
  * (its folder, or its main checkout's folder for a linked worktree), where the evidence is a
  * quoted sentence found in one of the user's messages, or a value change written with `→`.

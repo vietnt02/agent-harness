@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * session-notes.cjs - surface the session note (rules/mine/session-notes.md).
+ * session-notes.cjs - surface the session note (rules/agent-harness/session-notes.md).
  *   SessionStart compact|resume: print the note whose `session:` line holds this session id, in full;
  *   a note over a cap gets the order to fix it first. An older note over VIEW_CHARS with sections
  *   outside the four prints only its front matter, `## Đang làm`, `## Đang có hiệu lực` and
@@ -209,7 +209,7 @@ try {
         console.log(
           `Session note ${n.file} is ${n.text.length} chars in sections outside the four, ` +
             'so only its live state is shown. Before any other step: Read the file and rewrite it within the caps in the four sections of ' +
-            'rules/mine/session-notes.md (`## Đang làm`, `## Đang có hiệu lực`, `## Đã xong` one line per closed topic, ' +
+            'rules/agent-harness/session-notes.md (`## Đang làm`, `## Đang có hiệu lực`, `## Đã xong` one line per closed topic, ' +
             `\`## Resume\` IDs); detail stays in the session jsonl.\n\n${overCapView(n.text)}`
         );
       }
@@ -241,7 +241,7 @@ try {
       );
     }
     if (data.hook_event_name === 'PostToolUse' && changesState((data.tool_input || {}).command || '')) {
-      post.push(`A PR/MR or branch state just changed: update the IDs under "## Resume" in the session note (${files}), not append; an older note: rewrite it into the four sections of rules/mine/session-notes.md first.`);
+      post.push(`A PR/MR or branch state just changed: update the IDs under "## Resume" in the session note (${files}), not append; an older note: rewrite it into the four sections of rules/agent-harness/session-notes.md first.`);
     }
     const closed = data.hook_event_name === 'PostToolUse' ? closedNote(own, id) : [];
     if (closed.length) post.push(kaizenReminder(closed, data.transcript_path));
@@ -260,7 +260,7 @@ try {
 
   if (id && own.length === 0 && data.hook_event_name === 'UserPromptSubmit' && DECISION_RE.test(data.prompt || '')) {
     console.log(
-      `This session has no note yet (rules/mine/session-notes.md). Only if this prompt approves work, ` +
+      `This session has no note yet (rules/agent-harness/session-notes.md). Only if this prompt approves work, ` +
         `create ${path.join(ROOT, slug)}/<yymmdd>-<topic>.md before this turn's first tool call, with front matter ` +
         `"session: ${id}", "status: open", "scope: <one line>", or append ${id} to the session: line of an open note you take over.`
     );

@@ -1,5 +1,5 @@
 /**
- * session-note-cap.cjs - the size and shape a session note may take (rules/mine/session-notes.md:
+ * session-note-cap.cjs - the size and shape a session note may take (rules/agent-harness/session-notes.md:
  * only what a compact would make Claude get wrong; detail is re-read from the session jsonl).
  * Capped per section, not in total: a total cap made the sections compete, so a long `Đang làm`
  * squeezed out approvals. `Đang làm` and `Resume` never grow with the session: capped whole.

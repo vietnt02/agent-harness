@@ -7,7 +7,7 @@
  *
  * Behavior (Unified Mode):
  * - PreInvocation:
- *   - No longer injects ~/.claude/CLAUDE.md, ~/.claude/rules/mine/*.md, or session-notes.cjs
+ *   - No longer injects ~/.claude/CLAUDE.md, ~/.claude/rules/**/*.md, or session-notes.cjs
  *     (core instructions live in ~/.gemini/config/AGENTS.md).
  *   - Resets sub-repo context state on compaction (`nap-context-repo-con`).
  *   - Surfaces pending post-tool context (`worktree-after-release`, `worker-start-receipt`)
@@ -25,7 +25,7 @@
  *     8. `watch-guard` (blocks manual polling loops)
  *     9. `gate-line-guard` (blocks remote SSH/scp/rsync writes, `git -c core.hooksPath=...`, and git mutations on a main checkout unless `Gate:` is present in the command or turn text)
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
- *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md and line budgets on ~/.claude/rules/)
+ *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md and the session-note caps)
  * - PostToolUse:
  *   - Captures `worktree-after-release` and `worker-start-receipt` reminders.
  * - Stop:
@@ -741,7 +741,7 @@ function handlePreToolUse(payload) {
         process.stdout.write(
           JSON.stringify({
             decision: 'deny',
-            reason: res.stderr || 'rules-budget: rule file exceeds line budget.',
+            reason: res.stderr || 'rules-budget: session note over its caps.',
           })
         );
         return;

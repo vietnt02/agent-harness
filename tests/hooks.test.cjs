@@ -202,33 +202,42 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.ok(platform.samePath(p4, path.resolve(os.homedir(), 'sub')));
   });
 
-  await t.test('rules-budget: a tracked rule file over its installed budget fails CI; at the budget it passes', () => {
-    assert.deepEqual(rulesBudget.trackedOverBudget(path.join(__dirname, '..', 'claude')), [], 'this checkout fits');
-    const budget = rulesBudget.CHAR_BUDGETS[path.join(os.homedir(), '.claude', 'CLAUDE.md')];
+  await t.test('rules-budget (tools): a tracked rule file or the total over budget fails CI; at the budget it passes', () => {
+    const budget = require('../tools/rules-budget.cjs');
+    assert.deepEqual(budget.overBudget(path.join(__dirname, '..', 'claude')), [], 'this checkout fits');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-'));
     try {
-      fs.mkdirSync(path.join(dir, 'rules', 'mine'), { recursive: true });
-      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'ữ'.repeat(budget));
-      assert.deepEqual(rulesBudget.trackedOverBudget(dir), [], 'at the budget, counted in characters, passes');
-      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'ữ'.repeat(budget + 1));
-      const notes = rulesBudget.CHAR_BUDGETS[path.join(os.homedir(), '.claude', 'rules', 'mine', 'session-notes.md')];
-      fs.writeFileSync(path.join(dir, 'rules', 'mine', 'session-notes.md'), 'x'.repeat(notes + 1));
-      assert.deepEqual(rulesBudget.trackedOverBudget(dir), [`CLAUDE.md ${budget + 1}/${budget}`, `rules/mine/session-notes.md ${notes + 1}/${notes}`]);
+      const rules = path.join(dir, 'rules', 'agent-harness');
+      fs.mkdirSync(rules, { recursive: true });
+      const cap = budget.BUDGETS['CLAUDE.md'];
+      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'ữ'.repeat(cap));
+      assert.deepEqual(budget.overBudget(dir), [], 'at the budget, counted in characters, passes');
+      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'ữ'.repeat(cap + 1));
+      fs.writeFileSync(path.join(rules, 'new.md'), 'x'.repeat(budget.NEW_FILE_CHARS + 1));
+      assert.deepEqual(budget.overBudget(dir).slice(0, 2), [`CLAUDE.md ${cap + 1}/${cap}`, `rules/agent-harness/new.md ${budget.NEW_FILE_CHARS + 1}/${budget.NEW_FILE_CHARS}`],
+        'a new rule file gets the new-file budget');
+      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'x'.repeat(cap));
+      fs.writeFileSync(path.join(rules, 'new.md'), 'x'.repeat(budget.NEW_FILE_CHARS));
+      for (const f of ['a.md', 'b.md']) fs.writeFileSync(path.join(rules, f), 'x'.repeat(budget.NEW_FILE_CHARS));
+      assert.match(budget.overBudget(dir).join(' '), new RegExp(`^total \\d+/${budget.TOTAL_CHARS}$`), 'files each within budget can still pass the total');
+      fs.mkdirSync(path.join(dir, 'rules', 'mine'));
+      fs.writeFileSync(path.join(dir, 'rules', 'mine', 'identities.md'), 'x'.repeat(50000));
+      fs.rmSync(path.join(rules, 'a.md'));
+      fs.rmSync(path.join(rules, 'b.md'));
+      fs.writeFileSync(path.join(rules, 'new.md'), 'x');
+      assert.deepEqual(budget.overBudget(dir), [], 'a personal rules/mine file holds no budget');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  await t.test('rules-budget: isMine and isNote handle Windows and POSIX paths', () => {
+  await t.test('rules-budget: isNote handles Windows and POSIX paths; a rule file is no longer its business', () => {
     const home = os.homedir();
-    const mineFile = path.join(home, '.claude', 'rules', 'mine', 'custom.md');
-    assert.ok(rulesBudget.isMine(mineFile));
-
     const noteFile = path.join(home, '.claude', 'session-notes', 'slug', 'note.md');
     assert.ok(rulesBudget.isNote(noteFile));
-
-    assert.ok(!rulesBudget.isMine(path.join(home, '.claude', 'CLAUDE.md')));
     assert.ok(!rulesBudget.isNote(path.join(home, '.claude', 'rules', 'mine', 'note.md')));
+    const md = path.join(home, '.claude', 'CLAUDE.md');
+    assert.equal(rulesBudget.problem(md, 'x', 'x'.repeat(20000)), null, 'CI holds the rule budgets, not this hook');
   });
 
   await t.test('worker-default-guard: inside() handles path casing on win32', () => {
@@ -453,7 +462,7 @@ test('macOS/Linux behavior unchanged compared to origin/main or baseline', async
 
     // Case C: rules-budget with small edit to a mine rule file under budget
     await t.test('rules-budget POSIX payload behavior', () => {
-      const mineFile = path.join(os.homedir(), '.claude', 'rules', 'mine', 'communication-style.md');
+      const mineFile = path.join(os.homedir(), '.claude', 'rules', 'agent-harness', 'communication-style.md');
       const payload = {
         tool_name: 'Edit',
         tool_input: { file_path: mineFile, old_string: '', new_string: '' },

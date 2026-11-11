@@ -197,6 +197,29 @@ test('2. second run: settings and hooks.json byte identical, no new backup, no n
   assert.ok(!fs.existsSync(path.join(home, '.claude', 'backups')), 'Backup directory created on second run');
 });
 
+test('2b. a link to a file the repo moved is removed; the moved file is linked; a link elsewhere is kept', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+  // The shape a move leaves behind: claude/rules/mine/x.md moved to claude/rules/agent-harness/x.md,
+  // so ~/.claude/rules/mine/x.md still points at the old repo path.
+  const moved = path.join(home, '.claude', 'rules', 'mine', 'communication-style.md');
+  fs.mkdirSync(path.dirname(moved), { recursive: true });
+  fs.symlinkSync(path.join(repoDir, 'claude', 'rules', 'mine', 'communication-style.md'), moved, 'file');
+  const own = path.join(home, '.claude', 'hooks', 'my-hook.cjs');
+  fs.mkdirSync(path.dirname(own), { recursive: true });
+  fs.symlinkSync(path.join(home, 'elsewhere', 'gone.cjs'), own, 'file');
+  const mine = path.join(home, '.claude', 'rules', 'mine', 'identities.md');
+  fs.writeFileSync(mine, 'mine');
+
+  const res = runInstall(home);
+  assert.strictEqual(res.status, 0, res.stderr);
+  assert.throws(() => fs.lstatSync(moved), /ENOENT/, 'the dead link into the repo is gone');
+  assert.ok(fs.lstatSync(own).isSymbolicLink(), 'a link pointing outside the repo is the user\'s');
+  assert.strictEqual(fs.readFileSync(mine, 'utf8'), 'mine', 'a personal rule file is untouched');
+  const now = path.join(home, '.claude', 'rules', 'agent-harness', 'communication-style.md');
+  assert.strictEqual(fs.realpathSync(now), fs.realpathSync(path.join(repoDir, 'claude', 'rules', 'agent-harness', 'communication-style.md')));
+});
+
 test('3. dry-run on empty home does not create any files', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
