@@ -57,7 +57,7 @@ the loop this stops.
   serious harm is closed (deleted) with no change: a break is never fixed by adding or
   tightening a sentence. Otherwise fix per type: the harness defect in its hook, script or skill;
   a serious break with the hook that stops it; an ambiguous sentence reworded within the
-  `rules-budget` caps. No rule names an incident or its date; an example stays only when the
+  `tools/rules-budget.cjs` caps. No rule names an incident or its date; an example stays only when the
   rule is unclear without it.
 - The harness guides; the work's output is what counts, and every block costs the agent a read and
   a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a

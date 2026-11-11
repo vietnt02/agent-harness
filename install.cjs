@@ -107,6 +107,34 @@ function existsOrLink(target) {
   }
 }
 
+// Remove the symlinks under each of `dirs` that point into `claudeDir` at a file the repo no longer
+// has (a file moved or deleted in the repo), so ~/.claude never keeps a dead rule, hook or skill.
+// A symlinked directory is not entered; a link pointing anywhere else is the user's and is kept.
+function pruneDeadLinks(dirs, claudeDir, dryRun) {
+  const inRepo = (p) => {
+    const rel = path.relative(claudeDir, p);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const ent of entries) {
+      const p = path.join(dir, ent.name);
+      if (ent.isSymbolicLink()) {
+        let dest;
+        try { dest = path.resolve(dir, stripExtendedPrefix(fs.readlinkSync(p))); } catch (_) { continue; }
+        if (!inRepo(dest) || fs.existsSync(dest)) continue;
+        if (dryRun) { console.log(`[dry-run] Gỡ link chết: ${p} -> ${dest}`); continue; }
+        fs.unlinkSync(p);
+        console.log(`Đã gỡ link chết: ${p} -> ${dest}`);
+      } else if (ent.isDirectory()) {
+        walk(p);
+      }
+    }
+  };
+  for (const d of dirs) walk(d);
+}
+
 function backupItem(target, homeDir, backupDir, dryRun) {
   const relTarget = path.relative(homeDir, target);
   const backupTarget = path.join(backupDir, relTarget);
@@ -212,6 +240,12 @@ function main() {
     const target = path.join(homeDir, '.claude', relClaude);
     installFileSymlink(src, target, homeDir, backupDir, dryRun);
   }
+
+  // 1b. Gỡ symlink trỏ vào file repo đã dời hay xoá
+  const installedDirs = fs.readdirSync(claudeDir, { withFileTypes: true })
+    .filter((ent) => ent.isDirectory())
+    .map((ent) => path.join(homeDir, '.claude', ent.name));
+  pruneDeadLinks(installedDirs, claudeDir, dryRun);
 
   // 2. Cài symlink claude skills (nguyên thư mục)
   const skillsDir = path.join(repoDir, 'claude', 'skills');

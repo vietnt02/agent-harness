@@ -9,7 +9,7 @@
  *   gets the message back as additionalContext so it is acted on and acknowledged.
  * - AskUserQuestion after an answer already written this turn is blocked: the chat UI folds
  *   text that precedes a tool call into thinking, so the answer would be hidden
- *   (rules/mine/communication-style.md § Format). An answer is a text block with a line
+ *   (rules/agent-harness/communication-style.md § Format). An answer is a text block with a line
  *   break or over ANSWER_CHARS; the one-line intro before a tool call is not one.
  * The harness writes the assistant records of the current response a moment after the
  * tool call starts (measured ~0.1 s, 2026-10-12), so a reply written right before this

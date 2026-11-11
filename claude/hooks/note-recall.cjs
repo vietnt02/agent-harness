@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * note-recall.cjs - PreToolUse(Bash): what this session wrote in its note about a command is read
- * again before that command runs (rules/mine/session-notes.md: the note is kept to be read).
+ * again before that command runs (rules/agent-harness/session-notes.md: the note is kept to be read).
  * The lines under `## Đang có hiệu lực` that name the command (two or more of its distinctive words, one of them an
  * argument value such as a model slug or branch, not only program/subcommand names; message and
  * body text never count) block the call once, quoted in the message;
@@ -111,7 +111,7 @@ function recall(notes, command) {
     // Only `## Đang có hiệu lực` holds what a command must honour (approvals, limits, decisions);
     // `## Resume` and `## Đã xong` are IDs and `## Đang làm` the next step, so a command naming them
     // is the plan itself, not a reason to stop. A note in an older layout (none of the four sections of
-    // rules/mine/session-notes.md) is read whole. NFC and LF first, and a `## ` inside a code fence ends no section, as in session-notes.cjs.
+    // rules/agent-harness/session-notes.md) is read whole. NFC and LF first, and a `## ` inside a code fence ends no section, as in session-notes.cjs.
     const body = String(raw).normalize('NFC').replace(/\r\n?/g, '\n');
     const lines = body.split('\n');
     const isLive = (l) => /^##\s+Đang có hiệu lực\b/u.test(l);

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Personal overlay for all projects: it beats every rule in `~/.claude/rules/`; my
-`rules/mine/*` decide wherever it is silent. Knowledge a repo never recorded
+Personal overlay: it beats every rule in `~/.claude/rules/`; my `rules/mine/*` and
+`rules/agent-harness/*` decide wherever it is silent. Knowledge a repo never recorded
 (routes too: deploy, logs, DNS) goes into that repo's own PR.
 
 ## Who decides what
