@@ -202,6 +202,23 @@ test('Modified hook path helpers on POSIX and Windows formats', async (t) => {
     assert.ok(platform.samePath(p4, path.resolve(os.homedir(), 'sub')));
   });
 
+  await t.test('rules-budget: a tracked rule file over its installed budget fails CI; at the budget it passes', () => {
+    assert.deepEqual(rulesBudget.trackedOverBudget(path.join(__dirname, '..', 'claude')), [], 'this checkout fits');
+    const budget = rulesBudget.CHAR_BUDGETS[path.join(os.homedir(), '.claude', 'CLAUDE.md')];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-'));
+    try {
+      fs.mkdirSync(path.join(dir, 'rules', 'mine'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'ữ'.repeat(budget));
+      assert.deepEqual(rulesBudget.trackedOverBudget(dir), [], 'at the budget, counted in characters, passes');
+      fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'ữ'.repeat(budget + 1));
+      const notes = rulesBudget.CHAR_BUDGETS[path.join(os.homedir(), '.claude', 'rules', 'mine', 'session-notes.md')];
+      fs.writeFileSync(path.join(dir, 'rules', 'mine', 'session-notes.md'), 'x'.repeat(notes + 1));
+      assert.deepEqual(rulesBudget.trackedOverBudget(dir), [`CLAUDE.md ${budget + 1}/${budget}`, `rules/mine/session-notes.md ${notes + 1}/${notes}`]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   await t.test('rules-budget: isMine and isNote handle Windows and POSIX paths', () => {
     const home = os.homedir();
     const mineFile = path.join(home, '.claude', 'rules', 'mine', 'custom.md');

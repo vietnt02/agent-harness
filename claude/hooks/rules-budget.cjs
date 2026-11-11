@@ -107,6 +107,17 @@ const isMine = (f) => samePath(path.dirname(f), MINE_DIR) && f.endsWith('.md');
 // The note itself (session-notes/<slug>/<name>.md), not a file kept in a note's `<name>-files/` folder.
 const isNote = (f) => samePath(path.dirname(path.dirname(f)), NOTES_DIR) && f.endsWith('.md');
 
+// Rule files of a harness checkout (`<repo>/claude`) over the budget they get once installed, as
+// "<path> n/budget". The hook measures only the live files under ~/.claude, so CI runs this on the
+// tracked copy before a merge can put an over-budget file live.
+function trackedOverBudget(claudeDir) {
+  return Object.entries(CHAR_BUDGETS).map(([live, budget]) => {
+    const rel = path.relative(CLAUDE_DIR, live);
+    const n = read(path.join(claudeDir, rel)).length;
+    return n > budget ? `${rel.split(path.sep).join('/')} ${n}/${budget}` : null;
+  }).filter(Boolean);
+}
+
 function ruleFiles() {
   const mine = fs.existsSync(MINE_DIR) ? fs.readdirSync(MINE_DIR).filter((f) => f.endsWith('.md')) : [];
   return [CLAUDE_MD, ...mine.map((f) => path.join(MINE_DIR, f))];
@@ -151,7 +162,7 @@ function problem(file, current, after) {
   return null;
 }
 
-module.exports = { problem, isMine, isNote, ruleFiles, freshOverBudget, CHAR_BUDGETS, TOTAL_CHARS };
+module.exports = { problem, isMine, isNote, ruleFiles, freshOverBudget, trackedOverBudget, CHAR_BUDGETS, TOTAL_CHARS };
 if (require.main !== module) return;
 
 let raw = '';
