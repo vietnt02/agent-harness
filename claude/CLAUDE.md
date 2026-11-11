@@ -62,7 +62,7 @@ run earns its place only when it can see changed input.
 ## Delegation
 
 **Agents cost real money**: spawn one only for a block I opened or my question; subagents
-only for independent reads (the scout, `ntv-orca` § 1) or reviews. **Execution goes to Orca workers** (`ntv-orca`),
+only for reads (`ntv-orca` § 1) or reviews. **Execution goes to Orca workers** (`ntv-orca`),
 never subagents; you do it only where `ntv-implement` allows; never ask who. New logic is **never
 graded by its author**. A worker drafts a design; you approve it. You decide each reviewer finding;
 a fix lands in the block's artifact; a **reviewer's PASS is input**, never the gate.
