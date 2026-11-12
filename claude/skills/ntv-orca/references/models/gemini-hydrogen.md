@@ -5,12 +5,12 @@ effort: high
 ui: chưa rõ
 backend: chưa rõ
 speed: chưa đo (Google công bố nhanh gấp 2,5 lần 3.8 Flash ở mức high)
-source: chưa có phiên; số liệu từ công bố của Google
+source: chưa có phiên; số liệu từ công bố của Google (https://antigravity.google/blog/gemini-4-hydrogen-in-google-antigravity)
 ---
 
 # gemini-hydrogen
 
-Mặc định làm **worker** và **checker** cho task nhỏ đến trung bình, research gồm cả; task phức tạp giao `gemini-4-carbon` (`SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`). Spawn: `--agent antigravity --model gemini-4-hydrogen --effort high` (`../antigravity.md`).
+Mặc định làm **worker** và **checker** cho task nhỏ đến trung bình, research nhỏ đến trung bình gồm cả; task và research phức tạp giao `gemini-4-carbon` (`SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`). Spawn: `--agent antigravity --model gemini-4-hydrogen --effort high` (`../antigravity.md`).
 
 ## Giao gì / Không giao gì
 
@@ -19,11 +19,9 @@ Mặc định làm **worker** và **checker** cho task nhỏ đến trung bình,
 
 ## Phải nói rõ trong spec
 
-Kèm câu lệnh bị chặn ở `../antigravity.md`:
-
-      Báo cáo worker_done viết tiếng Việt, mở đầu bằng "Đã kiểm: <cách> → <kết quả>". Việc nào tự kiểm được trong scope thì kiểm xong mới báo. Chỉ ghi "CHƯA kiểm: <điều gì> — <lý do>" cho việc scope cấm (dữ liệu prod, thao tác tầng B/C) hoặc cần người làm; không có thì ghi "CHƯA kiểm: không có".
+Chỉ câu lệnh bị chặn ở `../antigravity.md`.
 
 ## Review gì
 
 - Duyệt kế hoạch và nghiệm thu như mọi dòng model (`SKILL.md` § 1, § 4).
-- Phiên đầu tiên dùng model này: ghi điểm yếu thấy được vào file này, thay `source`, `ui`, `backend`, `speed` bằng kết quả thật.
+- Phiên đầu tiên dùng model này: ghi điểm yếu thấy được và kết quả thật cho `source`, `ui`, `backend`, `speed` qua kaizen (`ntv-kaizen`).

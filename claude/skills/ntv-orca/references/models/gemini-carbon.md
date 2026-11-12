@@ -10,11 +10,11 @@ source: 1 phiên (2 worker rà chỉ-đọc dữ liệu)
 
 # gemini-carbon
 
-Mặc định làm **worker** cho task phức tạp, research gồm cả; task nhỏ đến trung bình giao `gemini-4-hydrogen` (`gemini-hydrogen.md`, `SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`): người chấm khác model với người làm.
+Mặc định làm **worker** cho task phức tạp, research phức tạp gồm cả; task và research nhỏ đến trung bình giao `gemini-4-hydrogen` (`gemini-hydrogen.md`, `SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`): người chấm khác model với người làm.
 
 ## Giao gì / Không giao gì
 
-- **Giao:** Task phức tạp (nhiều bước, chạy lệnh, sửa code có test chứng minh), research đọc nhiều nguồn.
+- **Giao:** Task phức tạp (nhiều bước, chạy lệnh, sửa code có test chứng minh), research phức tạp (tổng hợp, đối chiếu nhiều nguồn mâu thuẫn để ra kết luận).
 - **Không giao / Điểm yếu:** Không giao chặng rà chỉ-đọc (việc của subagent rà, `SKILL.md` § 1): không có kế hoạch duyệt trước thì dò rộng ra ngoài đích spec nêu, mỗi lượt nghĩ lâu, viết lại nhiều lần lệnh `python3 -c` hỏng dấu nháy. Không làm reviewer.
 
 ## Phải nói rõ trong spec — câu chèn sẵn vào `--spec`
