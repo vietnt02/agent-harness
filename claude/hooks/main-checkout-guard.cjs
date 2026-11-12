@@ -4,8 +4,10 @@
  * (merge, reset, checkout, switch, commit, …; in cwd, after `cd`, or under `-C`) is blocked
  * once with a reminder: new work goes in its own worktree from `origin/<base>` (CLAUDE.md §
  * Mutation gate), and reading the latest code needs only `git fetch` + `git show origin/<b>:<path>`.
- * Upkeep that starts no work there passes: `pull`, `worktree add/move/remove/prune`, `branch -d`;
- * their forced forms (`--force`, `-B`, `-D`) can drop work and stay gated.
+ * Upkeep that starts no work there passes: `pull` of the branch's own upstream, `worktree
+ * add/move/remove/prune`, `branch -d`. Forms that merge, reset or drop work stay gated: `pull` with a
+ * refspec, `--squash`, `--no-commit`, `--no-ff` or `--force`; `-f`/`--force`, `-B`, `-D`; removing a
+ * detached worktree whose commits no ref holds.
  * The same command run again passes (lib/block-once.cjs). A linked worktree and a repo in the
  * session scratchpad pass. `git -c core.hooksPath=…` turns the repo's checks off and is always
  * blocked (CLAUDE.md § Irreversible actions: never bypass a check). Subagents are skipped.
@@ -21,8 +23,12 @@ const { commands, program, innerScript, assignments, expandVars } = require('./l
 
 const GIT_WRITE = new Set(['merge', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am', 'clean', 'restore', 'update-ref']);
 const STASH_READ = new Set(['list', 'show', 'create']);
-// `worktree add -B` resets an existing branch; `--force`/`-f` drops a dirty worktree or a lock.
-const WORKTREE_FORCED = /^(-[a-zA-Z]*[fB]|--force)$/;
+// `worktree add -B` resets an existing branch; `--force`/`-f` drops a dirty worktree or a lock. A short
+// cluster may carry them anywhere but after `-b` (whose value follows: `-bfix/x`); git takes `--fo…`.
+const WORKTREE_FORCED = /^(-[ac-zAC-Z]*[fB]|--fo)/;
+// `pull` that does more than bring the branch up to its upstream: a merge of another branch, a
+// staged or forced result.
+const PULL_MORE = /^(--(squash|no-commit|no-ff|fo)|-[a-zA-Z]*f)/;
 // Global options that take the next word as their value.
 const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
@@ -67,7 +73,12 @@ function gitWrite(raw, words) {
   }
   const sub = words[i];
   const args = words.slice(i + 1);
+  const operands = args.filter((a) => !a.startsWith('-'));
+  if (sub === 'worktree' && args[0] === 'remove' && !args.some((a) => WORKTREE_FORCED.test(a))) {
+    return operands[1] ? { dirs, removes: operands[1] } : null;
+  }
   const write = GIT_WRITE.has(sub) ||
+    (sub === 'pull' && (operands.length > 1 || operands.some((a) => /[:+]/.test(a)) || args.some((a) => PULL_MORE.test(a)))) ||
     (sub === 'stash' && !STASH_READ.has(args[0])) ||
     // `branch -d` deletes only a merged branch: upkeep. `-D`, `-f`, a move or copy can lose work.
     (sub === 'branch' && args.some((a) => /^-[a-zA-Z]*[DmMfcCu]/.test(a) || /^--(move|force|copy|set-upstream-to|unset-upstream|edit-description)\b/.test(a))) ||
@@ -138,9 +149,21 @@ function writesMainCheckout(command, cwd) {
       const to = d === null ? null : expandVars(c, vars);
       return to === null ? null : resolveDir(to, d);
     }, here);
+    if (git.removes) {
+      if (dir !== null && isMain(dir) && dropsCommits(resolveDir(expandVars(git.removes, vars) || git.removes, dir))) return true;
+      continue;
+    }
     if (isMain(git.dirs ? dir : null)) return true;
   }
   return false;
+}
+
+// True when removing the worktree at `dir` loses commits: its HEAD is detached and no ref (branch, tag,
+// remote-tracking) holds it, so they go with the worktree's own reflog. Unknown (no such worktree): false.
+function dropsCommits(dir) {
+  const git = (args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+  try { git(['symbolic-ref', '-q', 'HEAD']); return false; } catch (_) { /* detached, or no repo */ }
+  try { return git(['for-each-ref', '--contains', 'HEAD', '--count=1', '--format=%(refname)']).trim() === ''; } catch (_) { return false; }
 }
 
 // True when a git that runs takes `-c core.hooksPath=…` (a commit message naming it is text).
@@ -173,7 +196,7 @@ process.stdin.on('end', () => {
     process.stderr.write(
       'main-checkout-guard: this git command writes into the user\'s main checkout. New work goes in its own ' +
         'worktree from `origin/<base>`; to read the latest code: `git fetch`, then `git show origin/<b>:<path>`. ' +
-        '`git pull`, `git worktree add/remove` and `git branch -d` pass.' + again(sessionId) + '\n'
+        'Upkeep passes unforced: `git pull` of the upstream, `git worktree add/move/remove/prune`, `git branch -d`.' + again(sessionId) + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open */ }
