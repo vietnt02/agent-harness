@@ -13,7 +13,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
   scouts, builds the command and runs it `--dry-run`; Claude reads that output, runs it for real
   and reads the result back. `hooks/dispatch-split-guard.cjs` blocks a worker spec or message
   holding a Lark or n8n write; it does not see SQL, curl or a job trigger. Claude does a gated change itself only: in `~/.claude`
-  (rules, skills, hooks: only an agent on this harness judges them), and only in a session Viet
+  or a repo's `.claude/` (rules, skills, hooks: only an agent on this harness judges them), and only in a session Viet
   opened for the harness or a kaizen or a block naming it (a harness defect met during other work
   goes to a kaizen file, `ntv-kaizen`: never a fix, a PR or an ask to open one); the specs, plans and
   knowledge docs a coordinator writes (`plans/`, `knowledge/` in a repo); a change to an existing
@@ -62,8 +62,8 @@ description: "How Claude does execution work itself: before Claude itself edits 
   yet proven is reported `CHƯA kiểm`, and the change never merges described as the fix.
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
   Orca worker `agy gemini-4-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
-  subagent only when Viet names one. A change to Claude Code itself (`~/.claude` rules, skills,
-  hooks, scripts; a kaizen session) is reviewed by a Claude subagent: only an agent running this
+  subagent only when Viet names one. A change to Claude Code itself (`~/.claude` or a repo's `.claude/`
+  rules, skills, hooks, scripts; a kaizen session) is reviewed by a Claude subagent: only an agent running this
   harness can judge a hook's contract or how a rule is read; never Codex or agy. Its brief names the
   commands agents actually write, never a hunt for routes around the hook (`ntv-kaizen`).
 
