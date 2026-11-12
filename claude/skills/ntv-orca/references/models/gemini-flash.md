@@ -10,12 +10,12 @@ source: 1 phiên (2 worker gemini-3.8-flash high song song, 2 MR, CI xanh)
 
 # gemini-flash
 
-Mặc định cho worker/checker ở task nhỏ–vừa, trừ research (`gemini-4-carbon`); hết quota thì `gemini-4-carbon` (`SKILL.md` § 2). Spawn: `--agent antigravity --model <slug trần> --effort high` (`../antigravity.md`).
+Chỉ dùng khi user chỉ định; worker/checker mặc định cho task nhỏ–vừa là `gemini-4-hydrogen` (`gemini-hydrogen.md`, `SKILL.md` § 2). Spawn: `--agent antigravity --model <slug trần> --effort high` (`../antigravity.md`).
 
 ## Giao gì / Không giao gì
 
 - **Giao:** Backend, data pipeline vừa có khuôn sẵn (ingest API, dbt, port workflow có bản live đối chiếu); chạy kiểm cơ học làm checker (`SKILL.md` § 4). Tái dùng helper/macro; dừng `ask` khi chạm ngoài scope.
-- **Không giao:** Task dài hoặc căn chỉnh bằng mắt nhiều bước (đầy context 256K tự nén làm quên spec, bịa số liệu); research đọc nhiều tài liệu, tổng hợp nhiều nguồn (giao `gemini-4-carbon`). Chia task ≤ 30 phút kèm cổng máy (`SKILL.md` § 2).
+- **Không giao:** Task dài hoặc căn chỉnh bằng mắt nhiều bước (đầy context 256K tự nén làm quên spec, bịa số liệu); research đọc nhiều tài liệu, tổng hợp nhiều nguồn (giao theo mức độ, `SKILL.md` § 2). Chia task ≤ 30 phút kèm cổng máy (`SKILL.md` § 2).
 
 ## Phải nói rõ trong spec
 

@@ -432,7 +432,7 @@ process.stdin.on('end', () => {
     }
     if (missingEffort(starts) && firstTime(sessionId, 'dispatch-split-guard-effort', command)) {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
-        'its `agy models` row minus the `-low|-medium|-high` suffix (ntv-orca § 2, Chọn model); without it agy ' +
+        'its `agy models` row minus the `-low|-medium|-high|-xhigh` suffix (ntv-orca § 2, Chọn model); without it agy ' +
         `runs Medium. A model with one level gets exactly that level (\`agy models\`).${again(sessionId)}\n`);
       process.exit(2);
     }

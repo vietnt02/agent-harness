@@ -10,7 +10,7 @@ source: 1 phiên (3 PR repo Python, worker và reviewer cùng model)
 
 # gemini-argon
 
-Mặc định làm **Reviewer** (`SKILL.md` § 2, § 4) và cho **Coordinator** khi user mở `agy` trực tiếp (`../antigravity.md`). Worker cho task phức tạp và research là `gemini-4-carbon` (`gemini-carbon.md`); Argon làm worker chỉ khi user chỉ định.
+Mặc định làm **Reviewer** (`SKILL.md` § 2, § 4) và cho **Coordinator** khi user mở `agy` trực tiếp (`../antigravity.md`). Worker cho task phức tạp là `gemini-4-carbon` (`gemini-carbon.md`), task nhỏ đến trung bình là `gemini-4-hydrogen` (`gemini-hydrogen.md`); Argon làm worker chỉ khi user chỉ định.
 
 ## Giao gì / Không giao gì
 
