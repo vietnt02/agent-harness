@@ -300,7 +300,28 @@ function main() {
     }
   }
 
-  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0) {
+  // A hook pointing at a script under ~/.claude/hooks that no longer exists (the repo dropped it and
+  // the installer removed its link) would error on every call: drop it, and a group it leaves empty.
+  const hooksDir = path.join(homeDir, '.claude', 'hooks').replace(/\\/g, '/');
+  const norm = (p) => (isWin ? p.toLowerCase() : p);
+  let claudeCommandsRemoved = 0;
+  for (const event of Object.keys(currentClaudeSettings.hooks)) {
+    const groups = currentClaudeSettings.hooks[event];
+    if (!Array.isArray(groups)) continue;
+    for (const g of groups) {
+      if (!g || !Array.isArray(g.hooks)) continue;
+      g.hooks = g.hooks.filter((h) => {
+        const k = getHookKey(h, isWin);
+        const script = k && k.startsWith('cjs:') ? k.slice(4).split(' ')[0] : null;
+        const dead = script && norm(script).startsWith(norm(hooksDir + '/')) && !fs.existsSync(script);
+        if (dead) claudeCommandsRemoved++;
+        return !dead;
+      });
+    }
+    currentClaudeSettings.hooks[event] = groups.filter((g) => !g || !Array.isArray(g.hooks) || g.hooks.length > 0);
+  }
+
+  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0 || claudeCommandsRemoved > 0) {
     if (!dryRun) {
       if (claudeFileExisted) {
         const backupTarget = path.join(backupDir, '.claude', 'settings.json');
@@ -363,7 +384,7 @@ function main() {
   }
 
   // --- 3. Summary ---
-  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh, cập nhật matcher ${claudeMatchersUpdated} lệnh.`);
+  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh, cập nhật matcher ${claudeMatchersUpdated} lệnh, gỡ ${claudeCommandsRemoved} lệnh trỏ tới file đã xoá.`);
   console.log(`Agy hooks: ${agyStatus}.`);
 }
 

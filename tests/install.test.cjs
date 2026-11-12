@@ -99,7 +99,7 @@ function countHooksInSettings(settings) {
   return count;
 }
 
-test('1. clean home: symlinks, repo resolution, 26 hooks format, templates, no backup', (t) => {
+test('1. clean home: symlinks, repo resolution, 19 hooks format, templates, no backup', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -127,7 +127,7 @@ test('1. clean home: symlinks, repo resolution, 26 hooks format, templates, no b
     );
   }
 
-  // Settings has exactly 26 hooks in correct OS format
+  // Settings has exactly 19 hooks in correct OS format
   const settingsPath = path.join(home, '.claude', 'settings.json');
   assert.ok(fs.existsSync(settingsPath), 'settings.json does not exist');
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -151,7 +151,7 @@ test('1. clean home: symlinks, repo resolution, 26 hooks format, templates, no b
       }
     }
   }
-  assert.strictEqual(hookCount, 26, `Expected 26 hooks, found ${hookCount}`);
+  assert.strictEqual(hookCount, 19, `Expected 19 hooks, found ${hookCount}`);
 
   // 3 templates copied
   const templates = ['identities.md', 'knowledge-index.md', 'user-profile.md'];
@@ -242,7 +242,7 @@ test('3. dry-run on empty home does not create any files', (t) => {
   assert.strictEqual(files.length, 0, `dry-run created files: ${files.join(', ')}`);
 });
 
-test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 26 hooks added', (t) => {
+test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 19 hooks added', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -290,7 +290,7 @@ test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom 
   const backedUpSettings = path.join(backupFolder, '.claude', 'settings.json');
   assert.ok(fs.existsSync(backedUpSettings), `Backed up settings.json missing: ${backedUpSettings}`);
 
-  // In new settings: custom hook kept, 26 hooks added -> total 27 hooks
+  // In new settings: custom hook kept, 19 hooks added -> total 20 hooks
   const newSettings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
   let foundCustomHook = false;
   for (const group of newSettings.hooks.PostToolUse || []) {
@@ -301,10 +301,10 @@ test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom 
     }
   }
   assert.ok(foundCustomHook, 'Custom hook was removed');
-  assert.strictEqual(countHooksInSettings(newSettings), 27, 'Expected 27 total hooks (1 custom + 26 added)');
+  assert.strictEqual(countHooksInSettings(newSettings), 20, 'Expected 20 total hooks (1 custom + 19 added)');
 });
 
-test('5. settings already has 26 hooks in shell form: merge adds 0 hooks on any OS', (t) => {
+test('5. settings already has 19 hooks in shell form: merge adds 0 hooks on any OS', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -324,7 +324,7 @@ test('5. settings already has 26 hooks in shell form: merge adds 0 hooks on any 
   assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
 
   const updatedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  assert.strictEqual(countHooksInSettings(updatedSettings), 26, 'Should still have exactly 26 hooks');
+  assert.strictEqual(countHooksInSettings(updatedSettings), 19, 'Should still have exactly 19 hooks');
   assert.ok(!fs.existsSync(path.join(claudeDir, 'backups')), 'No backup should be created when 0 hooks added');
 });
 
@@ -337,7 +337,7 @@ test('5b. a harness hook installed under an older matcher takes the shared match
   const normHome = process.platform === 'win32' ? home.replace(/\\/g, '/') : home;
   const normNode = process.platform === 'win32' ? process.execPath.replace(/\\/g, '/') : process.execPath;
   const old = JSON.parse(rawShared.split('{HOME}').join(normHome).split('{NODE}').join(normNode));
-  const isGuard = (g) => g.hooks.some((h) => /worker-default-guard\.cjs/.test(h.command));
+  const isGuard = (g) => g.hooks.some((h) => /secret-file-guard\.cjs/.test(h.command));
   const shared = old.hooks.PreToolUse.find(isGuard).matcher;
   old.hooks.PreToolUse.find(isGuard).matcher = 'Write|Edit|MultiEdit|NotebookEdit';
   old.hooks.PreToolUse.push({ matcher: 'Read', hooks: [{ type: 'command', command: 'echo mine' }, { type: 'command', command: `"${normNode}" "${normHome}/.claude/hooks/x-user.cjs"` }] });
@@ -351,6 +351,28 @@ test('5b. a harness hook installed under an older matcher takes the shared match
   assert.ok(shared.includes('Bash'));
   assert.strictEqual(updated.hooks.PreToolUse.filter(isGuard).length, 1, 'no second group for the same hook');
   assert.strictEqual(updated.hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command === 'echo mine')).matcher, 'Read');
+});
+
+test('5c. a hook pointing at a harness script the repo dropped is removed; a user hook is kept', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const normHome = process.platform === 'win32' ? home.replace(/\\/g, '/') : home;
+  const normNode = process.platform === 'win32' ? process.execPath.replace(/\\/g, '/') : process.execPath;
+  const dropped = `"${normNode}" "${normHome}/.claude/hooks/retired-guard.cjs"`;
+  const mine = `"${normNode}" "${normHome}/my-hooks/mine.cjs"`;
+  const settingsPath = path.join(claudeDir, 'settings.json');
+  fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { PreToolUse: [
+    { matcher: 'Bash', hooks: [{ type: 'command', command: dropped }] },
+    { matcher: 'Read', hooks: [{ type: 'command', command: mine }, { type: 'command', command: dropped }] },
+  ] } }, null, 2), 'utf8');
+
+  const res = runInstall(home);
+  assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
+  const commands = JSON.parse(fs.readFileSync(settingsPath, 'utf8')).hooks.PreToolUse.flatMap((g) => g.hooks.map((h) => [h.command, ...(h.args || [])].join(' ')));
+  assert.ok(!commands.some((c) => c.includes('retired-guard.cjs')), 'the dead harness hook is gone');
+  assert.ok(commands.some((c) => c.includes('my-hooks/mine.cjs')), 'a hook outside ~/.claude/hooks is the user\'s');
 });
 
 test('6. existing .gemini/config/hooks.json with orca-status: claude-bridge added, orca-status preserved', (t) => {
@@ -415,7 +437,7 @@ test('7. run each hook in installed settings: Claude Code invocation, exit 0 or 
     }
   }
 
-  assert.strictEqual(testedHooks, 26, `Expected to test 26 hooks, tested ${testedHooks}`);
+  assert.strictEqual(testedHooks, 19, `Expected to test 19 hooks, tested ${testedHooks}`);
 });
 
 test('8. install --node <path> uses specified node binary', (t) => {

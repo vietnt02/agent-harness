@@ -22,11 +22,6 @@ description: "How Claude does execution work itself: before Claude itself edits 
 - Before a production write, `git grep` the field or table across every repo that reads it: the
   ask names each reader (workflow, its schedule, the source it compares) with one consequence line;
   a reader comparing against a mirror that syncs later is paused, or both sides are written together.
-- Before the first edit in a repo, the session note's `## Đang có hiệu lực` holds one line per
-  repo: `Người làm: Claude — <repo folder> — "<Viet's sentence naming Claude>"` or `— <file>:
-  <key> <old>→<new>`. `hooks/worker-default-guard.cjs` reminds once per repo, on Edit/Write into a
-  git repo outside `~/.claude` (`.md` under `plans/`, `knowledge/` pass), while no line names that
-  repo with a quote from one of Viet's messages or a `→`; an Orca worker session is exempt.
 
 ## Change
 

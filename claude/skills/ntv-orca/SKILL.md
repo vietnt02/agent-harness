@@ -34,7 +34,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Spawn reviewer khi cần (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; worker sửa theo finding đã quyết. |
 | 7. Cổng, chạy thật | Đọc toàn bộ diff tới đúng SHA sẽ merge, chạy check của repo trên SHA đó, merge. Tự chạy lệnh ghi production thật, đọc lại đích. Sau deploy đọc thứ đang chạy trên production. | — |
-| 8. Báo cáo | Báo user `Đã kiểm` / `CHƯA kiểm`, release worker. | `worker_done`: đã kiểm gì, chưa kiểm gì. |
+| 8. Báo cáo | Báo user đã kiểm gì, chưa kiểm gì, release worker. | `worker_done`: đã kiểm gì, chưa kiểm gì. |
 
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
 coordinator trả lời từ thứ đang có, hoặc chạy **một** lệnh xác nhận một đích đã biết (một file, một
@@ -79,13 +79,12 @@ worker một dòng:
   và mọi báo cáo; `--name`, `--display-name` chỉ thêm khi `--worktree new-child|new-top-level`.
   Reviewer là một dòng `w<N>-review-w<M>`, tính vào cap.
 - Đổi phase, worker hay model sau khi user "ok" → hỏi lại, không báo sau.
-- Manifest chỉ phủ tầng A của worker. Tầng B hỏi riêng một lần, tầng C hỏi ngay trước khi làm
-  (`CLAUDE.md` § Irreversible actions). Bot không người không bao giờ mở B hay C.
+- Manifest chỉ phủ tầng A của worker. Tầng C hỏi ngay trước khi làm (`CLAUDE.md` § Irreversible
+  actions). Bot không người không bao giờ mở tầng C.
 
 **Spec** gồm: câu của user; những gì coordinator đang có (link, lỗi, dữ liệu đã thấy, bản đồ của
 subagent rà: `file:dòng`, bảng, cột); giả thuyết và
-hướng đề xuất; khối `Scope:` (chép đúng dòng manifest của worker đó, worker in một dòng `Scope:`
-trước mutation đầu tiên, ngoài scope thì `ask`); mục **Nghiệm thu** (kết quả user thấy, chuẩn đối
+hướng đề xuất; khối `Scope:` (chép đúng dòng manifest của worker đó; ngoài scope thì `ask`); mục **Nghiệm thu** (kết quả user thấy, chuẩn đối
 chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
 
 - gửi kế hoạch qua `ask` trước khi sửa, kèm output thô của query chạy trên toàn bộ dữ liệu;
@@ -98,7 +97,7 @@ chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;
 - task viết/sửa test, đổi logic, hay chạm hệ thống ngoài, dữ liệu thật, lịch, quyền: trích `ntv-test`
   § 1–3; worker chạy mutation và kiểm thực tế trước review, PR ghi kết quả; coordinator soát ở bước 7;
-- báo cáo có `Đã kiểm: <cách> → <kết quả>` và `CHƯA kiểm: <điều gì> — <lý do>`;
+- báo cáo nói đã kiểm gì, bằng cách nào, và chưa kiểm gì, vì sao;
 - các câu trong mục "Phải nói rõ trong spec" của file model đang dùng;
 - worker mở trình duyệt: câu tắt tiếng sau mỗi lần tải trang (`~/.claude/knowledge/browser-debug.md`);
 - spec viết tiếng Việt có dấu (bỏ dấu thì "dung" là dùng/đừng/đúng/dựng).
@@ -129,8 +128,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
   lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify), và chặng rà
   là subagent `ntv-scout` (Sonnet, § 1).
-- Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định, ghi dòng
-  `# Model: user chỉ định <bản>` trong lệnh (`dispatch-split-guard` chặn khi thiếu). Chọn theo loại
+- Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Chọn theo loại
   task trước, cỡ task sau: research (đọc nhiều tài liệu, tra nguồn ngoài, tổng hợp nhiều nguồn) hay
   task phức tạp → `agy gemini-4-carbon high`, cỡ nào cũng vậy; đọc code có khuôn, làm theo spec rõ,
   task nhanh, nhỏ đến trung bình → `gemini-flash`; flash hết quota → `gemini-4-carbon`. Reviewer mặc
@@ -199,8 +197,8 @@ bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" v�
 
 ## 5. Chế độ không người
 
-Bot chạy liên tục là coordinator không có user. Phase 2 của nó là `AGENTS.md § Phạm vi tự chủ` của
-repo đích giao với scope trong `CLAUDE.md` của bot. Không bao giờ mở tầng B hay C; gặp thứ ngoài
+Bot chạy liên tục là coordinator không có user. Việc nó được làm là `AGENTS.md § Phạm vi tự chủ` của
+repo đích giao với scope trong `CLAUDE.md` của bot. Không bao giờ mở tầng C; gặp thứ ngoài
 policy → park, báo qua kênh của bot, làm item tiếp theo. Chỉ sinh worker khi có từ 2 item chạy song
 song.
 

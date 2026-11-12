@@ -25,7 +25,7 @@ the loop this stops.
      route for, or a skill followed to the letter gave a wrong step (`## Rule đã phạm`: "lỗi của
      harness");
    - a serious break no hook stops yet: a secret printed, a write to production or to data others
-     read, a tier B/C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
+     read, a tier-C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
    - a rule sentence two fair readings of which lead to two different actions; the fix rewords
      that sentence, never adds one.
    Anything else is no file: a command shape a hook missed (a hook catches the common path,

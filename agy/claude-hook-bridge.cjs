@@ -18,14 +18,14 @@
  *     2. `scout-checker` (.ckignore heavy directories across Read/Bash/Grep/Glob)
  *     3. `push-after-pr-guard` (blocks git push onto a branch with a MERGED/CLOSED PR/MR)
  *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_airflow)
- *     5. `open-browser-guard` (blocks `open <url/.html>` outside Orca browser and `orca goto`/`tab create` without `--worktree`)
  *   - Direct interactive session (non-Orca worker):
  *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, blocks once per sub-repo/worktree per session before non-Read tools in `repos/*`, reminding to read `AGENTS.md`)
- *     7. `tier-c-guard` (blocks `gh pr merge`, `glab mr merge`, `airflow dags trigger|pause|unpause` when the latest user prompt is a question)
+ *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
+ *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill` and `trigger --conf` when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
- *     9. `gate-line-guard` (blocks remote SSH/scp/rsync writes, `git -c core.hooksPath=...`, and git mutations on a main checkout unless `Gate:` is present in the command or turn text)
+ *     9. `main-checkout-guard` (git writes into a main checkout: blocked once; `git -c core.hooksPath=...`: always)
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
- *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md and the session-note caps)
+ *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md; session-note caps come back as a reminder)
  * - PostToolUse:
  *   - Captures `worktree-after-release` and `worker-start-receipt` reminders.
  * - Stop:
@@ -39,7 +39,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync, execFileSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const HOME = os.homedir();
 const CLAUDE_DIR = path.join(HOME, '.claude');
@@ -76,63 +76,12 @@ const TOOL_MAP = {
   find_by_name: 'Glob',
 };
 
-const REMOTE_WRITE = new RegExp(
-  [
-    String.raw`(?:^|[;&|(\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*ssh\s.*(\brm\b|\bmv\b|\bcp\b|\bsed\s+-i|\btee\b|\btruncate\b|\bchmod\b|\bchown\b|\bkill(all)?\b|\bpkill\b`,
-    String.raw`|\bdocker(-compose)?\s+(rm|stop|kill|restart|start|run|pull|compose\s+(up|down|rm|stop|restart|pull))`,
-    String.raw`|\bsystemctl\s+(start|stop|restart|reload|enable|disable)|\b(insert|update|delete|drop|alter|truncate)\s`,
-    String.raw`|[^2&]>(?!\s*/dev/null))`,
-    String.raw`|^\s*(scp|rsync)\b|[;&|\n]\s*(scp|rsync)\b`,
-  ].join(''),
-  'is'
-);
-
-const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
-const GIT_LOCAL_WRITE = new RegExp(
-  String.raw`(?:^|[;&|(\n]\s*|\b(?:then|do)\s+)git((?:\s+-C\s+${ARG}|\s+-c\s+\S+)*)\s+` +
-    String.raw`(?:(?:merge|pull|rebase|reset|checkout|switch|commit|cherry-pick|revert|am|clean|restore)(?![\w-])` +
-    String.raw`|stash(?:\s+(?:push|pop|drop|apply|clear)\b|\s*(?:$|[;&|)]))` +
-    String.raw`|branch\s+(?:-[dDmM]|--delete|--move)\b|worktree\s+(?:add|remove)\b|tag\s+(?:-d|--delete)\b)`,
-  'gm'
-);
-const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
-const TIER_C = /\b(airflow\s+dags\s+(trigger|pause|unpause)|gh\s+pr\s+merge|glab\s+mr\s+merge)\b/;
+const TIER_C = /\bairflow\s+dags\s+(pause|unpause|backfill)\b|\bairflow\s+dags\s+trigger\b[^;&|'"\n]*?\s(-c|--conf)(\s|=)/;
 const WORKER_START = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 const WORKER_START_HELP = /\bworker-start\b[^;&|\n]*\s(?:--help|-h)\b/;
 
 const stripHeredocs = (s) =>
   String(s || '').replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC');
-const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
-const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
-
-function isMainCheckout(dir) {
-  try {
-    const [gitDir, common] = execFileSync(
-      'git',
-      ['-C', dir, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'],
-      { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] }
-    )
-      .trim()
-      .split('\n');
-    return Boolean(gitDir) && gitDir === common;
-  } catch (_) {
-    return false;
-  }
-}
-
-function writesMainCheckout(command, cwd) {
-  const cleaned = stripHeredocs(command);
-  for (const m of cleaned.matchAll(GIT_LOCAL_WRITE)) {
-    const dashC = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].pop();
-    const cds = [...cleaned.slice(0, m.index).matchAll(new RegExp(String.raw`(?:^|[;&|(\n]\s*)cd\s+(${ARG})`, 'g'))];
-    let dir = cwd;
-    if (cds.length) dir = resolveDir(cds.pop()[1], cwd);
-    if (dashC) dir = resolveDir(dashC[1], dir);
-    if (isMainCheckout(dir)) return true;
-  }
-  return false;
-}
-
 function findUmbrellaNapHook(cwd) {
   let dir = path.resolve(cwd || process.cwd());
   while (true) {
@@ -538,18 +487,17 @@ function handlePreToolUse(payload) {
     }
   }
 
-  // 5. Open-browser guard (blocks `open <url/.html>` and `orca goto`/`tab create` without `--worktree`)
-  if (claudeTool === 'Bash' && /\b(open|orca)\b/.test(command)) {
+  // 5. A production write after another step in the same call (tier-c-guard), for workers too.
+  if (claudeTool === 'Bash') {
     try {
-      const { problem: browserProblem } = require(path.join(HOOKS_DIR, 'open-browser-guard.cjs'));
-      const why = browserProblem(command, cwd);
-      if (why) {
-        process.stdout.write(
-          JSON.stringify({
-            decision: 'deny',
-            reason: `open-browser-guard: ${why}`,
-          })
-        );
+      const { chainedProdWrite } = require(path.join(HOOKS_DIR, 'tier-c-guard.cjs'));
+      const chained = chainedProdWrite(command);
+      if (chained) {
+        process.stdout.write(JSON.stringify({
+          decision: 'deny',
+          reason: `tier-c-guard: \`${chained.slice(0, 120)}\` writes to production after another step in the same call. ` +
+            'Run the earlier steps, read their output, then run the write alone in its own call.',
+        }));
         return;
       }
     } catch (_) {}
@@ -598,7 +546,7 @@ function handlePreToolUse(payload) {
     }
   }
 
-  // 7. Tier-C guard (blocks merge / airflow trigger|pause|unpause when latest user message is a question)
+  // 7. Tier-C guard: a tier-C Airflow step when the latest user message is a question.
   if (claudeTool === 'Bash' && TIER_C.test(stripHeredocs(command))) {
     try {
       const { isQuestion } = require(path.join(HOOKS_DIR, 'lib', 'user-intent.cjs'));
@@ -631,7 +579,8 @@ function handlePreToolUse(payload) {
     const bg = Boolean(args.IsDaemon);
     const res = runClaudeHook('watch-guard.cjs', {
       tool_name: 'Bash',
-      tool_input: { command, run_in_background: bg },
+      // agy has no Bash timeout: a background watcher runs until watch.sh exits on its own.
+      tool_input: { command, run_in_background: bg, ...(bg ? { timeout: 7200000 } : {}) },
       cwd,
       session_id: payload.conversationId,
     });
@@ -646,54 +595,32 @@ function handlePreToolUse(payload) {
     }
   }
 
-  // 9. Gate line guard for remote SSH/scp/rsync mutations, git hooksPath bypass, and main checkout git writes
-  if (claudeTool === 'Bash') {
-    const remote = REMOTE_WRITE.test(command);
-    const gitMain = !remote && (HOOKS_OFF.test(command) || writesMainCheckout(command, cwd));
-    if (remote || gitMain) {
-      let gateFound = `${command}\n${args.toolSummary || ''}`.includes('Gate:') || `${command}\n${args.toolSummary || ''}`.includes('Restate:');
-      if (!gateFound) {
-        const tail = readJsonLines(transcriptFile(payload), 512 * 1024, false);
-        for (let i = tail.length - 1; i >= 0; i--) {
-          const rec = tail[i];
-          if (rec.type === 'USER_INPUT') break;
-          if (
-            rec.type === 'PLANNER_RESPONSE' &&
-            typeof rec.content === 'string' &&
-            (rec.content.includes('Gate:') || rec.content.includes('Restate:'))
-          ) {
-            gateFound = true;
-            break;
-          }
-        }
-      }
-      if (!gateFound) {
-        process.stdout.write(
-          JSON.stringify({
-            decision: 'deny',
-            reason:
-              (gitMain
-                ? "gate-line-guard: this command writes into the user's main git checkout (or turns git hooks off) and this turn has no `Gate:` line. " +
-                  'To read the latest code: `git fetch`, then `git show origin/<b>:<path>`; never fast-forward their main checkout. '
-                : 'gate-line-guard: this command changes another machine and this turn has no `Gate:` line. ') +
-              'Print `Gate: mở bởi "<the user\'s sentence>" → <khối việc>` in visible text (or `# Gate:` in the command), then rerun. ' +
-              'If it only reads, `# Gate: không áp (chỉ đọc)`.',
-          })
-        );
-        return;
-      }
+  // 9. Main checkout guard (git writes into a main checkout: once; `git -c core.hooksPath=…`: always)
+  if (claudeTool === 'Bash' && /\bgit\b/.test(command)) {
+    const res = runClaudeHook('main-checkout-guard.cjs', {
+      tool_name: 'Bash',
+      tool_input: { command },
+      cwd,
+      session_id: payload.conversationId,
+    });
+    if (res.status === 2) {
+      process.stdout.write(JSON.stringify({ decision: 'deny', reason: res.stderr || 'main-checkout-guard: git write into a main checkout.' }));
+      return;
     }
   }
 
   // 10. Orca worker-start flag guard (when dispatching workers via Orca)
   if (claudeTool === 'Bash' && WORKER_START.test(command) && !WORKER_START_HELP.test(command)) {
-    if (/--agent[ =]['"]?antigravity\b/.test(command) && !/--terminal\b/.test(command) && !/--effort[ =]['"]?[^\s'"]/.test(command)) {
+    const noEffort = /--agent[ =]['"]?antigravity\b/.test(command) && !/--terminal\b/.test(command) && !/--effort[ =]['"]?[^\s'"]/.test(command);
+    let once = true;
+    try { once = require(path.join(HOOKS_DIR, 'lib', 'block-once.cjs')).firstTime(payload.conversationId, 'dispatch-split-guard-effort', command); } catch (_) {}
+    if (noEffort && once) {
       process.stdout.write(
         JSON.stringify({
           decision: 'deny',
           reason:
             'dispatch-split-guard: an antigravity worker needs `--effort` (e.g. `--model gemini-3.8-flash --effort high`); ' +
-            'without it agy runs Medium.',
+            'without it agy runs Medium. Said once: if the command is right as it is, run it again unchanged.',
         })
       );
       return;
@@ -737,15 +664,10 @@ function handlePreToolUse(payload) {
         tool_input: claudeInput,
         cwd,
       });
-      if (res.status === 2) {
-        process.stdout.write(
-          JSON.stringify({
-            decision: 'deny',
-            reason: res.stderr || 'rules-budget: session note over its caps.',
-          })
-        );
-        return;
-      }
+      try {
+        const ctx = res.stdout && JSON.parse(res.stdout).hookSpecificOutput?.additionalContext;
+        if (ctx) queueEphemeral(payload, ctx);
+      } catch (_) {}
     }
   }
 }

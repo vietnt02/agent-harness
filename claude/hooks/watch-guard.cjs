@@ -1,27 +1,28 @@
 #!/usr/bin/env node
 /**
- * watch-guard.cjs - PreToolUse(Bash): a background command that loops, or a foreground one that
- * polls (`while/until … do … sleep`), inline or in a script file it runs, not through
- * ~/.claude/scripts/watch.sh (whose allowlist exits on anything unexpected instead of waiting on it
- * silently, skills/ntv-implement) is blocked once with the reminder; the same command run again
- * passes (lib/block-once.cjs).
- * Always blocks, in the foreground, what locks the session while the user cannot type: an explicit
- * `timeout` over 120000 ms, or remote calls (ssh, docker exec, gh/glab api, airflow) inside a loop.
- * An omitted timeout is the harness default (120000 ms) and passes.
- * `# watch-exempt: <reason>` in the command or the script lets a legitimate loop through.
+ * watch-guard.cjs - PreToolUse(Bash). Commands are read with lib/shell-words.cjs, so a loop inside a
+ * quoted script (`ssh host 'for …'`), a heredoc for another program or an argument string is text,
+ * not a loop of this shell.
+ * - Always blocks what locks the session while the user cannot type: an explicit foreground
+ *   `timeout` over 120000 ms, or the watch.sh loop in the foreground (only --once/--help run there).
+ * - Blocks once with a reminder (lib/block-once.cjs; the same command run again passes): a
+ *   foreground loop of this shell around remote calls (ssh, docker exec, gh/glab api, airflow), a
+ *   foreground `while/until … sleep` poll, a background loop not through ~/.claude/scripts/watch.sh,
+ *   and a background watch.sh whose `--checkpoint` outlives the Bash `timeout` (default 1800000 ms),
+ *   which would kill the watcher before it reports.
+ * An omitted foreground timeout is the harness default (120000 ms) and passes. Script files the
+ * command runs are read the same way. `# watch-exempt: <reason>` lets a legitimate loop through.
  * Fails open on unreadable input.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { expandHome, samePath } = require('./lib/platform.cjs');
+const { commands, program, innerScript } = require('./lib/shell-words.cjs');
 
-const LOOP = /\b(while|until)\b[\s\S]*\bdo\b|\bsleep\b/;
-// Foreground: only an unbounded poll. `while read` (no sleep) and `for i in $(seq 1 N)` pass.
-const POLL = /\b(while|until)\b[\s\S]*\bdo\b[\s\S]*\bsleep\b/;
 const EXEMPT = /#\s*watch-exempt:\s*\S/;
-const ANY_LOOP = /\b(for|while|until)\b[\s\S]*\bdo\b/;
-const REMOTE = /\b(ssh|docker\s+exec|gh\s+api|glab\s+api|airflow)\b/;
+const BG_TIMEOUT_MS = 1800000;
+const MAX_TIMEOUT_MS = 7200000;
 const FG_TIMEOUT_MS = 120000;
 const WATCH_PATH = path.join(os.homedir(), '.claude', 'scripts', 'watch.sh');
 
@@ -31,15 +32,46 @@ const RUNS = /(?:^|[;&|(\n]|\bthen|\bdo)\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|zsh|sour
 const expand = (p) => expandHome(p.replace(/^(?:\$HOME|\$\{HOME\})(?=[/\\])/, os.homedir()));
 // `bash -n x.sh` only checks syntax.
 const isRun = (before) => RUNS.test(before) && !/\b(?:ba|z)?sh(?:\s+-\S+)*\s+-\w*n\w*\s+$/.test(before);
-// A heredoc body is data for another program (`python3 - <<'EOF'`), not shell to run.
 const dropHeredocs = (s) => s.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<heredoc');
-// A heredoc body is commands unless a known non-shell reader takes it (a Python or Node script, SQL,
-// a file written with `cat >`/`tee`, a commit message): only then are its words text, not a loop.
-// `bash <<EOF`, `ssh host <<EOF`, `sudo -s <<EOF` keep their body.
-const HEREDOC = /([^\n]*)<<-?\s*(['"]?)(\w+)\2([^\n]*)\n([\s\S]*?)\n[ \t]*\3[ \t]*(?=\n|$)/g;
-const TEXT_READER = /(^|[\s|;&(])(python[\d.]*|node|ruby|perl|psql|mysql|sqlite3|jq|cat\s*>{1,2}|tee|git\s+commit)\b[^|;&]*$/;
-const dropTextHeredocs = (s) => s.replace(HEREDOC, (all, before, q, tag, after) =>
-  (TEXT_READER.test(before) ? `${before}<<heredoc${after}` : all));
+
+// The scripts the command hands another machine or shell to run: `ssh host '<s>'`, and a heredoc
+// body fed to `ssh host` or `sudo … -s` (a heredoc fed to bash/sh is read by shell-words already).
+function remoteScripts(text) {
+  const out = [];
+  for (const words of commands(text).map(program)) {
+    if (words[0] !== 'ssh') continue;
+    const rest = words.slice(1).filter((a, k, all) => !a.startsWith('-') && !/^-[bcDEeFIiJLlmOopQRSWw]$/.test(all[k - 1] || ''));
+    if (rest.length > 1) out.push(rest.slice(1).join(' '));
+  }
+  const fed = /(?:\bssh(?:\s+-\S+(?:\s+[^\s-]\S*)?)*\s+[^\s<-]\S*|\bsudo\b[^\n<]*\s-s)\s*<<-?\s*(['"]?)(\w+)\1[^\n]*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?=\n|$)/g;
+  for (const m of text.matchAll(fed)) out.push(m[3]);
+  return out;
+}
+
+// What the shell itself runs: { loop: a `for/while/until` of this shell, wait: a `while/until`
+// loop, poll: one with a `sleep`, sleeps: a `sleep` command, remote: a remote call }. `deep` also
+// reads the scripts handed to another machine for waits (`ssh h 'while …; sleep 5; done'` polls too).
+function shape(text, deep = true) {
+  const inner = deep ? remoteScripts(text).map((t) => shape(t, false)) : [];
+  const all = commands(text);
+  // A script this shell runs in its own place (`bash -c '<s>'`, `eval <s>`) is this shell's work.
+  const own = all.map(program).map(innerScript).filter((t) => t !== null).map((t) => shape(t, deep));
+  const first = (w) => w.find((x) => !/^(\{|\(|!|time)$/.test(x));
+  const loops = all.map(first).filter((w) => /^(for|while|until)$/.test(w || ''));
+  const progs = all.map(program);
+  const sleeps = progs.some((w) => w[0] === 'sleep');
+  const remote = progs.some((w) => w[0] === 'ssh' || w[0] === 'airflow' ||
+    (w[0] === 'docker' && w[1] === 'exec') || ((w[0] === 'gh' || w[0] === 'glab') && w[1] === 'api'));
+  const wait = loops.some((w) => w !== 'for') || inner.some((x) => x.wait) || own.some((x) => x.wait);
+  const poll = (loops.some((w) => w !== 'for') && sleeps) || inner.some((x) => x.poll) || own.some((x) => x.poll);
+  return {
+    loop: loops.length > 0 || own.some((x) => x.loop),
+    wait,
+    poll,
+    sleeps: sleeps || inner.some((x) => x.sleeps) || own.some((x) => x.sleeps),
+    remote: remote || own.some((x) => x.remote),
+  };
+}
 
 // The arguments of each place the command runs watch.sh, up to the next separator; quoted
 // strings are blanked first, so `--check "x --once"` does not count as --once.
@@ -66,7 +98,7 @@ function scriptsIn(text, cwd) {
     .map((p) => fs.readFileSync(p, 'utf8'));
 }
 
-module.exports = { watchRuns, scriptsIn, expand };
+module.exports = { watchRuns, scriptsIn, expand, shape };
 if (require.main !== module) return;
 
 let raw = '';
@@ -77,6 +109,12 @@ process.stdin.on('end', () => {
     const command = input.command || '';
     if (tool !== 'Bash') process.exit(0);
     const bg = !!input.run_in_background;
+    const { firstTime, again } = require('./lib/block-once.cjs');
+    const once = (msg) => {
+      if (!firstTime(sessionId, 'watch-guard', command)) process.exit(0);
+      process.stderr.write(msg + again(sessionId) + '\n');
+      process.exit(2);
+    };
     const runs = watchRuns(command, cwd || process.cwd());
     if (runs.length) {
       // The loop blocks the session while the user waits: only --once (or --help) runs in the foreground.
@@ -85,28 +123,35 @@ process.stdin.on('end', () => {
           'foreground: report what is ready first, then wait in the background. Foreground is only for --once.\n');
         process.exit(2);
       }
+      const limit = Number(input.timeout) || BG_TIMEOUT_MS;
+      const checkpoint = Math.max(...runs.map((args) => Number((/--checkpoint[ =](\d+)/.exec(args) || [])[1] || 600)));
+      const want = Math.min(checkpoint * 1000 + 300000, MAX_TIMEOUT_MS);
+      if (bg && checkpoint * 1000 + 60000 > limit && want > limit) {
+        once(`watch-guard: --checkpoint ${checkpoint} s outlives this call's timeout (${limit} ms): the harness ` +
+          `would stop the watcher before it reports. Pass \`timeout: ${want}\` with run_in_background.`);
+      }
       process.exit(0);
     }
-    const pattern = bg ? LOOP : POLL;
-    const sources = [dropTextHeredocs(command), ...scriptsIn(command, cwd || process.cwd())];
+    const sources = [command, ...scriptsIn(command, cwd || process.cwd())];
     if (sources.some((s) => EXEMPT.test(s))) process.exit(0);
-    if (!bg && (Number(input.timeout) > FG_TIMEOUT_MS || sources.some((s) => ANY_LOOP.test(s) && REMOTE.test(s)))) {
-      process.stderr.write('watch-guard: this foreground command can lock the session while the user cannot ' +
-        'type (timeout over 120000 ms, or remote calls inside a loop). Run it with run_in_background: true, ' +
-        'or make the remote reads one call (one query, one API list). A run you wait on: watch.sh --once.\n');
+    if (!bg && Number(input.timeout) > FG_TIMEOUT_MS) {
+      process.stderr.write('watch-guard: a foreground timeout over 120000 ms locks the session while the user cannot ' +
+        'type. Run it with run_in_background: true; a run you wait on: watch.sh --once.\n');
       process.exit(2);
     }
-    if (!sources.some((s) => pattern.test(s))) process.exit(0);
-    const { firstTime, again } = require('./lib/block-once.cjs');
-    if (!firstTime(sessionId, 'watch-guard', command)) process.exit(0);
-    process.stderr.write(
+    const shapes = sources.map((x) => shape(x));
+    if (!bg && shapes.some((x) => x.loop && x.remote)) {
+      once('watch-guard: this foreground loop makes remote calls one after another and can hold the session. ' +
+        'Make the remote reads one call (one query, one API list, one ssh with the loop inside), or run it in the background.');
+    }
+    if (!shapes.some((x) => (bg ? x.wait || x.sleeps : x.poll))) process.exit(0);
+    once(
       (bg ? 'watch-guard: background loops go through ~/.claude/scripts/watch.sh (see --help): '
         : 'watch-guard: a foreground `while/until … sleep` poll has no deadline of its own. ' +
           'Bound it (`for i in $(seq 1 N)`) or go through ~/.claude/scripts/watch.sh (see --help): ') +
       'run it with --once in the foreground, then the same command in the background. ' +
       'A loop that is not waiting on external state: add `# watch-exempt: <reason>`. ' +
-      'A wait watch.sh cannot express is a kaizen: see the end of watch.sh --help.' + again(sessionId) + '\n'
+      'A wait watch.sh cannot express is a kaizen: see the end of watch.sh --help.'
     );
-    process.exit(2);
   } catch (_) { /* fail-open: malformed hook input */ }
 });

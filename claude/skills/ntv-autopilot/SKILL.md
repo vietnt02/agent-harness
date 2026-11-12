@@ -41,7 +41,7 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    summary (the design settled, actions by group, each tier C step by name, Done when,
    prerequisites with their results, defaults, out of scope). From the next turn, ask in one
    AskUserQuestion call: every open question, the role question if the user named none
-   (`CLAUDE.md` § Scope), every tier-B ask with its conditions. Recommended option first. Only
+   (`CLAUDE.md` § Scope). Recommended option first. Only
    when none is left, ask the final gate in one AskUserQuestion: run this plan on autopilot?
    Never ask it while a question is open.
 
@@ -57,7 +57,7 @@ again.
 - First, rerun every prerequisite check: one failing parks the actions that need it, and every
   action that needs a parked action's result.
 - Every listed action runs without a new ask, tier C included, after the checks
-  `CLAUDE.md` § Irreversible actions puts before a B/C step.
+  `CLAUDE.md` § Irreversible actions puts before a tier-C step.
 - Never stop the plan to ask. A question the plan or the user's words already answer is no
   question; reads, probes and checks never need a yes. Whatever surfaces runs the three checks
   (`CLAUDE.md` § Mutation gate): all yes → fix, check, one-line report; otherwise park it and
@@ -70,7 +70,7 @@ again.
 
 ## Report
 
-One report: `**Claude đã làm:**` with `Đã kiểm / CHƯA kiểm` per action, then `**Quyết định thay
+One report: `**Claude đã làm:**` with what was checked, and what was not, per action, then `**Quyết định thay
 bạn:**`, each technical choice inside a listed action that the plan did not state and that
 changes nothing the user feels, one line with its reason (a choice needing intent was parked,
 never listed here), then `**Đã park:**`, each item with why and the exact command or decision

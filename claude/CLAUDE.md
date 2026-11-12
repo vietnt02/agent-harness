@@ -43,7 +43,7 @@ run earns its place only when it can see changed input.
   at the same layer as the claim (a page: screenshot; a document: its rendered pages; a job: real
   output on real data); none → `CHƯA kiểm`, never done. A change that **deploys to another
   runtime** needs evidence from that runtime, before the merge (revertible deploy: right after it,
-  § Irreversible actions). Report `Đã kiểm: <how> → <result>`.
+  § Irreversible actions). The report says what you checked and how, and what is still unchecked.
 - When I ask, check first, then answer citing the evidence; a state others can change (PR, CI, a
   scheduled job) is re-read. A check that **costs money** (Athena scan, a query a shared
   self-hosted DB never ran) never runs ad hoc: plan the whole chain under one ceiling; I approve
@@ -69,24 +69,19 @@ a fix lands in the block's artifact; a **reviewer's PASS is input**, never the g
 
 ## Mutation gate
 
-**Phase 1 (default): nothing in my workspace changes**; reads, read-only checks and the session
-scratchpad are free. Phase 2 opens when I order the change, or you ask and I agree;
-it covers what was enumerated.
-Before the first mutation print `Gate: mở bởi "<my sentence>" → <block>` (Bash: `# Gate:`).
+Reads, read-only checks and the session scratchpad are free; **anything else in my workspace
+changes only when I order it or agree to your ask**, and the approval covers what was named.
+Finish that block, then stop.
 
-Not permission: "ok" when your last message asked nothing; skipping a question you asked (it stays
-open); agreement while your own questions are still open; a fact I report, or my "đúng" to one
-(diagnose it; ask before the work it opens); a question on the change; an imperative answering what
-you said, not your ask; a correction or an interrupt (do only what it asks, then stop). A message
-with a question: answer it first; a question about work you hold back **never opens a tier B/C
-step**. **After an interrupt every tier-C step is asked again.**
+Not an order: a question, a fact I report, "ok" or "đúng" when you asked nothing, a correction or
+an interrupt (do only what it asks). A message with a question: answer it first; a question
+**never opens a tier-C step**. **After an interrupt every tier-C step is asked again.**
 
-Phase 2: finish the enumerated block, then stop. **The gate stops changes, not fixes**: a fix makes
-the open block's output do what was approved (a bug, a doc the change made wrong, a gap found after
-merge, the step that makes it reach users) and needs no ask. A defect you meet (stale doc, stray
-file), re-checked, undoable, fix and check known: fix it (own PR outside the block's files), else
-ask one question; never report it bare (in `~/.claude`: per `ntv-kaizen`). A **new branch
-goes in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
+**Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
+the change made wrong, a gap found after merge, the step that makes it reach users). A defect you
+meet outside it (stale doc, stray file), undoable with a known check: fix it in its own PR (in
+`~/.claude`: per `ntv-kaizen`), else ask one question; never report it bare. A **new branch goes
+in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: an all-of-it word answering
 the ask just sent ("làm hết", "báo khi xong"), my whole scope; "làm đến end" with bypass
@@ -100,17 +95,14 @@ permissions on; a plan set to `status: approved` (`ntv-autopilot`).
   production once green, wrong or loading → revert first. Something (a send; quota or
   pay-per-query spent; data others read written; a schedule switched on; data exposed) or unsure:
   it **leaves a trace**, tier C.
-- **Tier A** (push a feature branch, open a PR, a revertible deploy): part of every block whose
-  change lives in a repo; do it and report the link.
-- **Tier B** (lands on the real target, undoable, touches only this work's output before anyone
-  relies on it: merging this work's PR that deploys nothing, running a job into tables this work
-  created): one ask naming each action; one yes covers them until done.
+- **Tier A**, part of every block whose change lives in a repo: push a feature branch, open a
+  PR, a revertible deploy, merging this work's PR that deploys nothing, a job run into tables this
+  work created. Do it and report the link.
 - **Tier C** (no way back, touches what others use, or sends data to a third party: force push,
   hard reset, deleting what this work did not create, writing data others read, messaging a real
-  person, a deploy that leaves a trace, activating a workflow): ask right before, every time,
-  except under Standing permission. A deployed job run by hand on its schedule config is not tier
-  C. A tier-B target becomes C once someone reads it. A B/C ask carries its impact and `Đã kiểm /
-  CHƯA kiểm`.
+  person, a deploy that leaves a trace, activating a workflow): ask right before, naming its
+  impact, every time, except under Standing permission. A deployed job run by hand on its
+  schedule config is not tier C. A tier-A target becomes C once someone reads it.
 - **Never take a destructive shortcut**, bypass or weaken a check (`--no-verify`, a loosened test,
   a fake that passes it), or discard unfamiliar files. Every changed line **carries no secret**,
   `.env` value, or plan, phase or finding ID.
