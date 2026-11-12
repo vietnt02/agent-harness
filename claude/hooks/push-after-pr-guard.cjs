@@ -158,9 +158,13 @@ const glabEnvs = once(() => glabDirs());
 // Returns [{ id, state }] with state normalised to OPEN / MERGED / CLOSED.
 function reviewsFor(dir, remote, branch, { gh = ghEnvs, glab = glabEnvs } = {}) {
   if (!fs.existsSync(dir)) throw new Error(`thư mục ${dir} không tồn tại`);
-  // A bare `git push` goes to the branch's own remote (`branch.<b>.remote`), else the only remote.
+  // A bare `git push` goes where git sends it: `branch.<b>.pushRemote`, `remote.pushDefault`,
+  // `branch.<b>.remote`, else the only remote.
   if (!remote) {
-    try { remote = run('git', ['config', `branch.${branch}.remote`], dir); } catch (_) { remote = ''; }
+    for (const key of [`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]) {
+      try { remote = run('git', ['config', key], dir); } catch (_) { remote = ''; }
+      if (remote) break;
+    }
     if (!remote) { const all = run('git', ['remote'], dir).split('\n').filter(Boolean); remote = all.includes('origin') || all.length !== 1 ? 'origin' : all[0]; }
   }
   const url = run('git', ['remote', 'get-url', remote], dir);

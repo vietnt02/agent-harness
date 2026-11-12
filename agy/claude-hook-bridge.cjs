@@ -20,11 +20,12 @@
  *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_airflow)
  *   - Direct interactive session (non-Orca worker):
  *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, blocks once per sub-repo/worktree per session before non-Read tools in `repos/*`, reminding to read `AGENTS.md`)
- *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill` and `trigger --conf` when the latest user prompt is a question; a production write after another step in the same call always)
+ *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
+ *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill` and `trigger --conf` when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
  *     9. `main-checkout-guard` (git writes into a main checkout: blocked once; `git -c core.hooksPath=...`: always)
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
- *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md and the session-note caps)
+ *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md; session-note caps come back as a reminder)
  * - PostToolUse:
  *   - Captures `worktree-after-release` and `worker-start-receipt` reminders.
  * - Stop:
@@ -486,6 +487,22 @@ function handlePreToolUse(payload) {
     }
   }
 
+  // 5. A production write after another step in the same call (tier-c-guard), for workers too.
+  if (claudeTool === 'Bash') {
+    try {
+      const { chainedProdWrite } = require(path.join(HOOKS_DIR, 'tier-c-guard.cjs'));
+      const chained = chainedProdWrite(command);
+      if (chained) {
+        process.stdout.write(JSON.stringify({
+          decision: 'deny',
+          reason: `tier-c-guard: \`${chained.slice(0, 120)}\` writes to production after another step in the same call. ` +
+            'Run the earlier steps, read their output, then run the write alone in its own call.',
+        }));
+        return;
+      }
+    } catch (_) {}
+  }
+
   if (worker) return;
 
   // 6. Umbrella sub-repo context guard (`nap-context-repo-con.cjs`)
@@ -529,22 +546,7 @@ function handlePreToolUse(payload) {
     }
   }
 
-  // 7. Tier-C guard: a production write after another step in the same call, always; a tier-C Airflow
-  // step when the latest user message is a question.
-  if (claudeTool === 'Bash') {
-    try {
-      const { chainedProdWrite } = require(path.join(HOOKS_DIR, 'tier-c-guard.cjs'));
-      const chained = chainedProdWrite(command);
-      if (chained) {
-        process.stdout.write(JSON.stringify({
-          decision: 'deny',
-          reason: `tier-c-guard: \`${chained.slice(0, 120)}\` writes to production after another step in the same call. ` +
-            'Run the earlier steps, read their output, then run the write alone in its own call.',
-        }));
-        return;
-      }
-    } catch (_) {}
-  }
+  // 7. Tier-C guard: a tier-C Airflow step when the latest user message is a question.
   if (claudeTool === 'Bash' && TIER_C.test(stripHeredocs(command))) {
     try {
       const { isQuestion } = require(path.join(HOOKS_DIR, 'lib', 'user-intent.cjs'));
@@ -577,7 +579,8 @@ function handlePreToolUse(payload) {
     const bg = Boolean(args.IsDaemon);
     const res = runClaudeHook('watch-guard.cjs', {
       tool_name: 'Bash',
-      tool_input: { command, run_in_background: bg },
+      // agy has no Bash timeout: a background watcher runs until watch.sh exits on its own.
+      tool_input: { command, run_in_background: bg, ...(bg ? { timeout: 7200000 } : {}) },
       cwd,
       session_id: payload.conversationId,
     });
@@ -608,13 +611,16 @@ function handlePreToolUse(payload) {
 
   // 10. Orca worker-start flag guard (when dispatching workers via Orca)
   if (claudeTool === 'Bash' && WORKER_START.test(command) && !WORKER_START_HELP.test(command)) {
-    if (/--agent[ =]['"]?antigravity\b/.test(command) && !/--terminal\b/.test(command) && !/--effort[ =]['"]?[^\s'"]/.test(command)) {
+    const noEffort = /--agent[ =]['"]?antigravity\b/.test(command) && !/--terminal\b/.test(command) && !/--effort[ =]['"]?[^\s'"]/.test(command);
+    let once = true;
+    try { once = require(path.join(HOOKS_DIR, 'lib', 'block-once.cjs')).firstTime(payload.conversationId, 'dispatch-split-guard-effort', command); } catch (_) {}
+    if (noEffort && once) {
       process.stdout.write(
         JSON.stringify({
           decision: 'deny',
           reason:
             'dispatch-split-guard: an antigravity worker needs `--effort` (e.g. `--model gemini-3.8-flash --effort high`); ' +
-            'without it agy runs Medium.',
+            'without it agy runs Medium. Said once: if the command is right as it is, run it again unchanged.',
         })
       );
       return;
@@ -658,15 +664,10 @@ function handlePreToolUse(payload) {
         tool_input: claudeInput,
         cwd,
       });
-      if (res.status === 2) {
-        process.stdout.write(
-          JSON.stringify({
-            decision: 'deny',
-            reason: res.stderr || 'rules-budget: session note over its caps.',
-          })
-        );
-        return;
-      }
+      try {
+        const ctx = res.stdout && JSON.parse(res.stdout).hookSpecificOutput?.additionalContext;
+        if (ctx) queueEphemeral(payload, ctx);
+      } catch (_) {}
     }
   }
 }

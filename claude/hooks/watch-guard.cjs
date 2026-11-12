@@ -125,8 +125,8 @@ process.stdin.on('end', () => {
       }
       const limit = Number(input.timeout) || BG_TIMEOUT_MS;
       const checkpoint = Math.max(...runs.map((args) => Number((/--checkpoint[ =](\d+)/.exec(args) || [])[1] || 600)));
-      if (bg && checkpoint * 1000 + 60000 > limit) {
-        const want = Math.min(checkpoint * 1000 + 300000, MAX_TIMEOUT_MS);
+      const want = Math.min(checkpoint * 1000 + 300000, MAX_TIMEOUT_MS);
+      if (bg && checkpoint * 1000 + 60000 > limit && want > limit) {
         once(`watch-guard: --checkpoint ${checkpoint} s outlives this call's timeout (${limit} ms): the harness ` +
           `would stop the watcher before it reports. Pass \`timeout: ${want}\` with run_in_background.`);
       }

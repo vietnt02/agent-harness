@@ -1169,3 +1169,51 @@ test('dispatch-split-guard: the model and the effort reminders are each said onc
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('secret-file-guard: a variable set from a dotenv key carries it', () => {
+  const { printedSecrets } = require('../claude/hooks/secret-file-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sfg-alias-'));
+  fs.writeFileSync(path.join(tmp, '.env'), 'A_KEY=x\n');
+  const leak = (c) => printedSecrets(c, (f) => path.basename(f) === '.env', tmp);
+  try {
+    assert.deepEqual(leak('source .env; X=$A_KEY; echo $X'), ['.env']);
+    assert.deepEqual(leak('source .env; export Y="${A_KEY}"; Z=$Y; printf "%s" "$Z"'), ['.env']);
+    assert.deepEqual(leak('source .env; N=3; echo $N'), []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('main-checkout-guard: core.hooksPath counts only when git runs with it', () => {
+  const { hooksOff } = mainCheckoutGuard;
+  for (const c of ['git -c core.hooksPath=/dev/null commit -m x', 'git -C r -c core.hookspath=x push', 'bash -c "git -c core.hooksPath=x commit"'])
+    assert.equal(hooksOff(c), true, c);
+  for (const c of ['git commit -m "never run git -c core.hooksPath=/dev/null"', 'echo git -c core.hooksPath=x', 'git -c user.name=x commit'])
+    assert.equal(hooksOff(c), false, c);
+});
+
+test('watch-guard: no timeout advice when the call already has the longest timeout', () => {
+  const s = `wg-max-${process.pid}-${Date.now()}`;
+  const run = (input) => spawnSync(process.execPath, [path.join(HOOKS_DIR, 'watch-guard.cjs')], { encoding: 'utf8',
+    input: JSON.stringify({ tool_name: 'Bash', session_id: s, cwd: os.tmpdir(), tool_input: input }) });
+  const w = '~/.claude/scripts/watch.sh --check "x" --ok done --wait running --checkpoint 7200';
+  assert.equal(run({ command: w, run_in_background: true, timeout: 7200000 }).status, 0);
+});
+
+test('push-after-pr-guard: a bare push goes to the branch push remote, then remote.pushDefault, then its remote', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'papg-remote-'));
+  const git = (...a) => execFileSync('git', ['-C', tmp, ...a], { encoding: 'utf8' });
+  // The remote it picks is the one whose URL it reads: a remote that does not exist names itself in the error.
+  const picked = () => { try { pushAfterPrGuard.reviewsFor(tmp, null, 'feat', { glab: () => [], gh: () => [] }); return 'ok'; } catch (e) { return String(e.message); } };
+  try {
+    execFileSync('git', ['init', '-q', tmp]);
+    git('config', 'branch.feat.remote', 'by-branch');
+    assert.match(picked(), /by-branch/);
+    git('config', 'remote.pushDefault', 'by-default');
+    assert.match(picked(), /by-default/);
+    git('config', 'branch.feat.pushRemote', 'by-push-remote');
+    assert.match(picked(), /by-push-remote/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

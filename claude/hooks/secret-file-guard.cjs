@@ -31,7 +31,7 @@
 
 const os = require('os');
 const path = require('path');
-const { commands, program, dropHeredocs } = require('./lib/shell-words.cjs');
+const { commands, program, dropHeredocs, assignments } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
@@ -222,7 +222,11 @@ function printedSecrets(command, isSecret, cwd) {
   let printsAll = false;
   const named = [];
   let moved = false; // a `cd`/`pushd`/`env -C`/`sudo -D` ran before: a relative path no longer resolves from cwd
+  const aliases = {}; // `X=$A_KEY`: X carries A_KEY
+  const refs = (w) => [...String(w).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
   for (const words of commands(command)) {
+    const set = assignments(words);
+    for (const [name, value] of set || []) aliases[name] = refs(value).flatMap((r) => [r, ...(aliases[r] || [])]);
     const { argv, stdinFiles } = splitRedirects(words);
     const prog = program(argv);
     const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
@@ -239,7 +243,8 @@ function printedSecrets(command, isSecret, cwd) {
   }
   for (const { file, moved: after } of sourced) {
     const keys = after && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, cwd);
-    if (printsAll || named.some((n) => keys === null || keys.has(n))) leaked.push(file);
+    const carries = (n) => [n, ...(aliases[n] || [])];
+    if (printsAll || named.some((n) => keys === null || carries(n).some((k) => keys.has(k)))) leaked.push(file);
   }
   return [...new Set(leaked)];
 }

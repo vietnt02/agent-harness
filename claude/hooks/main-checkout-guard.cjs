@@ -22,7 +22,6 @@ const STASH_READ = new Set(['list', 'show', 'create']);
 const WORKTREE_WRITE = new Set(['add', 'remove', 'move']);
 // Global options that take the next word as their value.
 const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
-const HOOKS_OFF = /\bgit\s+(?:\S+\s+)*?-c\s+core\.hookspath=/i;
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
 
@@ -140,7 +139,16 @@ function writesMainCheckout(command, cwd) {
   return false;
 }
 
-module.exports = { resolveDir, inScratchpad, isMainCheckout, writesMainCheckout };
+// True when a git that runs takes `-c core.hooksPath=…` (a commit message naming it is text).
+function hooksOff(command) {
+  return commands(command).map(program).some((w) => {
+    const script = innerScript(w);
+    if (script !== null) return hooksOff(script);
+    return w[0] === 'git' && w.some((a, k) => /^core\.hookspath=/i.test(a) && w[k - 1] === '-c');
+  });
+}
+
+module.exports = { resolveDir, inScratchpad, isMainCheckout, writesMainCheckout, hooksOff };
 if (require.main !== module) return;
 
 let raw = '';
@@ -150,7 +158,7 @@ process.stdin.on('end', () => {
     const { agent_id: agentId, tool_input: input, cwd, session_id: sessionId } = JSON.parse(raw);
     const command = String(input?.command || '');
     if (agentId) process.exit(0);
-    if (HOOKS_OFF.test(command)) {
+    if (hooksOff(command)) {
       process.stderr.write('main-checkout-guard: `git -c core.hooksPath=…` turns the repo\'s checks off; ' +
         'run the git command without it (CLAUDE.md § Irreversible actions: never bypass a check).\n');
       process.exit(2);
