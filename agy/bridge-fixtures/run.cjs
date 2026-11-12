@@ -169,10 +169,11 @@ if (NAP && fs.existsSync(NAP)) {
   fs.copyFileSync(NAP, path.join(hooksDst, 'nap-context-repo-con.cjs'));
   const libSrc = path.join(path.dirname(NAP), 'lib');
   if (fs.existsSync(libSrc)) fs.cpSync(libSrc, path.join(hooksDst, 'lib'), { recursive: true });
+  // Each sub-repo has its own rules: the hook passes a repo whose rule files match ones already read.
   for (const r of [repo, otherRepo]) {
     fs.mkdirSync(path.join(r, '.git'), { recursive: true });
-    fs.writeFileSync(path.join(r, 'CLAUDE.md'), '# rules\n');
-    fs.writeFileSync(path.join(r, 'AGENTS.md'), '# rules\n');
+    fs.writeFileSync(path.join(r, 'CLAUDE.md'), `# rules of ${path.basename(r)}\n`);
+    fs.writeFileSync(path.join(r, 'AGENTS.md'), `# rules of ${path.basename(r)}\n`);
   }
   const home = { workspacePaths: [os.homedir()] };
 
