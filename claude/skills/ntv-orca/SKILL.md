@@ -44,7 +44,7 @@ trạng thái). Cần hơn một lệnh, hay chạm nhiều repo → giao ngay s
 that answer it") áp ở vai coordinator: lần đọc vẫn chạy, nhưng trong context gọn của subagent, không
 trong context lớn của coordinator.
 
-**Coordinator tự làm, không giao, chỉ khi:** sửa harness `~/.claude` trong phiên user mở cho
+**Coordinator tự làm, không giao, chỉ khi:** sửa harness (`~/.claude` và repo nguồn cài ra nó, `.claude/` của một repo) trong phiên user mở cho
 harness/kaizen hoặc khối gọi tên nó (gặp lỗi harness lúc làm việc khác → ghi kaizen, `ntv-kaizen`); đổi một giá trị có sẵn, không
 logic mới; việc cần công cụ chỉ phiên này có (MCP, login); user chỉ đích danh Claude; cổng merge,
 theo dõi CI, ghi production (`ntv-implement` § Who works).
