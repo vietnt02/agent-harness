@@ -58,72 +58,27 @@ test('rules-budget after Bash: a rule file over budget gets no nudge; CI holds t
     const ok = write(`${head}## Đang làm\n\n- a\n\n## Resume\n\n- b\n`);
     assert.equal(ok.status, 0, ok.stderr);
     const stray = write(`${head}## Đang làm\n\n- a\n\n## Lịch sử\n\n- b\n`);
-    assert.equal(stray.status, 2);
-    assert.match(stray.stderr, /## Lịch sử/);
+    assert.equal(stray.status, 0, 'a cap is a reminder, the write runs');
+    assert.match(context(stray), /## Lịch sử/);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
-test('coordinator-read-guard: the third read runs, with one reminder per turn', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-crg-'));
-  try {
-    const watched = path.join(home, 'repos');
-    fs.mkdirSync(watched);
-    fs.mkdirSync(path.join(home, '.claude', 'knowledge'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.claude', 'knowledge', 'coordinator-reads.txt'), `${watched}\n`);
-    const transcript = transcriptWith(home, 'bảng này đã có chưa');
-    const s = sid('crg');
-    const base = { session_id: s, transcript_path: transcript, cwd: home };
-    hook('coordinator-read-guard.cjs', { ...base, hook_event_name: 'UserPromptSubmit', prompt: 'bảng này đã có chưa' }, home);
-    const read = (i) => hook('coordinator-read-guard.cjs', { ...base, hook_event_name: 'PreToolUse', tool_name: 'Read',
-      tool_use_id: `tu_${i}`, tool_input: { file_path: path.join(watched, `f${i}`) } }, home);
-    const ran = (i) => hook('coordinator-read-guard.cjs', { ...base, hook_event_name: 'PostToolUse', tool_name: 'Read',
-      tool_use_id: `tu_${i}`, tool_input: { file_path: path.join(watched, `f${i}`) } }, home);
-    for (const i of [1, 2]) {
-      const r = read(i);
-      assert.equal(r.status, 0, r.stderr);
-      assert.equal(context(r), '', `read ${i} is quiet`);
-      ran(i); // counted, not left to a pending mark's clock
-    }
-    const third = read(3);
-    assert.equal(third.status, 0, 'the third read is not denied');
-    assert.match(context(third), /read 3 of a watched place/);
-    const fourth = read(4);
-    assert.equal(fourth.status, 0);
-    assert.equal(context(fourth), '', 'said once this turn');
-  } finally { fs.rmSync(home, { recursive: true, force: true }); }
-});
 
-test('worker-default-guard: an edit in a repo runs, with one reminder per repo', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-wdg-'));
-  try {
-    const repo = path.join(home, 'app');
-    fs.mkdirSync(repo);
-    execFileSync('git', ['init', '-q', repo]);
-    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    const transcript = transcriptWith(home);
-    const s = sid('wdg');
-    const edit = (file) => hook('worker-default-guard.cjs', { session_id: s, transcript_path: transcript, cwd: repo,
-      hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: path.join(repo, file), old_string: 'a', new_string: 'b' } }, home);
-    const first = edit('a.js');
-    assert.equal(first.status, 0, first.stderr);
-    assert.match(context(first), /the change goes ahead/);
-    const second = edit('b.js');
-    assert.equal(second.status, 0);
-    assert.equal(context(second), '', 'the same repo is reminded once');
-  } finally { fs.rmSync(home, { recursive: true, force: true }); }
-});
 
-test('gate-line-guard: a remote write with no Gate line stays blocked, rerun or not', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-glg-'));
+test('main-checkout-guard: a git write into the main checkout is said once; turning hooks off is always blocked', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-mcg-'));
   try {
-    const transcript = transcriptWith(dir);
-    const s = sid('glg');
-    const run = (command) => hook('gate-line-guard.cjs', { session_id: s, transcript_path: transcript, cwd: dir,
-      tool_name: 'Bash', tool_input: { command } });
-    const write = "ssh web1 'sudo systemctl restart nginx'";
-    assert.equal(run(write).status, 2);
-    assert.equal(run(write).status, 2, 'it cannot be undone: a rerun is still blocked');
-    assert.equal(run(`# Gate: mở bởi "khởi động lại nginx" → khối web1\n${write}`).status, 0);
+    execFileSync('git', ['init', '-q', dir]);
+    const s = sid('mcg');
+    const run = (command) => hook('main-checkout-guard.cjs', { session_id: s, cwd: dir, tool_name: 'Bash', tool_input: { command } });
+    const first = run('git checkout -b feat');
+    assert.equal(first.status, 2);
+    assert.match(first.stderr, /worktree/);
+    assert.equal(run('git checkout -b feat').status, 0, 'said once: the same command again passes');
+    assert.equal(run("ssh web1 'sudo systemctl restart nginx'").status, 0, 'a remote write needs no Gate line any more');
+    const off = 'git -c core.hooksPath=/dev/null commit -m x';
+    assert.equal(run(off).status, 2);
+    assert.equal(run(off).status, 2, 'bypassing a check stays blocked');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -141,12 +96,35 @@ test('watch-guard: an unwatched loop is held once; a session lock is always bloc
     const loop = { command: `${runner} <<'EOF'\nwhile true; do uptime; sleep 5; done\nEOF`, run_in_background: true };
     assert.equal(run(loop).status, 2, `${runner} runs its heredoc: still read`);
   }
-  const remote = { command: "ssh web1 <<'EOF'\nwhile true; do uptime; sleep 5; done\nEOF" };
-  assert.equal(run(remote).status, 2, 'a foreground remote poll locks the session');
-  assert.equal(run(remote).status, 2, 'and stays blocked');
   const lock = { command: 'npm test', timeout: 300000 };
   assert.equal(run(lock).status, 2);
   assert.equal(run(lock).status, 2, 'a foreground lock stays blocked');
+});
+
+test('watch-guard: only a loop of this shell around remote calls is one; scripts and text are not (kaizen fixtures)', () => {
+  const s = sid('wg-remote');
+  const run = (input) => hook('watch-guard.cjs', { session_id: s, cwd: os.tmpdir(), tool_name: 'Bash', tool_input: input });
+  for (const command of [
+    "ssh -o ConnectTimeout=10 host 'R=x; for f in $(sudo -n find /srv -name \"*.log\"); do wc -l $f; done'",
+    "ssh vps 'for d in a b; do docker exec sched airflow dags list-runs $d -o json | python3 -c 1; done'",
+    "cat > /tmp/k.md <<'EOF'\nfor h in a b; do ssh $h uptime; done\nEOF",
+    "cat >/tmp/k.md <<'EOF'\nx\nEOF\ncat > /tmp/l.md <<'EOF'\nfor h in a; do docker exec c airflow dags trigger d; done\nEOF",
+    `python3 -c 'print(1)' "for h in a; do ssh $h x; done"`,
+  ]) assert.equal(run({ command, timeout: 110000 }).status, 0, command);
+  const local = { command: 'for h in a b; do ssh $h uptime; done' };
+  assert.equal(run(local).status, 2, 'a local loop of remote calls is held once');
+  assert.equal(run(local).status, 0, 'and passes the second time');
+});
+
+test('watch-guard: a background watcher whose checkpoint outlives the Bash timeout is told the timeout it needs', () => {
+  const s = sid('wg-cp');
+  const run = (input) => hook('watch-guard.cjs', { session_id: s, cwd: os.tmpdir(), tool_name: 'Bash', tool_input: input });
+  const w = '~/.claude/scripts/watch.sh --check "x" --ok done --wait running --deadline 3h --every 120 --checkpoint 3000';
+  const short = run({ command: w, run_in_background: true });
+  assert.equal(short.status, 2);
+  assert.match(short.stderr, /timeout: 3300000/);
+  assert.equal(run({ command: w, run_in_background: true, timeout: 3300000 }).status, 0);
+  assert.equal(run({ command: w.replace(' --checkpoint 3000', ''), run_in_background: true }).status, 0, 'the default checkpoint fits');
 });
 
 test('dispatch-split-guard: a split hint never blocks; a missing --effort still does', () => {
@@ -162,22 +140,25 @@ test('dispatch-split-guard: a split hint never blocks; a missing --effort still 
     const bare = run(`orca orchestration worker-start ${spec} --agent antigravity --model gemini-3.8-flash --effort high`);
     assert.equal(bare.status, 0, 'no Track line is not owed');
     assert.equal(context(bare), '');
-    assert.equal(run(`# Track: w1 ← rà [a.py]\norca orchestration worker-start ${spec} --agent antigravity --model gemini-3.8-flash`).status, 2);
+    const noEffort = `# Track: w1 ← rà [a.py]\norca orchestration worker-start ${spec} --agent antigravity --model gemini-3.8-flash`;
+    assert.equal(run(noEffort).status, 2);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('dispatch-split-guard: a codex worker with no user pick is said once; the same command again passes', () => {
+test('dispatch-split-guard: a codex worker needs no ritual line; a full claude id is said once', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-dsg-'));
   try {
     const transcript = transcriptWith(dir, 'giao worker đi');
     const session = sid('dsg-once');
     const run = (command) => hook('dispatch-split-guard.cjs', { session_id: session, transcript_path: transcript, cwd: dir,
       tool_name: 'Bash', tool_input: { command } });
-    const codex = 'orca orchestration worker-start --spec "Rà; chạy orca orchestration check --peek sau mỗi 10 lệnh" --agent codex --model gpt-luna';
-    const first = run(codex);
+    const spec = '--spec "Rà; chạy orca orchestration check --peek sau mỗi 10 lệnh"';
+    assert.equal(run(`orca orchestration worker-start ${spec} --agent codex --model gpt-luna`).status, 0);
+    const full = `orca orchestration worker-start ${spec} --agent claude --model claude-opus-5-5`;
+    const first = run(full);
     assert.equal(first.status, 2);
-    assert.match(first.stderr, /user chỉ định/);
-    assert.equal(run(codex).status, 0, 'the agent judged it and ran it again');
+    assert.match(first.stderr, /bare alias/);
+    assert.equal(run(full).status, 0, 'the agent judged it and ran it again');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -328,28 +309,6 @@ test('worker-start-receipt: a new agy version runs the fixtures and speaks only 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('note-recall: only what the note holds in force stops a command; IDs and next steps never do', () => {
-  const { recall } = require('../claude/hooks/note-recall.cjs');
-  const body = [
-    '## Đang làm', 'PR #21: chờ CI rồi merge nhánh kaizen/harness-nhac-nhe', '',
-    '## Đang có hiệu lực', '- "chỉ push kaizen/harness-nhac-nhe, chưa merge" (uuid u1)', '',
-    '## Đã xong', '- vietnt02/agent-harness#19 merged', '',
-    '## Resume', '- vietnt02/agent-harness#21, nhánh kaizen/harness-nhac-nhe',
-  ].join('\n');
-  const hits = recall([{ file: 'n.md', body }], 'git push origin kaizen/harness-nhac-nhe');
-  assert.deepEqual(hits.map((h) => h.line), ['- "chỉ push kaizen/harness-nhac-nhe, chưa merge" (uuid u1)']);
-  assert.deepEqual(recall([{ file: 'n.md', body: body.replace(/^## Đang có hiệu lực\n.*\n/m, '') }],
-    'gh pr checks 21 --repo vietnt02/agent-harness'), [], 'Resume and Đã xong IDs never stop a command');
-  assert.equal(recall([{ file: 'old.md', body: '- dùng nhánh kaizen/harness-nhac-nhe' }], 'git push origin kaizen/harness-nhac-nhe').length, 1,
-    'a note with no sections is read whole');
-  const push = 'git push origin kaizen/harness-nhac-nhe';
-  assert.equal(recall([{ file: 'nfd.md', body: body.normalize('NFD') }], push).length, 1, 'an NFD note still finds its in-force section');
-  assert.equal(recall([{ file: 'crlf.md', body: body.replace(/\n/g, '\r\n') }], push).length, 1, 'CRLF too');
-  const fenced = body.replace('- "chỉ push', '```\n## not a heading\n```\n- "chỉ push');
-  assert.equal(recall([{ file: 'f.md', body: fenced }], push).length, 1, 'a ## inside a fence ends no section');
-  const older = '- Viet: "dùng kaizen/harness-nhac-nhe"\n## Quyết định của Viet\n- push kaizen/harness-nhac-nhe trước\n## Trạng thái resume\n- x';
-  assert.equal(recall([{ file: 'o.md', body: older }], push).length, 2, 'an older layout without the in-force section is read whole');
-});
 
 test('worker-stall: an agy worker run in a terminal has no transcript; the age of its last conversation step shows instead of an error', () => {
   const w = require('../claude/scripts/worker-stall.cjs');

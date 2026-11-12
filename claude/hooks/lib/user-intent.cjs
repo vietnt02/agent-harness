@@ -1,7 +1,13 @@
 /**
- * user-intent.cjs - what the user's latest words mean, shared by answer-first, session-notes
- * and tier-c-guard so the three hooks never disagree on "is this a question / an approval".
+ * user-intent.cjs - what the user's latest words mean, shared by answer-first, session-notes,
+ * tier-c-guard and secret-file-guard so they never disagree on "is this a question / an approval"
+ * or on which entries the user typed.
  */
+const fs = require('fs');
+
+// A message Orca delivers into the session (a worker's report or ask) is stored like a typed
+// prompt; only its header tells it apart: `──── From: <ID> (<id>) (worker_done) ────`.
+const ORCA_MESSAGE = /^─+ From: \S+ \(\S+\) \(\w+\) ─+/;
 
 // Approval words, or a bare numbered answer ("1 2 3") to an ask.
 const DECISION_RE =
@@ -43,7 +49,40 @@ function promptText(rec) {
   // Harness records stored as user strings, not the user's words: a background task's or subagent's
   // result, a `!` shell command and its output, a slash command and its output.
   if (/^<(task-notification|bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|command-name|command-message)>/.test(text)) return null;
+  if (ORCA_MESSAGE.test(text)) return null;
   return /^This session is being continued from a previous conversation/.test(text) ? null : text;
 }
 
-module.exports = { DECISION_RE, isQuestion, promptText };
+// The texts of the transcript's user prompts (not tool results, meta lines, notifications or Orca
+// messages), in order, NFC with LF line ends. `maxBytes` reads only the head of the file.
+function userTexts(transcript, maxBytes = Infinity) {
+  let raw = '';
+  try {
+    if (maxBytes === Infinity) raw = fs.readFileSync(transcript, 'utf8');
+    else {
+      const fd = fs.openSync(transcript, 'r');
+      const buf = Buffer.alloc(maxBytes);
+      raw = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, maxBytes, 0));
+      fs.closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if (d.type !== 'user' || d.isMeta || !d.message || d.isCompactSummary) continue;
+    // A task notification or a message from another session carries `origin.kind` other than `human`.
+    if (d.origin && typeof d.origin === 'object' && d.origin.kind && d.origin.kind !== 'human') continue;
+    const c = d.message.content;
+    const text = typeof c === 'string' ? c
+      : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text || '').join('\n') : '';
+    const t = text.trim();
+    if (!t || /^<(command-|local-command|system-reminder|task-notification)/.test(t) || ORCA_MESSAGE.test(t)) continue;
+    out.push(t.normalize('NFC').replace(/\r\n?/g, '\n'));
+  }
+  return out;
+}
+
+module.exports = { DECISION_RE, isQuestion, promptText, userTexts, ORCA_MESSAGE };

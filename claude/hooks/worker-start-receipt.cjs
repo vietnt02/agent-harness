@@ -201,7 +201,7 @@ function watchLines(ids) {
     const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}`;
     return `Theo dõi treo cho ${d}: \`~/.claude/scripts/watch.sh --once --check "${w}" --ok done --wait running\`, rồi ` +
       'cùng lệnh bỏ `--once`, thêm `--deadline <thời lượng tới giờ đã hẹn user + biên, vd 2h30m> --every 120 --checkpoint 3000 --why-wait ' +
-      '"worker đang làm, coordinator không làm thay"`, chạy background. `stale` là tín hiệu để đọc `worker-read` ' +
+      '"worker đang làm, coordinator không làm thay"`, chạy background với `timeout: 3300000` (mặc định 30 phút ngắn hơn checkpoint 50 phút). `stale` là tín hiệu để đọc `worker-read` ' +
       'hai lần cách vài phút, không phải để dừng hay chạy lại worker (ntv-orca § 3).';
   });
 }

@@ -68,6 +68,10 @@ function parkedProblem(text) {
       const after = p.slice(m.index + m[0].length);
       // A negation or a condition ("nếu doc lệch", "doc lệch thì sửa") states a rule, not a leftover.
       if (/(không|nếu|khi|gặp)\s+(\S+\s+){0,3}$/i.test(before) || /^\s*thì(\s|[,.]|$)/i.test(after)) continue;
+      // A label naming a kind of problem ("Tài liệu lệch thực tế: …" opening a line or a table cell)
+      // defines it, it reports none.
+      const cell = before.slice(before.lastIndexOf('|') + 1);
+      if (/^\s*(?:[-*]\s+|\d+[.)]\s+)?(?:\*\*)?$/.test(cell) && /^[^.;:!?|\n]{0,40}(?:\*\*)?\s*:/.test(after)) continue;
       if (!REF.test(sentences[k]) && !REF.test(sentences[k + 1] || '')) return m[0];
     }
   }

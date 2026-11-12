@@ -37,15 +37,6 @@
             "timeout": 30
           }
         ]
-      },
-      {
-        "matcher": "Bash|Read|Grep|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
-          }
-        ]
       }
     ],
     "PostToolUseFailure": [
@@ -56,15 +47,6 @@
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-start-receipt.cjs\"",
             "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Read|Grep|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
           }
         ]
       }
@@ -120,7 +102,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/gate-line-guard.cjs\""
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/main-checkout-guard.cjs\""
           },
           {
             "type": "command",
@@ -134,42 +116,6 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/agent-background-guard.cjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/open-browser-guard.cjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/note-recall.cjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/worker-default-guard.cjs\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Read|Grep|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
           }
         ]
       }
@@ -219,14 +165,6 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/session-notes.cjs\""
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/coordinator-read-guard.cjs\""
           }
         ]
       }

@@ -4,8 +4,8 @@
  * checked in CI on the tracked copy (tools/rules-budget.cjs), not here.
  * PreToolUse(Edit|Write|MultiEdit): a session note is capped per section and per line, and limited
  * to four `## ` sections (lib/session-note-cap.cjs): it is current state, rewritten, never a log
- * (rules/agent-harness/session-notes.md); an older note gets the four sections the first time it is
- * edited. Edits that shrink an over-cap note are allowed.
+ * (rules/agent-harness/session-notes.md). A write past a cap runs and gets the cap back as context:
+ * a nudge to rewrite, never a blocking error.
  * PostToolUse(Bash): a shell write (sed -i, heredoc) is not seen before it runs, so after a Bash
  * call a note of this session written in the last 10 minutes past a cap or with a section outside
  * the four is noted back as context, once per version of the file: a nudge, never a blocking error.
@@ -128,8 +128,9 @@ process.stdin.on('end', () => {
     const current = read(file);
     const why = problem(file, current, contentAfter(current, tool, input));
     if (why) {
-      process.stderr.write(`rules-budget: ${why} \n`);
-      process.exit(2);
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `rules-budget: ${why} Rewrite the note within the cap.` },
+      }));
     }
   } catch (_) { /* fail-open */ }
   process.exit(0);

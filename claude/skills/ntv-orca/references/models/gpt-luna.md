@@ -14,7 +14,7 @@ Chỉ dùng khi user chỉ định (`SKILL.md` § 2). Spawn: `--agent codex --mo
 
 ## Giao gì / Không giao gì
 
-- **Giao:** Backend, pipeline, SQL, schema gọn một lượt (lọc báo cáo, sửa text, pagination, chống race); giữ kỷ luật tầng B/C. Task nhạy cảm (thư, hoá đơn, công nợ) cần duyệt kế hoạch và reviewer (`SKILL.md` § 1, § 4).
+- **Giao:** Backend, pipeline, SQL, schema gọn một lượt (lọc báo cáo, sửa text, pagination, chống race); giữ kỷ luật tầng C. Task nhạy cảm (thư, hoá đơn, công nợ) cần duyệt kế hoạch và reviewer (`SKILL.md` § 1, § 4).
 - **Không giao:** UI/UX; task dài (chia ≤ 30 phút, `SKILL.md` § 2); việc chưa kiểm dữ liệu thật (không tự phản biện spec).
 
 ## Phải nói rõ trong spec

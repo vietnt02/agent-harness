@@ -102,7 +102,7 @@ function findPushes(command, startCwd) {
     const refspecs = positional.slice(1);
     // `:branch` deletes it, like --delete.
     if (refspecs.length && refspecs.every((r) => r.startsWith(':'))) continue;
-    pushes.push({ dir, remote: positional[0] || repo || 'origin', refspecs: refspecs.filter((r) => !r.startsWith(':')) });
+    pushes.push({ dir, remote: positional[0] || repo || null, refspecs: refspecs.filter((r) => !r.startsWith(':')) });
   }
   return pushes;
 }
@@ -158,6 +158,11 @@ const glabEnvs = once(() => glabDirs());
 // Returns [{ id, state }] with state normalised to OPEN / MERGED / CLOSED.
 function reviewsFor(dir, remote, branch, { gh = ghEnvs, glab = glabEnvs } = {}) {
   if (!fs.existsSync(dir)) throw new Error(`thư mục ${dir} không tồn tại`);
+  // A bare `git push` goes to the branch's own remote (`branch.<b>.remote`), else the only remote.
+  if (!remote) {
+    try { remote = run('git', ['config', `branch.${branch}.remote`], dir); } catch (_) { remote = ''; }
+    if (!remote) { const all = run('git', ['remote'], dir).split('\n').filter(Boolean); remote = all.includes('origin') || all.length !== 1 ? 'origin' : all[0]; }
+  }
   const url = run('git', ['remote', 'get-url', remote], dir);
   if (!/github\.com[:/]/.test(url)) {
     const mrs = firstThatWorks(glab, (env) => JSON.parse(runEnv('glab', ['mr', 'list', '--source-branch', branch, '--all', '-F', 'json'], dir, env)));
@@ -167,21 +172,23 @@ function reviewsFor(dir, remote, branch, { gh = ghEnvs, glab = glabEnvs } = {}) 
   return prs.map((p) => ({ id: `#${p.number}`, state: p.state }));
 }
 
+// A directory the command itself makes (`git worktree add <d> && cd <d> && git push`) is not there
+// yet when the hook runs: its branch is new, so nothing is said about it.
+const notYet = (e) => e && (e.code === 'ENOENT' || /not a git repository|không tồn tại/.test(`${e.message || ''}${e.stderr || ''}`));
+
 // What the hook does with a command: { block } naming a branch whose PR/MR is merged or closed,
-// else { blind } listing the branches whose state could not be read.
+// else { blind } listing the branches whose state could not be read. A directory that cannot be
+// known here (a variable path) or does not exist yet is skipped quietly.
 function decide(command, cwd, { reviews = reviewsFor, branches = branchesOf } = {}) {
   const blind = [];
   for (const push of findPushes(command, cwd)) {
-    if (push.dir === null) {
-      blind.push('không xác định được thư mục của `git push` (nằm sau một biến lệnh không gán giá trị literal)');
-      continue;
-    }
+    if (push.dir === null) continue;
     let names = [];
-    try { names = branches(push); } catch (e) { blind.push(`nhánh ở ${push.dir}: ${why(e)}`); }
+    try { names = branches(push); } catch (e) { if (!notYet(e)) blind.push(`nhánh ở ${push.dir}: ${why(e)}`); }
     for (const branch of names) {
       if (!branch || branch === 'HEAD') continue;
       let found;
-      try { found = reviews(push.dir, push.remote, branch); } catch (e) { blind.push(`"${branch}" (${redact(push.remote)}): ${why(e)}`); continue; }
+      try { found = reviews(push.dir, push.remote, branch); } catch (e) { if (!notYet(e)) blind.push(`"${branch}" (${redact(push.remote || 'remote của nhánh')}): ${why(e)}`); continue; }
       if (found.length === 0 || found.some((r) => r.state === 'OPEN')) continue;
       return { block: `push-after-pr-guard: branch "${branch}" already had ${found.map((r) => `${r.id} ${r.state}`).join(', ')}. ` +
         "Push the follow-up to a new branch from the target's current tip and open a new PR/MR.\n" };

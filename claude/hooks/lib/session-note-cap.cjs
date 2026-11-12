@@ -16,8 +16,8 @@ const LINE_CAPS = { 'Đang có hiệu lực': 250, 'Đã xong': 150 };
 const HOW_TO_CUT = {
   'Đang làm': 'keep one topic and its next step; the story so far is re-read from the session jsonl',
   Resume: 'IDs only',
-  'Đang có hiệu lực': "keep Viet's words and what they cover; a decision an issue, PR or comment now holds becomes its link",
-  'Đã xong': 'one closed topic: its result link and the uuid of the opening message',
+  'Đang có hiệu lực': 'the approved block in a few words, never wider; a decision an issue, PR or comment now holds becomes its link',
+  'Đã xong': 'one closed topic: its result link',
 };
 
 // Body text of each `## ` section outside code fences, front matter excluded.

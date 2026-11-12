@@ -14,10 +14,11 @@
  *   UserPromptSubmit with a note: a prompt carrying approval words gets "a line under
  *   `## Đang có hiệu lực` only if it approves, limits or decides; otherwise write nothing". The
  *   words also match a bare "ok", so the reminder never orders a write by itself.
- *   PostToolUse Bash with a note: a PR/MR merge/close/create or git push gets "rewrite the stale lines".
  *   PostToolUse (Bash, Edit, Write) once every note of this session says `status: done`: the order to
  *   sum up the session's kaizen from its transcript, once per session (closedNote, kaizenReminder).
  *   PostToolUse Edit|Write of an open note under session-notes/ without this session's id: say so (strayNote).
+ *   PostToolUse Edit|Write of a note whose `session:` line lost an id: say so (droppedIds): another
+ *   branch of the conversation (rewind, fork) may still use that note.
  * Always exits 0: a broken note never blocks a session.
  */
 
@@ -28,33 +29,10 @@ const { DECISION_RE } = require('./lib/user-intent.cjs');
 const { NOTE_SECTIONS, overCaps, strayHeadings } = require('./lib/session-note-cap.cjs');
 // How much of an over-cap note a compact shows; the order to Read and rewrite it comes with it.
 const VIEW_CHARS = 1500;
-const { commands, program, innerScript } = require('./lib/shell-words.cjs');
 
 const ROOT = path.join(os.homedir(), '.claude', 'session-notes');
 const KEEP_DONE_MS = 14 * 24 * 60 * 60 * 1000;
 const slugify = (p) => p.replace(/[^A-Za-z0-9]/g, '-');
-// A command that changes a PR/MR or a pushed branch: only one that runs (shell-words), so the words
-// in a quote, a heredoc, a grep or a `node -e` script never count; `bash -c` is read by its script.
-const STATE_VERBS = { gh: ['pr', /^(merge|close|create|ready)$/], glab: ['mr', /^(merge|close|create|update)$/], git: [null, /^push$/] };
-const TAKES_VALUE = /^(-C|-c|--git-dir|--work-tree|--namespace|--exec-path|-R|--repo|--title|-t|--body|-b|--base|-B|--head|-H|--source-branch|--target-branch|--description|-d|--label|-l|--assignee|-a|--reviewer|-r|--milestone|-m)$/;
-function changesState(command) {
-  return commands(command).map(program).some((words) => {
-    const inner = innerScript(words);
-    if (inner !== null) return changesState(inner);
-    const [cmd, ...args] = words;
-    const verbs = STATE_VERBS[cmd];
-    if (!verbs) return false;
-    // Flags are skipped wherever they stand, with their value only for the flags known to take one.
-    const plain = [];
-    for (let i = 0; i < args.length; i++) {
-      if (!args[i].startsWith('-')) { plain.push(args[i]); continue; }
-      if (TAKES_VALUE.test(args[i])) i++;
-    }
-    const [noun, verb] = verbs[0] ? plain : [null, plain[0]];
-    return noun === verbs[0] && verbs[1].test(verb || '');
-  });
-}
-
 const mdFiles = (dir) => {
   try {
     return fs.readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => path.join(dir, f));
@@ -117,7 +95,7 @@ function readNote(file) {
   return { text, head, front: Boolean(m) };
 }
 
-// The ids on a note's `session:` line, read as worker-default-guard `liveLines` reads them.
+// The ids on a note's `session:` line.
 const sessionIds = (head) => (head.session || '').split(/[\s,[\]"']+/).filter(Boolean);
 
 // The session's work ends when every note it owns says `status: done`, however that was written
@@ -155,7 +133,7 @@ function kaizenReminder(files, transcript) {
     (transcript ? ` ${transcript}` : ' (the session .jsonl)') +
     ', not your memory, and list only what a hook, script, skill or reworded sentence must fix: a harness defect met ' +
     '(a hook or script that misfired or lacks a step it is the only route for, a skill that gave a wrong step), a serious ' +
-    'break no hook stops yet (a secret printed, a production or shared-data write, a tier B/C action done wrong; its fix ' +
+    'break no hook stops yet (a secret printed, a production or shared-data write, a tier-C action done wrong; its fix ' +
     'is a hook, never a sentence), a rule sentence two fair readings of which lead to two different actions. ' +
     'A clear rule broken without such harm, or an intent misread, is no file. ' +
     'In a kaizen session fix them there instead (ntv-kaizen step 5). The report says how many files were written, or that the transcript held none.'
@@ -176,7 +154,24 @@ function strayNote(data, own, root = ROOT) {
   }
 }
 
-module.exports = { changesState, overCapView, readNote, cutLines, closedNote, kaizenReminder, strayNote };
+// The ids the `session:` line of the note this Edit/Write changed had before the call and lost
+// (the file before the call comes from the tool's result, `originalFile`; a call without it: none).
+function droppedIds(data, root = ROOT) {
+  const f = (data.tool_input || {}).file_path;
+  const before = (data.tool_response || {}).originalFile;
+  if (!f || typeof before !== 'string' || !path.resolve(f).startsWith(path.resolve(root) + path.sep)) return [];
+  const ids = (text) => {
+    const m = String(text).replace(/\r\n?/g, '\n').match(/^---\n([\s\S]*?)\n---/);
+    const line = m && (m[1].match(/^session:(.*)$/m) || [])[1];
+    return line ? line.split(/[\s,[\]"']+/).filter(Boolean) : [];
+  };
+  let after = '';
+  try { after = fs.readFileSync(f, 'utf8'); } catch { return []; }
+  const now = ids(after);
+  return ids(before).filter((x) => !now.includes(x));
+}
+
+module.exports = { overCapView, readNote, cutLines, closedNote, kaizenReminder, strayNote, droppedIds };
 if (require.main !== module) return;
 
 try {
@@ -229,7 +224,7 @@ try {
     }
   }
 
-  // An approval just given, or a PR/MR state just changed, leaves the note stale unless it is written now.
+  // An approval just given leaves the note stale unless it is written now.
   const post = [];
   if (own.length) {
     const files = own.map((n) => n.file).join(', ');
@@ -240,18 +235,22 @@ try {
           'rewrite "## Đang làm" and fold the closed topic into one "## Đã xong" line. An opinion, question or acknowledgement: write nothing.'
       );
     }
-    if (data.hook_event_name === 'PostToolUse' && changesState((data.tool_input || {}).command || '')) {
-      post.push(`A PR/MR or branch state just changed: update the IDs under "## Resume" in the session note (${files}), not append; an older note: rewrite it into the four sections of rules/agent-harness/session-notes.md first.`);
-    }
     const closed = data.hook_event_name === 'PostToolUse' ? closedNote(own, id) : [];
     if (closed.length) post.push(kaizenReminder(closed, data.transcript_path));
   }
 
-  // A note written in this session whose `session:` line lacks this id is invisible to every hook
-  // that reads the note (approvals, `Người làm` lines): say so right after the write.
+  // A note written in this session whose `session:` line lacks this id is not this session's note:
+  // a compact will not show it. Say so right after the write.
   const stray = data.hook_event_name === 'PostToolUse' && id && strayNote(data, own);
   if (stray) {
-    post.push(`The note ${stray} has no "${id}" on its session: line, so no hook reads its approvals or \`Người làm\` lines in this session. Put this id there (append it to take the note over).`);
+    post.push(`The note ${stray} has no "${id}" on its session: line. If its session has ended and you continue that work, append ${id} to take it over; ` +
+      'if another branch of this conversation (a rewind, a fork) still uses it, give this session its own note and name that one under "## Resume". ' +
+      'Its "## Đang có hiệu lực" lines are not approvals given in this session.');
+  }
+  const dropped = data.hook_event_name === 'PostToolUse' ? droppedIds(data) : [];
+  if (dropped.length) {
+    post.push(`This write removed ${dropped.join(', ')} from the session: line of ${(data.tool_input || {}).file_path}: that session may be another ` +
+      'branch of this conversation still using the note. Put the id back; this session takes its own note if both stay open.');
   }
   // PostToolUse takes one JSON object: every reminder of this call goes in it.
   if (post.length) {
@@ -262,7 +261,7 @@ try {
     console.log(
       `This session has no note yet (rules/agent-harness/session-notes.md). Only if this prompt approves work, ` +
         `create ${path.join(ROOT, slug)}/<yymmdd>-<topic>.md before this turn's first tool call, with front matter ` +
-        `"session: ${id}", "status: open", "scope: <one line>", or append ${id} to the session: line of an open note you take over.`
+        `"session: ${id}", "status: open", "scope: <one line>". Continuing an ended session's open note: append ${id} to its session: line instead.`
     );
   }
 } catch {

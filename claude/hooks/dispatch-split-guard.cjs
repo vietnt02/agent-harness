@@ -11,14 +11,11 @@
  * serial work ("chạy serial", "làm tuần tự"; not a complaint, a negation, a question or "serial
  * number") or `kern.memorystatus_vm_pressure_level` is ≥2 (`DSG_PRESSURE` overrides it in tests). No
  * `Track:` line, or a command whose every worker-start is `--retry-of`: nothing said.
- * An antigravity worker started without `--effort` is blocked, `--retry-of` included: agy then runs
- * Medium, not the High ntv-orca § 2 (Chọn model) requires. `--terminal` reuses a running agy.
- * A claude worker whose `--model` is not a bare alias (opus, sonnet, fable, haiku) is blocked unless the
- * command holds a `# Model: user chỉ định <bản>` line: a full id outside Orca's catalog drops the
- * worker's `Approve for me` permission mode (ntv-orca § 2, Chọn model). A claude or codex worker at all
- * needs that `# Model: user chỉ định <bản>` line (a retry naming one too; said once, lib/block-once.cjs): workers are Gemini through
- * antigravity unless the user names another (ntv-orca § 2, Chọn model); a rule naming only what a
- * worker is not let the coordinator copy the codex example of the orchestration skill.
+ * Said once (lib/block-once.cjs; the same command run again passes): an antigravity worker started
+ * without `--effort` (`--retry-of` included: agy then runs Medium, not the High ntv-orca § 2 (Chọn
+ * model) requires; `--terminal` reuses a running agy), and a claude worker whose `--model` is not a
+ * bare alias (opus, sonnet, fable, haiku): a full id outside Orca's catalog drops the worker's
+ * `Approve for me` permission mode (ntv-orca § 2, Chọn model).
  * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
  * `orca orchestration check --peek` (a negated mention does not count) gets a nudge: before Orca 1.4.249
  * a Chat worker saw a coordinator's `send` only after its turn ended, and on another agent or version
@@ -60,7 +57,7 @@ const inert = (t) => t.replace(/\\[\s\S]|'[^']*'|"(?:[^"\\]|\\.)*"/g,
 // A backtick dispatch is looked for in the command without heredoc bodies and comments.
 const toWorker = (command) => TO_WORKER.test(command) ||
   /`\s*(?:\w+=\S*\s+)*orca\s+orchestration\s+(?:worker-start|task-create|send|reply|dispatch)\b/.test(inert(workerStarts(command).cmd));
-// Orca's dispatch brief opens a worker session with this line (as in worker-default-guard.cjs).
+// Orca's dispatch brief opens a worker session with this line.
 // A simple command that runs `orca orchestration worker-start` (not a mention of it inside a quoted string).
 const STARTS_WORKER = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 const CREATES_TASK = /^[\s({]*(?:(?:then|do|else)\s+)?(?:\w+=\S*\s+)*orca\s+orchestration\s+task-create\b/;
@@ -146,28 +143,14 @@ function missingEffort({ cmd, segs }) {
     !hasEffort(/\$\{?[@*]/.test(seg) ? cmd : seg));
 }
 
-// The `--model` of a `worker-start --agent claude` segment that is not a bare alias, unless the
-// command names the user's pick on a `# Model: user chỉ định <bản>` line. A `$var` is not judged.
+// The `--model` of a `worker-start --agent claude` segment that is not a bare alias. A `$var` is not judged.
 function unpinnedClaudeModel(command, { segs }) {
-  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command.normalize('NFC'))) return null;
   for (const seg of segs) {
     if (!/--agent(?:\s+|=)['"]?claude\b/.test(seg)) continue;
     const m = seg.match(/--model[ =]['"]?([^\s'"]+)/);
     if (m && !m[1].startsWith('$') && !BARE_CLAUDE.test(m[1])) return m[1];
   }
   return null;
-}
-
-// The agent of a `worker-start --agent claude|codex` segment when the command has no
-// `# Model: user chỉ định <bản>` line; else ''. A retry that names one of them is judged too: a
-// retry with no `--agent` keeps the agent the user already took.
-function unnamedNonGemini(command, { segs }) {
-  if (/^\s*#\s*Model:\s*user chỉ định\s+\S/m.test(command.normalize('NFC'))) return '';
-  for (const seg of segs) {
-    const m = seg.match(/--agent(?:\s+|=)['"]?(claude|codex)\b/);
-    if (m) return m[1];
-  }
-  return '';
 }
 
 // Text a worker will receive from this command: the command itself (comment lines of this hook's
@@ -397,7 +380,7 @@ function verdict(lines, input, ctx, { advisory = false } = {}) {
   return null;
 }
 
-module.exports = { unnamedNonGemini, readsInbox, newSpecs, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
+module.exports = { unpinnedClaudeModel, readsInbox, newSpecs, rootOf, unrelatedTasks, sprawlingTask, verdict, workerStarts, workerText, prodWrites, prodWriteAllowed, workerSession };
 if (require.main !== module) return;
 
 let raw = '';
@@ -439,27 +422,18 @@ process.stdin.on('end', () => {
     }
     if (!starts.segs.length) say();
     if (onlyHelp(starts.segs)) say();
+    const { firstTime, again } = require('./lib/block-once.cjs');
     const model = unpinnedClaudeModel(command, starts);
-    if (model) {
+    if (model && firstTime(sessionId, 'dispatch-split-guard', command)) {
       process.stderr.write(`dispatch-split-guard: a claude worker takes a bare alias (\`--model opus\`, sonnet, ` +
         `fable, haiku), not \`${model}\` (ntv-orca § 2, Chọn model): an id outside Orca's catalog drops the worker's ` +
-        '`Approve for me` mode. A version the user named: add a `# Model: user chỉ định <bản>` line.\n');
+        `\`Approve for me\` mode.${again(sessionId)}\n`);
       process.exit(2);
     }
-    // Quota, not a spoiled run: said once (lib/block-once.cjs), the same command run again passes.
-    const agent = unnamedNonGemini(command, starts);
-    const { firstTime, again } = require('./lib/block-once.cjs');
-    if (agent && firstTime(sessionId, 'dispatch-split-guard', command)) {
-      process.stderr.write(`dispatch-split-guard: a ${agent} worker needs the user's pick on a \`# Model: user chỉ định <bản>\` ` +
-        'line. Workers are Gemini: `--agent antigravity --model <bare slug> --effort high`, the Carbon line for a complex or ' +
-        'research task, the Flash line for a quick one; bare slugs come from `agy models` at dispatch (ntv-orca § 2, ' +
-        `Chọn model).${again(sessionId)}\n`);
-      process.exit(2);
-    }
-    if (missingEffort(starts)) {
+    if (missingEffort(starts) && firstTime(sessionId, 'dispatch-split-guard', command)) {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
         'its `agy models` row minus the `-low|-medium|-high` suffix (ntv-orca § 2, Chọn model); without it agy ' +
-        'runs Medium. A model with one level gets exactly that level (`agy models`).\n');
+        `runs Medium. A model with one level gets exactly that level (\`agy models\`).${again(sessionId)}\n`);
       process.exit(2);
     }
     if (starts.segs.every((seg) => /\s--retry-of\b/.test(seg))) say();

@@ -13,7 +13,9 @@
  * - The `Read` and `Edit`/`MultiEdit` tools on a secret file (`Write` and `.pub` public keys pass).
  * - Loading a secret file (`source`, `.`) in the same command as shell trace (`set -x`, `set -v`,
  *   `set -o xtrace|verbose`) or a variable-printing command (`env` with no command to run,
- *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` with `$`).
+ *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` naming a key the loaded file
+ *   sets; `echo exit=$?` or a variable the file does not set passes; an unreadable file counts
+ *   every named variable).
  * Everything else naming a secret file (`set -a; . ./.env; set +a; <cmd>`, passing its path to a
  * `python3`/`node` script, `--env-file`, `ssh -i <key>`, `cp .env.example .env`, prose in heredocs
  * or quoted strings) passes.
@@ -188,21 +190,37 @@ function setsTrace(args) {
   return false;
 }
 
+// `all`: the command prints every variable (env, printenv, bare set, export/declare -p).
+// `names`: the variables an echo/printf prints (`$X`, `${X}`; `$?`, `$1` are no variables).
 function printsVars(argv, prog) {
-  if (prog.length === 0) return argv.some((w) => !/^\w+=/.test(w) && path.basename(w.replace(/\\/g, '/')).toLowerCase() === 'env');
+  if (prog.length === 0) return { all: argv.some((w) => !/^\w+=/.test(w) && path.basename(w.replace(/\\/g, '/')).toLowerCase() === 'env'), names: [] };
   const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
   const args = prog.slice(1);
-  if (name === 'printenv') return true;
-  if (name === 'set') return args.length === 0;
-  if (name === 'export' || name === 'declare') return args.some((a) => /^-[a-zA-Z]*p/.test(a));
-  if (name === 'echo' || name === 'printf') return args.some((a) => a.includes('$'));
-  return false;
+  if (name === 'printenv') return { all: true, names: [] };
+  if (name === 'set') return { all: args.length === 0, names: [] };
+  if (name === 'export' || name === 'declare') return { all: args.some((a) => /^-[a-zA-Z]*p/.test(a)), names: [] };
+  if (name === 'echo' || name === 'printf') {
+    const names = args.flatMap((a) => [...a.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
+    return { all: false, names };
+  }
+  return { all: false, names: [] };
 }
 
-function printedSecrets(command, isSecret) {
+// The keys a dotenv-style file sets, or null when it cannot be read. Values are never kept.
+function keysOf(file, cwd) {
+  try {
+    const text = require('fs').readFileSync(path.resolve(cwd || process.cwd(), String(file).replace(/^~(?=\/)/, os.homedir())), 'utf8');
+    return new Set([...text.matchAll(/^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/gm)].map((m) => m[1]));
+  } catch {
+    return null;
+  }
+}
+
+function printedSecrets(command, isSecret, cwd) {
   const leaked = [];
   const sourced = [];
-  let printsEnv = false;
+  let printsAll = false;
+  const named = [];
   for (const words of commands(command)) {
     const { argv, stdinFiles } = splitRedirects(words);
     const prog = program(argv);
@@ -213,9 +231,14 @@ function printedSecrets(command, isSecret) {
     if (files !== null) {
       for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);
     }
-    if ((name === 'set' && setsTrace(args)) || printsVars(argv, prog)) printsEnv = true;
+    const vars = printsVars(argv, prog);
+    if ((name === 'set' && setsTrace(args)) || vars.all) printsAll = true;
+    named.push(...vars.names);
   }
-  if (printsEnv && sourced.length > 0) leaked.push(...sourced);
+  for (const f of sourced) {
+    const keys = keysOf(f, cwd);
+    if (printsAll || named.some((n) => keys === null || keys.has(n))) leaked.push(f);
+  }
   return [...new Set(leaked)];
 }
 
@@ -227,7 +250,7 @@ function approved(command, transcript, userTexts) {
 }
 
 // The verdict on one call: { deny, paths, fallback, uninspectable, onlyDotenv, reason }.
-function judge(data, { checker = loadChecker(), userTexts = require('./worker-default-guard.cjs').userTexts } = {}) {
+function judge(data, { checker = loadChecker(), userTexts = require('./lib/user-intent.cjs').userTexts } = {}) {
   const tool = data.tool_name || '';
   const toolInput = data.tool_input || {};
   const isShell = tool === 'Bash' || tool === 'PowerShell';
@@ -269,7 +292,7 @@ function judge(data, { checker = loadChecker(), userTexts = require('./worker-de
     if (!base || clean.startsWith('-') || SAFE.test(base)) return false;
     return Boolean(checker.checkPrivacy({ toolName: 'Read', toolInput: { file_path: clean }, options: { cwd: data.cwd } }).blocked);
   };
-  const paths = printedSecrets(command, isSecret);
+  const paths = printedSecrets(command, isSecret, data.cwd);
   if (paths.length === 0 || approved(command, data.transcript_path, userTexts)) return pass;
   return { deny: true, paths, fallback: false, uninspectable: false, onlyDotenv: paths.every(isDotenv), reason: undefined };
 }

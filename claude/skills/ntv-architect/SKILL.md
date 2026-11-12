@@ -36,8 +36,8 @@ about a technical choice. Stop when you can predict his reaction to the finished
 
 Restate as: problem, exact requirements, goals, done means (observable end states, cleanup
 included), non-goals, constraints. Show the end state inline (a Mermaid diagram, a text mockup,
-a before/after table), labelled as proposed. Confirm both with one AskUserQuestion; on "not
-quite", ask what differs and return to step 3.
+a before/after table), labelled as proposed. Its confirmation is the final gate's (step 7), not
+a separate ask; a reply saying it is not quite right returns to step 3.
 
 ## 5. Decide the solution
 
