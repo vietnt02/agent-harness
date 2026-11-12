@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
  * main-checkout-guard.cjs - PreToolUse(Bash): git that writes into the user's main checkout
- * (merge, pull, reset, checkout, switch, commit, …; in cwd, after `cd`, or under `-C`) is blocked
+ * (merge, reset, checkout, switch, commit, …; in cwd, after `cd`, or under `-C`) is blocked
  * once with a reminder: new work goes in its own worktree from `origin/<base>` (CLAUDE.md §
  * Mutation gate), and reading the latest code needs only `git fetch` + `git show origin/<b>:<path>`.
+ * Upkeep that starts no work there passes: `pull`, `worktree add/move/remove/prune`, `branch -d`;
+ * their forced forms (`--force`, `-B`, `-D`) can drop work and stay gated.
  * The same command run again passes (lib/block-once.cjs). A linked worktree and a repo in the
  * session scratchpad pass. `git -c core.hooksPath=…` turns the repo's checks off and is always
  * blocked (CLAUDE.md § Irreversible actions: never bypass a check). Subagents are skipped.
@@ -17,9 +19,10 @@ const { execFileSync } = require('child_process');
 const { expandHome, toSlash } = require('./lib/platform.cjs');
 const { commands, program, innerScript, assignments, expandVars } = require('./lib/shell-words.cjs');
 
-const GIT_WRITE = new Set(['merge', 'pull', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am', 'clean', 'restore', 'update-ref']);
+const GIT_WRITE = new Set(['merge', 'rebase', 'reset', 'checkout', 'switch', 'commit', 'cherry-pick', 'revert', 'am', 'clean', 'restore', 'update-ref']);
 const STASH_READ = new Set(['list', 'show', 'create']);
-const WORKTREE_WRITE = new Set(['add', 'remove', 'move']);
+// `worktree add -B` resets an existing branch; `--force`/`-f` drops a dirty worktree or a lock.
+const WORKTREE_FORCED = /^(-[a-zA-Z]*[fB]|--force)$/;
 // Global options that take the next word as their value.
 const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
@@ -66,8 +69,9 @@ function gitWrite(raw, words) {
   const args = words.slice(i + 1);
   const write = GIT_WRITE.has(sub) ||
     (sub === 'stash' && !STASH_READ.has(args[0])) ||
-    (sub === 'branch' && args.some((a) => /^-[a-zA-Z]*[dDmMfcCu]/.test(a) || /^--(delete|move|force|copy|set-upstream-to|unset-upstream|edit-description)\b/.test(a))) ||
-    (sub === 'worktree' && WORKTREE_WRITE.has(args[0])) ||
+    // `branch -d` deletes only a merged branch: upkeep. `-D`, `-f`, a move or copy can lose work.
+    (sub === 'branch' && args.some((a) => /^-[a-zA-Z]*[DmMfcCu]/.test(a) || /^--(move|force|copy|set-upstream-to|unset-upstream|edit-description)\b/.test(a))) ||
+    (sub === 'worktree' && args.some((a) => WORKTREE_FORCED.test(a))) ||
     (sub === 'tag' && args.some((a) => /^-[a-zA-Z]*[df]/.test(a) || a === '--delete' || a === '--force'));
   return write ? { dirs } : null;
 }
@@ -169,7 +173,7 @@ process.stdin.on('end', () => {
     process.stderr.write(
       'main-checkout-guard: this git command writes into the user\'s main checkout. New work goes in its own ' +
         'worktree from `origin/<base>`; to read the latest code: `git fetch`, then `git show origin/<b>:<path>`. ' +
-        'Updating the checkout after a merge the user approved is fine.' + again(sessionId) + '\n'
+        '`git pull`, `git worktree add/remove` and `git branch -d` pass.' + again(sessionId) + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open */ }

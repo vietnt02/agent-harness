@@ -644,7 +644,6 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'bash -c "true; git checkout main"',
         'eval "true; git checkout main"',
         'sh -c "git checkout main"',
-        'bash -lc \'git pull\'',
         ...['-u', '-m wip', '--keep-index', 'save wip', 'branch tmp', 'store abc'].map((a) => `git stash ${a}`),
         'git branch -f main HEAD~1',
         'git branch -Df x',
@@ -653,9 +652,7 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         `git --work-tree . checkout main`,
         `cd "${L}" && git --work-tree="${T}" checkout main`,
         `cd "${L}" && GIT_WORK_TREE="${T}" git checkout main`,
-        'timeout 30 git pull',
         'xargs -J % git branch -D %',
-        'xargs -s 100 git branch -d',
         `cd "${L}" && env -C "${T}" git checkout main`,
         `(cd "${L}" && git status); git checkout main`,
         `x=$(cd "${L}"; pwd); git checkout main`,
@@ -688,6 +685,29 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git branch -a',
         'git tag -l',
       ]) assert.equal(writes(c), false, c);
+    });
+    await t.test('upkeep that starts no work in the checkout passes: pull, worktree add/move/remove, a safe branch delete', () => {
+      for (const c of [
+        'git pull --ff-only',
+        'bash -lc \'git pull\'',
+        'timeout 30 git pull',
+        `git -C "${L}" pull -q --ff-only origin main`,
+        'git worktree add -q ../wt -b fix/x origin/main',
+        'git worktree remove ../wt',
+        'git worktree move ../wt ../wt2',
+        'git worktree prune',
+        'git branch -d fix/x feat/y',
+        'git branch --delete fix/x',
+        'xargs -s 100 git branch -d',
+      ]) assert.equal(writes(c), false, c);
+      for (const c of [
+        'git worktree remove --force ../wt',
+        'git worktree remove -f ../wt',
+        'git worktree add -B main ../wt origin/main',
+        'git worktree add --force ../wt main',
+        'git branch -d -f x',
+        'git branch --delete --force x',
+      ]) assert.equal(writes(c), true, c);
     });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
