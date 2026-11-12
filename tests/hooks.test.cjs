@@ -823,13 +823,15 @@ test('dispatch-split-guard: a claude worker id outside the bare aliases is caugh
 
 test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a finished one, where the new dispatch is', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
-  const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded' }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
+  const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded', released: true, worktree: 'wt1::/w' }, ctx_b3: { state: 'succeeded', released: false }, ctx_b4: { state: 'stopped', released: true, exited: true }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
   const lines = (c) => receipt.sendLines(c, (d) => states[d]);
   assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
   assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /check --peek.*worker-stop --dispatch ctx_a1/);
   assert.doesNotMatch(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Cần bạn/);
   assert.match(lines('orca orchestration send --to=dispatch:ctx_c3 --subject x')[0], /state=ready/);
-  assert.match(lines('orca orchestration send --to dispatch:ctx_b2 --subject x')[0], /dispatch mới.*worker-list.*không giao thêm worker/);
+  assert.match(lines('orca orchestration send --to dispatch:ctx_b2 --subject x')[0], /dispatch mới.*worker-list.*wt1::\/w.*không giao thêm worker/);
+  assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b3 --subject x'), [], 'terminal still retained: not seen, silent');
+  assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b4 --subject x'), [], 'other finished states: silent');
   assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);
   assert.deepEqual(lines('echo "orca orchestration send --to dispatch:ctx_a1"'), []);
   assert.deepEqual(receipt.sendLines('orca orchestration send --to dispatch:ctx_zz', () => { throw new Error('x'); }), []);
