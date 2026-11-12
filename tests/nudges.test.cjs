@@ -379,7 +379,10 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
     assert.match(w.status(o, deps), /^stale idle>10m agy-step=none state=running$/, 'no conversation found: still a state line, never an error');
     conv('mine', ws, now - 2 * 60000);
     conv('sibling', `${ws}-2`, now - 60000);
-    assert.match(w.status(o, deps), /^stale idle>10m agy-step=2m state=running$/, 'the newer DB of `<worktree>-2` is another worker');
+    // A worker that plans before it edits changes no file for a while; a step of its own within
+    // --idle-min still means running, whatever the worktree's file times say.
+    assert.match(w.status(o, deps), /^running agy-step=2m state=running$/, 'the newer DB of `<worktree>-2` is another worker');
+    assert.match(w.status(o, { ...deps, now: now + 8 * 60000 }), /^stale idle>10m agy-step=10m state=running$/, 'no file and no step within --idle-min');
     fs.writeFileSync(path.join(ws, 'a.txt'), 'x');
     assert.match(w.status(o, { ...deps, now: Date.now() }), /^running changed=a\.txt agy-step=0m state=running$/);
     assert.throws(() => w.status(o, { ...deps, newErrors: () => { throw Object.assign(new Error('Command failed: dispatch_not_found'), { stderr: 'dispatch_not_found' }); } }), /dispatch_not_found/, 'any other read error still fails');
