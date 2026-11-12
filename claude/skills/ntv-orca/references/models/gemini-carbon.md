@@ -10,7 +10,7 @@ source: 1 phiên (2 worker rà chỉ-đọc dữ liệu)
 
 # gemini-carbon
 
-Mặc định làm **worker** cho task phức tạp và research, và khi `gemini-flash` hết quota (`SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`): người chấm khác model với người làm.
+Mặc định làm **worker** cho task phức tạp, research gồm cả; task nhỏ đến trung bình giao `gemini-4-hydrogen` (`gemini-hydrogen.md`, `SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`): người chấm khác model với người làm.
 
 ## Giao gì / Không giao gì
 
