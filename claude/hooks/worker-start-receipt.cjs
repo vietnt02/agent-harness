@@ -17,7 +17,9 @@
  * worker; earlier it waited Queued for the next `check --peek`). The worker's chat pane shows which:
  * `worker-read --source transcript` does not show the new turn. A worker that does not act on an
  * urgent message is the coordinator's own `worker-stop` plus a new dispatch on the same worktree,
- * never an ask to the user.
+ * never an ask to the user. A send to a `succeeded` worker whose terminal is released does not fail:
+ * Orca starts a new dispatch on the same worktree to take the message (knowledge/orca.md), so the
+ * reminder names where to find it instead of a second worker. Other finished states: not seen, silent.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -170,14 +172,18 @@ function sendTargets(command) {
 function showState(d) {
   const r = JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', d, '--json', '--full'])).result;
   const exited = r.projection?.liveness?.verdict === 'exited' || r.observation?.status === 'exited';
-  return { state: r.worker?.state, exited };
+  return { state: r.worker?.state, exited, released: r.terminalResource?.releaseState === 'released', worktree: r.worker?.worktreeId };
 }
 
-// One reminder per addressed worker not finished; `show` reads its state.
+// One reminder per addressed worker; `show` reads its state.
 function sendLines(command, show = showState) {
   return sendTargets(command).flatMap((d) => {
     let st;
     try { st = show(d); } catch (_) { return []; }
+    if (st.state === 'succeeded' && st.released) {
+      return [`${d} (state=succeeded, terminal released): Orca giao tin này cho một dispatch mới trên cùng worktree. Tìm nó ở ` +
+        `\`orca orchestration worker-list --json\` (mới nhất trước, \`workspace\` = \`${st.worktree}\`) và theo dõi dispatch đó; không giao thêm worker.`];
+    }
     if (DONE.has(st.state)) return [];
     if (st.exited) {
       return [`${d} (state=${st.state}): session của worker đã thoát, tin sẽ không tới. Đừng báo user là worker đã nhận; ` +
