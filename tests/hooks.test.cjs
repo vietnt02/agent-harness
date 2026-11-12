@@ -693,6 +693,10 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'timeout 30 git pull',
         'git pull -q --ff-only origin',
         'git pull --rebase',
+        'git pull --depth 1 origin',
+        'git pull -X theirs origin',
+        'git pull -s ours origin',
+        'git pull -Xdiff-algorithm=patience',
         'git worktree add -q ../wt -b fix/x origin/main',
         'git worktree add -bfix/x ../wt origin/main',
         'git worktree remove ../wt',
@@ -715,6 +719,7 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git branch -fd x',
         'git branch --force -d x',
         'git pull origin feat/x',
+        'git pull origin main',
         'git pull --squash origin',
         'git pull --no-commit',
         'git pull --no-ff',
@@ -1280,6 +1285,29 @@ test('main-checkout-guard: removing a detached worktree is flagged only when no 
     assert.equal(writes(`git worktree remove "${P(atMain)}"`), false, 'a branch holds its commit');
     assert.equal(writes(`git worktree remove "${P(onBranch)}"`), false, 'on a branch');
     assert.equal(writes(`git -C "${P(onBranch)}" worktree remove "${P(lone)}"`), false, 'run from a linked worktree');
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'mcg-ws-'));
+    try {
+      const away = path.join(ws, 'away');
+      git('worktree', 'add', '-q', '--detach', away);
+      execFileSync('git', ['-C', away, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'only here', '--allow-empty']);
+      assert.equal(writes('git worktree remove away'), true, 'a worktree outside the checkout, named by its ending');
+      assert.equal(writes(`git worktree remove ${path.basename(ws)}/away/`), true, 'a longer ending');
+    } finally {
+      fs.rmSync(ws, { recursive: true, force: true });
+    }
+    // `git pull <remote> <branch>` of the branch's own upstream is upkeep; another branch is a merge.
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'mcg-bare-'));
+    try {
+      execFileSync('git', ['init', '-q', '--bare', bare]);
+      const head = git('rev-parse', '--abbrev-ref', 'HEAD').trim();
+      git('remote', 'add', 'origin', bare);
+      git('push', '-q', '-u', 'origin', head);
+      assert.equal(writes(`git pull origin ${head}`), false, 'its own upstream');
+      assert.equal(writes(`git pull --rebase origin ${head}`), false, 'its own upstream, rebased');
+      assert.equal(writes('git pull origin other'), true, 'another branch');
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
