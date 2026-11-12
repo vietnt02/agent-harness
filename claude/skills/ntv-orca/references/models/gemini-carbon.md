@@ -14,7 +14,7 @@ Mặc định làm **worker** cho task phức tạp, research phức tạp gồm
 
 ## Giao gì / Không giao gì
 
-- **Giao:** Task phức tạp (nhiều bước, chạy lệnh, sửa code có test chứng minh), research phức tạp (tổng hợp, đối chiếu nhiều nguồn mâu thuẫn để ra kết luận).
+- **Giao:** Task phức tạp (nhiều bước, chạy lệnh, sửa code có test chứng minh), research phức tạp (cùng tiêu chí phức tạp ở `SKILL.md` § 2).
 - **Không giao / Điểm yếu:** Không giao chặng rà chỉ-đọc (việc của subagent rà, `SKILL.md` § 1): không có kế hoạch duyệt trước thì dò rộng ra ngoài đích spec nêu, mỗi lượt nghĩ lâu, viết lại nhiều lần lệnh `python3 -c` hỏng dấu nháy. Không làm reviewer.
 
 ## Phải nói rõ trong spec — câu chèn sẵn vào `--spec`
