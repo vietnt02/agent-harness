@@ -18,7 +18,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { expandHome, samePath } = require('./lib/platform.cjs');
-const { commands, program } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript } = require('./lib/shell-words.cjs');
 
 const EXEMPT = /#\s*watch-exempt:\s*\S/;
 const BG_TIMEOUT_MS = 1800000;
@@ -54,15 +54,23 @@ function remoteScripts(text) {
 function shape(text, deep = true) {
   const inner = deep ? remoteScripts(text).map((t) => shape(t, false)) : [];
   const all = commands(text);
+  // A script this shell runs in its own place (`bash -c '<s>'`, `eval <s>`) is this shell's work.
+  const own = all.map(program).map(innerScript).filter((t) => t !== null).map((t) => shape(t, deep));
   const first = (w) => w.find((x) => !/^(\{|\(|!|time)$/.test(x));
   const loops = all.map(first).filter((w) => /^(for|while|until)$/.test(w || ''));
   const progs = all.map(program);
   const sleeps = progs.some((w) => w[0] === 'sleep');
   const remote = progs.some((w) => w[0] === 'ssh' || w[0] === 'airflow' ||
     (w[0] === 'docker' && w[1] === 'exec') || ((w[0] === 'gh' || w[0] === 'glab') && w[1] === 'api'));
-  const wait = loops.some((w) => w !== 'for') || inner.some((x) => x.wait);
-  const poll = (loops.some((w) => w !== 'for') && sleeps) || inner.some((x) => x.poll);
-  return { loop: loops.length > 0, wait, poll, sleeps: sleeps || inner.some((x) => x.sleeps), remote };
+  const wait = loops.some((w) => w !== 'for') || inner.some((x) => x.wait) || own.some((x) => x.wait);
+  const poll = (loops.some((w) => w !== 'for') && sleeps) || inner.some((x) => x.poll) || own.some((x) => x.poll);
+  return {
+    loop: loops.length > 0 || own.some((x) => x.loop),
+    wait,
+    poll,
+    sleeps: sleeps || inner.some((x) => x.sleeps) || own.some((x) => x.sleeps),
+    remote: remote || own.some((x) => x.remote),
+  };
 }
 
 // The arguments of each place the command runs watch.sh, up to the next separator; quoted

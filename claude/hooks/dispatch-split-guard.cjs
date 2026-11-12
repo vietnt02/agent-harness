@@ -424,13 +424,13 @@ process.stdin.on('end', () => {
     if (onlyHelp(starts.segs)) say();
     const { firstTime, again } = require('./lib/block-once.cjs');
     const model = unpinnedClaudeModel(command, starts);
-    if (model && firstTime(sessionId, 'dispatch-split-guard', command)) {
+    if (model && firstTime(sessionId, 'dispatch-split-guard-model', command)) {
       process.stderr.write(`dispatch-split-guard: a claude worker takes a bare alias (\`--model opus\`, sonnet, ` +
         `fable, haiku), not \`${model}\` (ntv-orca § 2, Chọn model): an id outside Orca's catalog drops the worker's ` +
         `\`Approve for me\` mode.${again(sessionId)}\n`);
       process.exit(2);
     }
-    if (missingEffort(starts) && firstTime(sessionId, 'dispatch-split-guard', command)) {
+    if (missingEffort(starts) && firstTime(sessionId, 'dispatch-split-guard-effort', command)) {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
         'its `agy models` row minus the `-low|-medium|-high` suffix (ntv-orca § 2, Chọn model); without it agy ' +
         `runs Medium. A model with one level gets exactly that level (\`agy models\`).${again(sessionId)}\n`);

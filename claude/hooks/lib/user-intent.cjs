@@ -6,8 +6,9 @@
 const fs = require('fs');
 
 // A message Orca delivers into the session (a worker's report or ask) is stored like a typed
-// prompt; only its header tells it apart: `──── From: <ID> (<id>) (worker_done) ────`.
-const ORCA_MESSAGE = /^─+ From: \S+ \(\S+\) \(\w+\) ─+/;
+// prompt; only its header tells it apart: `──── From: <ID> (<id>) (worker_done) ────`, with or
+// without a priority (`[HIGH]`) or a type.
+const ORCA_MESSAGE = /^─+ From: \S+ \(\S+\)/;
 
 // Approval words, or a bare numbered answer ("1 2 3") to an ask.
 const DECISION_RE =

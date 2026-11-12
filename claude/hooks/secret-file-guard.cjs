@@ -221,12 +221,14 @@ function printedSecrets(command, isSecret, cwd) {
   const sourced = [];
   let printsAll = false;
   const named = [];
+  let moved = false; // a `cd`/`pushd`/`env -C`/`sudo -D` ran before: a relative path no longer resolves from cwd
   for (const words of commands(command)) {
     const { argv, stdinFiles } = splitRedirects(words);
     const prog = program(argv);
     const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
     const args = prog.slice(1);
-    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push(args[0]);
+    if (name === 'cd' || name === 'pushd' || prog.chdir !== undefined) moved = true;
+    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], moved });
     const files = printerFiles(name, args);
     if (files !== null) {
       for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);
@@ -235,9 +237,9 @@ function printedSecrets(command, isSecret, cwd) {
     if ((name === 'set' && setsTrace(args)) || vars.all) printsAll = true;
     named.push(...vars.names);
   }
-  for (const f of sourced) {
-    const keys = keysOf(f, cwd);
-    if (printsAll || named.some((n) => keys === null || keys.has(n))) leaked.push(f);
+  for (const { file, moved: after } of sourced) {
+    const keys = after && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, cwd);
+    if (printsAll || named.some((n) => keys === null || keys.has(n))) leaked.push(file);
   }
   return [...new Set(leaked)];
 }

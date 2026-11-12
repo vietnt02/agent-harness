@@ -1107,3 +1107,65 @@ test('session-notes: a write that drops another session id from the session: lin
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('watch-guard: a loop inside `bash -c`, `sh -c` or `eval` is this shell\'s loop', () => {
+  const { shape } = require('../claude/hooks/watch-guard.cjs');
+  assert.equal(shape("nohup bash -c 'while true; do sleep 5; done' &").wait, true);
+  assert.equal(shape("sh -c 'sleep 600; gh pr checks 1'").sleeps, true);
+  assert.equal(shape("bash -c 'until curl -sf x; do sleep 2; done'").poll, true);
+  const remote = shape("bash -c 'for h in a b; do ssh $h x; done'");
+  assert.equal(remote.loop && remote.remote, true);
+  assert.equal(shape("eval 'while true; do sleep 1; done'").poll, true);
+  assert.equal(shape("ssh host 'for f in *; do cat $f; done'").loop, false, 'a script for another machine is one remote call');
+});
+
+test('secret-file-guard: a relative dotenv loaded after a `cd` counts every variable an echo names', () => {
+  const { printedSecrets } = require('../claude/hooks/secret-file-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sfg-cd-'));
+  for (const [d, key] of [['a', 'A_KEY'], ['b', 'B_TOKEN']]) {
+    fs.mkdirSync(path.join(tmp, d));
+    fs.writeFileSync(path.join(tmp, d, '.env'), `${key}=x\n`);
+  }
+  const isSecret = (f) => path.basename(f) === '.env';
+  const leak = (c) => printedSecrets(c, isSecret, path.join(tmp, 'a'));
+  try {
+    assert.deepEqual(leak('cd ../b && source .env && echo $B_TOKEN'), ['.env']);
+    assert.deepEqual(leak('env -C ../b true; source .env; echo $B_TOKEN'), ['.env']);
+    assert.deepEqual(leak('cd ../b && set -a && . ./.env && set +a && python3 x.py; echo exit=$?'), [], 'no variable named');
+    assert.deepEqual(leak('source .env && echo $B_TOKEN'), [], 'the cwd file does not set it');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('user-intent: every Orca message header is not the user\'s words, whatever its priority or type', () => {
+  for (const text of [
+    '──── From: TERM_4041-AB (term_4041-ab) (worker_done) ────\nSubject: x',
+    '──── From: TERM_4041-AB (term_4041-ab) [HIGH] (escalation) ────\nCó pause DAG không?',
+    '──── From: TERM_4041-AB (term_4041-ab) ────\nxin chỉ thị',
+  ]) assert.equal(userIntent.promptText({ type: 'user', message: { content: text } }), null, text);
+  assert.equal(userIntent.promptText({ type: 'user', message: { content: 'From: Viet, ok làm đi' } }), 'From: Viet, ok làm đi');
+});
+
+test('dispatch-split-guard: the model and the effort reminders are each said once for the same command', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsg-keys-'));
+  const t = path.join(tmp, 't.jsonl');
+  fs.writeFileSync(t, JSON.stringify({ type: 'user', message: { role: 'user', content: 'giao worker đi' } }) + '\n');
+  const session = `dsg-keys-${process.pid}-${Date.now()}`;
+  const spec = '--spec "Rà; chạy orca orchestration check --peek sau mỗi 10 lệnh"';
+  const both = `orca orchestration worker-start ${spec} --agent antigravity --model gemini-3.8-flash` +
+    ` ; orca orchestration worker-start ${spec} --agent claude --model claude-opus-5-5`;
+  const run = () => spawnSync(process.execPath, [path.join(HOOKS_DIR, 'dispatch-split-guard.cjs')], { encoding: 'utf8',
+    input: JSON.stringify({ tool_name: 'Bash', session_id: session, transcript_path: t, cwd: tmp, tool_input: { command: both } }) });
+  try {
+    const first = run();
+    assert.equal(first.status, 2);
+    assert.match(first.stderr, /bare alias/);
+    const second = run();
+    assert.equal(second.status, 2, 'the effort reminder still comes once');
+    assert.match(second.stderr, /--effort/);
+    assert.equal(run().status, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

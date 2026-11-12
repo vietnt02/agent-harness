@@ -197,7 +197,7 @@ bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" v�
 
 ## 5. Chế độ không người
 
-Bot chạy liên tục là coordinator không có user. Phase 2 của nó là `AGENTS.md § Phạm vi tự chủ` của
+Bot chạy liên tục là coordinator không có user. Việc nó được làm là `AGENTS.md § Phạm vi tự chủ` của
 repo đích giao với scope trong `CLAUDE.md` của bot. Không bao giờ mở tầng C; gặp thứ ngoài
 policy → park, báo qua kênh của bot, làm item tiếp theo. Chỉ sinh worker khi có từ 2 item chạy song
 song.
