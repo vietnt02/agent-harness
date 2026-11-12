@@ -193,7 +193,8 @@ function sendLines(command, show = showState) {
 }
 
 // The stall watch for each new dispatch, ready to run: wakes the coordinator when the worker ends, or
-// its worktree sits still for 10 minutes, or its transcript shows an API error streak. It reads no
+// its worktree (for an agy terminal worker, also its conversation DB) sits still for 10 minutes, or
+// its transcript shows an API error streak. It reads no
 // inbox (`check`), so it takes no message from Orca's wake-ups.
 function watchLines(ids) {
   return ids.map((d) => {

@@ -3,14 +3,17 @@
  * worker-stall.cjs - one line for one Orca worker, in the "<state> [context]" form watch.sh judges:
  *   done <state>     the worker's Task ended (succeeded, failed, stopped, cancelled, abandoned)
  *   running <why>    a file in its worktree changed within --idle-min minutes, and no API error streak;
- *                    or `waiting-coordinator`: its last `orca orchestration ask` has no reply yet, for
+ *                    or an agy terminal worker's last conversation step is that recent (it plans and
+ *                    reads before it edits); or `waiting-coordinator`: its last `orca orchestration ask` has no reply yet, for
  *                    at most --ask-max minutes (then `stale ask-unanswered>…`)
- *   stale <why>      nothing in its worktree changed for --idle-min minutes, or the worker's messages
+ *   stale <why>      nothing in its worktree changed for --idle-min minutes (nor, for an agy terminal
+ *                    worker, its conversation DB), or the worker's messages
  *                    since the last run hold >= --api-errors 502/503/429-type errors
- * A worker that is only reading for a long time also shows `stale`: a cue to look (worker-read twice,
- * a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker run in a terminal has
- * no Orca transcript: no error count then, and the line adds `agy-step=<n>m`, the age of the last
- * write to its own conversation DB (the newest one naming its worktree), so a long read shows. Anything it cannot read exits 1 with
+ * A worker with a transcript that is only reading for a long time also shows `stale`: a cue to look
+ * (worker-read twice, a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker
+ * run in a terminal has no Orca transcript: no error count and no ask wait then (an unanswered ask
+ * past --idle-min shows `stale`), and the line adds `agy-step=<n>m`, the age of the last write to its
+ * own conversation DB (the newest one naming its worktree), which counts like a changed file. Anything it cannot read exits 1 with
  * stderr, never a state line, so watch.sh counts it as an error instead of waiting on it.
  * It reads worker-show, file times in the worktree and worker-read from a cursor kept between runs
  * ($TMPDIR/claude-worker-stall/<dispatch>.json), so each run reads only the messages new since the
@@ -168,8 +171,9 @@ function status(o, deps = {}) {
   if (!workspace || !fs.existsSync(workspace)) throw new Error(`no worktree on disk for ${o.dispatch} (state=${state})`);
   const now = deps.now || Date.now();
   let step = '';
+  let last = null;
   if (terminal) {
-    const last = (deps.agyLastStep || agyLastStep)(workspace);
+    last = (deps.agyLastStep || agyLastStep)(workspace);
     step = last ? ` agy-step=${Math.max(0, Math.floor((now - last) / 60000))}m` : ' agy-step=none';
   }
   const since = (deps.waitingAsk || waitingAsk)(o.dispatch);
@@ -178,8 +182,10 @@ function status(o, deps = {}) {
     const max = o.askMax || 60;
     return mins >= max ? `stale ask-unanswered>${max}m state=${state}` : `running waiting-coordinator ${mins}m state=${state}`;
   }
-  const recent = changedSince(workspace, now - o.idle * 60000);
-  return recent ? `running changed=${recent}${step} state=${state}` : `stale idle>${o.idle}m${step} state=${state}`;
+  const cutoff = now - o.idle * 60000;
+  const recent = changedSince(workspace, cutoff);
+  if (recent) return `running changed=${recent}${step} state=${state}`;
+  return last && last >= cutoff ? `running${step} state=${state}` : `stale idle>${o.idle}m${step} state=${state}`;
 }
 
 module.exports = { args, status, newErrors, waitingAsk, workerText, changedSince, agyLastStep, API_ERROR, ASK_SENT };
