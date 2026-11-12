@@ -17,7 +17,9 @@
  * worker; earlier it waited Queued for the next `check --peek`). The worker's chat pane shows which:
  * `worker-read --source transcript` does not show the new turn. A worker that does not act on an
  * urgent message is the coordinator's own `worker-stop` plus a new dispatch on the same worktree,
- * never an ask to the user.
+ * never an ask to the user. A send to a worker already finished does not fail: Orca starts a new
+ * dispatch on the same worktree to take the message (knowledge/orca.md), so the reminder names where
+ * to find it instead of a second worker.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -173,12 +175,15 @@ function showState(d) {
   return { state: r.worker?.state, exited };
 }
 
-// One reminder per addressed worker not finished; `show` reads its state.
+// One reminder per addressed worker; `show` reads its state.
 function sendLines(command, show = showState) {
   return sendTargets(command).flatMap((d) => {
     let st;
     try { st = show(d); } catch (_) { return []; }
-    if (DONE.has(st.state)) return [];
+    if (DONE.has(st.state)) {
+      return [`${d} (state=${st.state}): worker đã xong, Orca giao tin này cho một dispatch mới trên cùng worktree. Tìm nó ở ` +
+        '`orca orchestration worker-list --json` (mới nhất trước, cùng `workspace`) và theo dõi dispatch đó; không giao thêm worker.'];
+    }
     if (st.exited) {
       return [`${d} (state=${st.state}): session của worker đã thoát, tin sẽ không tới. Đừng báo user là worker đã nhận; ` +
         'chạy lại task (`--retry-of`) hoặc giao worker mới.'];

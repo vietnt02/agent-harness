@@ -8,17 +8,12 @@
  *   answered first): answer it in the next visible text.
  * - Anything else (an instruction, a notice): the first tool call after it gets the message back so
  *   it is acted on and acknowledged.
- * - AskUserQuestion after an answer already written this turn: the chat UI folds text that precedes
- *   a tool call into thinking, so the answer is repeated as the turn's last text
- *   (rules/agent-harness/communication-style.md § Format). An answer is a text block with a line
- *   break or over ANSWER_CHARS; the one-line intro before a tool call is not one.
  * Fails open whenever the transcript cannot be read.
  */
 const fs = require('fs');
 const { isQuestion, promptText } = require('./lib/user-intent.cjs');
 
 const TAIL_BYTES = 512 * 1024;
-const ANSWER_CHARS = 200;
 
 function tailLines(file) {
   const fd = fs.openSync(file, 'r');
@@ -58,33 +53,14 @@ function pendingMessage(lines) {
   return null;
 }
 
-// Whether this turn holds an answer before the tool_use `id`; null while that call is not on disk.
-function answerBefore(lines, id) {
-  let seen = false;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let rec;
-    try { rec = JSON.parse(lines[i]); } catch { continue; }
-    if (isTurnStart(rec)) break;
-    for (const b of blocks(rec)) {
-      if (b.type === 'tool_use' && b.id === id) seen = true;
-      else if (seen && b.type === 'text' && (b.text.trim().includes('\n') || b.text.trim().length > ANSWER_CHARS)) return true;
-    }
-  }
-  return seen ? false : null;
-}
-
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 
 process.stdin.on('end', () => {
   try {
-    const { transcript_path: transcript, agent_id: agentId, tool_name: tool, tool_use_id: id } = JSON.parse(raw);
+    const { transcript_path: transcript, agent_id: agentId } = JSON.parse(raw);
     if (!transcript || agentId) process.exit(0);
     const notes = [];
-    if (tool === 'AskUserQuestion' && id && answerBefore(tailLines(transcript), id)) {
-      notes.push('answer-first: this turn already wrote an answer before AskUserQuestion, and text before a tool ' +
-        'call is folded into thinking: repeat the answer as the turn\'s last text.');
-    }
     const pending = pendingMessage(tailLines(transcript));
     if (pending && (isQuestion(pending.prompt) || pending.calls <= 1)) {
       const quote = pending.prompt.replace(/\s+/g, ' ').slice(0, 200);
