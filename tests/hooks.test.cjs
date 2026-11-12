@@ -1204,7 +1204,10 @@ test('push-after-pr-guard: a bare push goes to the branch push remote, then remo
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'papg-remote-'));
   const git = (...a) => execFileSync('git', ['-C', tmp, ...a], { encoding: 'utf8' });
   // The remote it picks is the one whose URL it reads: a remote that does not exist names itself in the error.
-  const picked = () => { try { pushAfterPrGuard.reviewsFor(tmp, null, 'feat', { glab: () => [], gh: () => [] }); return 'ok'; } catch (e) { return String(e.message); } };
+  // The hook's 12 s deadline starts when its module loads (one hook call = one process): load a fresh copy.
+  const modPath = require.resolve('../claude/hooks/push-after-pr-guard.cjs');
+  const fresh = () => { delete require.cache[modPath]; return require(modPath); };
+  const picked = () => { try { fresh().reviewsFor(tmp, null, 'feat', { glab: () => [], gh: () => [] }); return 'ok'; } catch (e) { return String(e.message); } };
   try {
     execFileSync('git', ['init', '-q', tmp]);
     git('config', 'branch.feat.remote', 'by-branch');

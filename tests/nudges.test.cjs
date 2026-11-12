@@ -332,7 +332,8 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
   // What Orca prints for such a dispatch (worker-stall's stderr, copied from a real run).
   const noTranscript = () => { throw Object.assign(new Error('Command failed'), { stderr: 'transcript_required: Structured output is unavailable for Dispatch ctx_t: provider_unsupported.' }); };
   try {
-    const now = Date.now() + 11 * 60000;
+    // Whole seconds: a file time set from a fraction comes back a hair earlier, which tips the exact --idle-min case.
+    const now = Math.ceil((Date.now() + 11 * 60000) / 1000) * 1000;
     const deps = { show: () => ({ state: 'running', workspace: `id::${ws}` }), newErrors: noTranscript, now,
       agyLastStep: (p) => w.agyLastStep(p, convs) };
     assert.match(w.status(o, deps), /^stale idle>10m agy-step=none state=running$/, 'no conversation found: still a state line, never an error');
