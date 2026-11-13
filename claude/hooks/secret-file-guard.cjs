@@ -14,8 +14,9 @@
  * - Loading a secret file (`source`, `.`) in the same command as shell trace (`set -x`, `set -v`,
  *   `set -o xtrace|verbose`) or a variable-printing command (`env` with no command to run,
  *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` naming a key the loaded file
- *   sets; `echo exit=$?` or a variable the file does not set passes; an unreadable file counts
- *   every named variable).
+ *   sets; `echo exit=$?`, a variable the file does not set, or one only passed to a `$(…)` inside
+ *   the echo passes; a relative file after a `cd` resolves from its literal target; an unreadable
+ *   file, or one loaded after a `cd` to an unknown place, counts every named variable).
  * Everything else naming a secret file (`set -a; . ./.env; set +a; <cmd>`, passing its path to a
  * `python3`/`node` script, `--env-file`, `ssh -i <key>`, `cp .env.example .env`, prose in heredocs
  * or quoted strings) passes.
@@ -190,6 +191,36 @@ function setsTrace(args) {
   return false;
 }
 
+// A word without its `$(…)` and backtick substitutions: their output is printed, not the variables
+// passed to them; the commands inside are judged on their own (`commands` lists them).
+function dropSubstitutions(word) {
+  let out = '';
+  for (let i = 0; i < word.length; i++) {
+    if (word[i] === '`') {
+      const end = word.indexOf('`', i + 1);
+      if (end === -1) return out;
+      i = end;
+    } else if (word[i] === '$' && word[i + 1] === '(') {
+      let depth = 0;
+      for (i++; i < word.length; i++) {
+        if (word[i] === '(') depth++;
+        else if (word[i] === ')' && --depth === 0) break;
+      }
+    } else {
+      out += word[i];
+    }
+  }
+  return out;
+}
+
+// The directory a `cd`/`pushd` moves to from `dir`, or null when unknown. A target the shell would
+// expand (`-`, `$D`, a glob) resolves to a path that does not exist, so its dotenv stays unreadable.
+function cdTarget(dir, args) {
+  const target = args.filter((a) => a !== '--' && a !== '-P' && a !== '-L');
+  if (dir === null || target.length !== 1) return null;
+  return path.resolve(dir, target[0].replace(/^~(?=\/|$)/, os.homedir()));
+}
+
 // `all`: the command prints every variable (env, printenv, bare set, export/declare -p).
 // `names`: the variables an echo/printf prints (`$X`, `${X}`; `$?`, `$1` are no variables).
 function printsVars(argv, prog) {
@@ -200,7 +231,7 @@ function printsVars(argv, prog) {
   if (name === 'set') return { all: args.length === 0, names: [] };
   if (name === 'export' || name === 'declare') return { all: args.some((a) => /^-[a-zA-Z]*p/.test(a)), names: [] };
   if (name === 'echo' || name === 'printf') {
-    const names = args.flatMap((a) => [...a.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
+    const names = args.flatMap((a) => [...dropSubstitutions(a).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
     return { all: false, names };
   }
   return { all: false, names: [] };
@@ -221,9 +252,11 @@ function printedSecrets(command, isSecret, cwd) {
   const sourced = [];
   let printsAll = false;
   const named = [];
-  let moved = false; // a `cd`/`pushd`/`env -C`/`sudo -D` ran before: a relative path no longer resolves from cwd
-  const aliases = {}; // `X=$A_KEY`: X carries A_KEY
-  const refs = (w) => [...String(w).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
+  // The shell's directory as `cd`/`pushd` move it (`cdTarget`); after `env -C`/`sudo -D` or a `cd`
+  // with no single target it is unknown (null), so a relative file loaded after it cannot be read.
+  let dir = path.resolve(cwd || process.cwd());
+  const aliases = {}; // `X=$A_KEY`: X carries A_KEY; `X=$(curl $A_KEY)` holds curl's output
+  const refs = (w) => [...dropSubstitutions(String(w)).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
   for (const words of commands(command)) {
     const set = assignments(words);
     for (const [name, value] of set || []) aliases[name] = refs(value).flatMap((r) => [r, ...(aliases[r] || [])]);
@@ -231,8 +264,9 @@ function printedSecrets(command, isSecret, cwd) {
     const prog = program(argv);
     const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
     const args = prog.slice(1);
-    if (name === 'cd' || name === 'pushd' || prog.chdir !== undefined) moved = true;
-    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], moved });
+    if (name === 'cd' || name === 'pushd') dir = cdTarget(dir, args);
+    else if (prog.chdir !== undefined) dir = null;
+    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], dir });
     const files = printerFiles(name, args);
     if (files !== null) {
       for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);
@@ -241,8 +275,8 @@ function printedSecrets(command, isSecret, cwd) {
     if ((name === 'set' && setsTrace(args)) || vars.all) printsAll = true;
     named.push(...vars.names);
   }
-  for (const { file, moved: after } of sourced) {
-    const keys = after && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, cwd);
+  for (const { file, dir: from } of sourced) {
+    const keys = from === null && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, from || cwd);
     const carries = (n) => [n, ...(aliases[n] || [])];
     if (printsAll || named.some((n) => keys === null || carries(n).some((k) => keys.has(k)))) leaked.push(file);
   }
