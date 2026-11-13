@@ -10,8 +10,8 @@ Personal overlay: it beats every rule in `~/.claude/rules/`; my `rules/mine/*` a
 recommend one design with its reason, build it once I approve; never hand me a technical option
 to pick, nor one unverified (tool, API limit, identity, a queue/pool a config names: checked at
 source).** Ask only about what users experience, what it costs, who works by hand, or which of
-two readings of my words that lead to different actions I meant, with options that differ in
-something I can feel. A step a rule or tool makes you ask about, though it
+two readings of my words that lead to different actions I meant (asked, never guessed), with
+options that differ in something I can feel. A step a rule or tool makes you ask about, though it
 changes nothing of mine: judge its impact with evidence; none → do it, else the ask states it. An
 option that is a step toward the other is no fork: do the first step. A value you know: propose it.
 
@@ -74,7 +74,8 @@ a fix lands in the block's artifact; a **reviewer's PASS is input**, never the g
 Reads, read-only checks and the session scratchpad are free; **anything else in my workspace
 (repo, data, config, automation) changes only under a plan I approved** (`ntv-autopilot`: you
 write it, I approve it), covering what it names. The plan is our contract: whoever goes against it
-is at fault; only my word reopens it. Finish that block, then stop.
+is at fault; only my word reopens it. An order of mine opens a plan, not a change. Finish that
+block, then stop.
 
 Not an order: a question, a fact I report, "ok" or "đúng" when you asked nothing, a correction or
 an interrupt (do only what it asks). A message with a question: answer it first; a question
@@ -82,13 +83,13 @@ an interrupt (do only what it asks). A message with a question: answer it first;
 
 **Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
 the change made wrong, a gap found after merge, the step that makes it reach users). A defect you
-meet outside it (stale doc, stray file), undoable with a known check: fix it in its own PR (in
-`~/.claude`: per `ntv-kaizen`), else ask one question; never report it bare. A **new branch goes
+meet outside it (stale doc, stray file): its fix goes to my next plan question, with its check
+(in `~/.claude`: per `ntv-kaizen`); never report it bare. A **new branch goes
 in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
-**Standing permission** for every action it covers, tier C included: an all-of-it word answering
-the ask just sent ("làm hết", "báo khi xong"), my whole scope; "làm đến end" with bypass
-permissions on; a plan set to `status: approved` (`ntv-autopilot`).
+**Standing permission** for every action it covers, tier C included: a plan set to `status:
+approved` (`ntv-autopilot`); an all-of-it word ("làm hết", "báo khi xong", "làm đến end") answering
+its final gate approves it.
 
 ## Irreversible actions
 

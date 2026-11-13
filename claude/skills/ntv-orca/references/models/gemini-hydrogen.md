@@ -10,7 +10,7 @@ source: 1 phiên (3 PR một repo Python, cùng spec với carbon); công bố c
 
 # gemini-hydrogen
 
-Mặc định làm **worker** và **checker** mọi mức độ, research gồm cả; `gemini-4-carbon` chỉ khi user chỉ định hoặc hydrogen hỏng hai lần trên cùng thiết kế (`SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`). Spawn: `--agent antigravity --model gemini-4-hydrogen --effort high` (`../antigravity.md`).
+Mặc định làm **worker** và **checker** mọi mức độ, research gồm cả; `gemini-4-carbon` chỉ khi user chỉ định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt (`SKILL.md` § 2). Reviewer vẫn là `gemini-argon` (`gemini-argon.md`). Spawn: `--agent antigravity --model gemini-4-hydrogen --effort high` (`../antigravity.md`).
 
 ## Giao gì / Không giao gì
 

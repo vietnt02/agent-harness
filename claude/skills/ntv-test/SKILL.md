@@ -33,17 +33,17 @@ PR/MR carries the results; the coordinator checks them at the gate (`ntv-orca`).
 A change touching an external system, real data, a schedule or permissions is not proven by the
 suite, whatever its colour. It runs the repo's own reality check (a read-only dry run on real
 input, a query plan on real data, a recorded-reply refresh) and the PR/MR carries its summary:
-counts, pass/fail, record IDs, never row data.
-
-A test is only a test: it runs in an isolated environment, with its own copy of every state the
-live system reads (its ledger, lock, cursor, config), never the live state, even the system's
-own; real input is read, never written. A repo with no way to point a run at such a copy gets one
-as part of the change; the check is never skipped for lack of it. Side effects that leave the
-machine or reach a person (an OS notification, a sent message, an API write) are blocked by
-default in the suite, and a test that needs one fakes it. A check that costs money or spends a vendor's quota
+counts, pass/fail, record IDs, never row data. A check that costs money or spends a vendor's quota
 follows `CLAUDE.md` § Verification and claims: planned under one ceiling and approved, never run
 ad hoc. A repo with no such check for that layer: that layer is `CHƯA kiểm` in the report and the
 PR/MR names the missing check; it is never reported green.
+
+A test is only a test, the suite and the reality check alike: it runs in an isolated environment,
+with its own copy of every state the live system reads (its ledger, lock, cursor, config), never
+the live state, even the system's own; real input is read, never written. A repo with no way to
+point a run at such a copy gets one as part of the change, never a run on the live state instead.
+Side effects that leave the machine or reach a person (an OS notification, a sent message, an API
+write) are blocked by default in the suite, and a test that needs one fakes it.
 
 ## 3. Measure the diff with mutation
 

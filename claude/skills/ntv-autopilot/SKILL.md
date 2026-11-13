@@ -78,6 +78,7 @@ changes nothing the user feels, one line with its reason (a choice needing inten
 never listed here), then `**Đã park:**`, each item with why and the exact command or decision
 it needs. Every listed action done → `status: done`.
 
-Then, in one AskUserQuestion (recommended option first): every `Đã park` item and anything new the
-run surfaced. The answers revise the plan, back to `status: draft`; then ask the final gate for
-the next run. Never ask mid-run.
+Anything parked or surfaced: from the next turn, one AskUserQuestion (recommended option first)
+holds every `Đã park` item and each new point. The answers revise the plan, back to `status:
+draft`, then the final gate for the next run. Nothing parked: the plan stays `done`. Never ask
+mid-run.

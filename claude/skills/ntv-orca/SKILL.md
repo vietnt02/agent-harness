@@ -30,7 +30,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | 1. Nhận việc | Hiểu ý user, chốt phạm vi và tiêu chí xong (thứ user sẽ thấy). Ý chưa rõ thì hỏi user. | — |
 | 2. Rà, giao | **Không tự rà:** đích chưa rõ thì giao subagent rà (dưới), bản đồ nó trả về đi vào plan và spec. Manifest là một mục của plan `ntv-autopilot`; plan duyệt xong mới viết spec (§ 2), spawn. | — |
 | 3. Lập kế hoạch | — | Đọc đúng chỗ bản đồ hay đích spec nêu, query dữ liệu thật trên toàn bộ dữ liệu. Gửi kế hoạch qua `ask`: thiết kế (hàm, luồng, ca biên, test phải chứng minh gì), kèm output thô và `file:dòng`. Chưa sửa gì. |
-| 4. Duyệt kế hoạch | Đối chiếu kế hoạch với ý user và với bằng chứng worker dán; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy → hỏi user. Duyệt hoặc trả lại kèm lý do. | Sửa kế hoạch, gửi lại. |
+| 4. Duyệt kế hoạch | Đối chiếu kế hoạch với ý user và với bằng chứng worker dán; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy mà plan chưa ghi → park, hỏi gộp sau lượt (`ntv-autopilot` § Report). Duyệt hoặc trả lại kèm lý do. | Sửa kế hoạch, gửi lại. |
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Spawn reviewer khi cần (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; worker sửa theo finding đã quyết. |
 | 7. Cổng, chạy thật | Đọc toàn bộ diff tới đúng SHA sẽ merge, chạy check của repo trên SHA đó, merge. Tự chạy lệnh ghi production thật, đọc lại đích. Sau deploy đọc thứ đang chạy trên production. | — |
@@ -78,9 +78,10 @@ một dòng:
 - Worker tên `w<N>-<việc>`, N theo thứ tự dispatch, không cấp lại; dùng cho `--task-title`
   và mọi báo cáo; `--name`, `--display-name` chỉ thêm khi `--worktree new-child|new-top-level`.
   Reviewer là một dòng `w<N>-review-w<M>`, tính vào cap.
-- Đổi phase, worker hay model sau khi plan duyệt → plan về `draft`, hỏi lại, không báo sau.
-- Manifest chỉ phủ tầng A của worker. Tầng C hỏi ngay trước khi làm (`CLAUDE.md` § Irreversible
-  actions). Bot không người không bao giờ mở tầng C.
+- Đổi phase, worker hay model sau khi plan duyệt → plan về `draft`, hỏi lại, không báo sau;
+  ngoại lệ: đổi sang carbon theo **Chọn model** (dưới) chạy luôn, báo trong report.
+- Manifest chỉ phủ tầng A của worker. Tầng C plan ghi tên thì coordinator chạy theo plan; tầng C
+  ngoài plan thì park (`CLAUDE.md` § Irreversible actions). Bot không người không bao giờ mở tầng C.
 
 **Spec** gồm: câu của user; những gì coordinator đang có (link, lỗi, dữ liệu đã thấy, bản đồ của
 subagent rà: `file:dòng`, bảng, cột); giả thuyết và
@@ -132,7 +133,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Builder và
   research mọi mức độ → `agy gemini-4-hydrogen high`; `agy gemini-4-carbon high` chỉ khi user chỉ
-  định hoặc hydrogen hỏng hai lần trên cùng một thiết kế đã duyệt; `gemini-flash` chỉ khi user chỉ
+  định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt; `gemini-flash` chỉ khi user chỉ
   định. Mọi model Gemini trên `agy` chung một quota, nên hết quota thì không đổi
   sang model Gemini khác. Reviewer mặc định `agy gemini-4-argon high`.
 - Không giao task dài cho model context ngắn (`gemini-flash`, `gpt-luna`): chia task nhỏ, mỗi task
@@ -176,7 +177,7 @@ item tối đa × thời gian đo trên lần chạy thật) có lọt trần th
 nào khác (nút bấm, lịch, webhook) ghi hay gửi cho cùng bản ghi trong cùng khoảng thời gian. Spec reviewer đòi dán nguyên findings kèm output
 thô và `file:dòng`; finding coordinator tự gửi worker cũng dẫn `file:dòng` cả nơi sinh lẫn nơi đọc
 giá trị, hoặc kèm một ca chạy thật. Phạm vi reviewer cố định (user chốt): diff, hai câu hỏi trên và
-bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo một lượt chạy thật; vòng 2 chỉ kiểm
+bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo một lượt chạy thật trên bản sao state (`ntv-test` § 2); vòng 2 chỉ kiểm
 các finding đã sửa. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
 thật; PASS của reviewer chỉ là đầu vào. **Tiêu chí dừng:** chỉ finding làm sai output thật khi dùng
 bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" vào PR. Sau khi thiết kế ổn định tối đa

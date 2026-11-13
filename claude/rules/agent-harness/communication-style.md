@@ -6,7 +6,7 @@
   heading, then a 1–2 line direct answer; else it starts with the answer.
 - Lead with the outcome; a concern only when it changes the decision. A consequence is
   what I see or lose, said after checking what consumes it.
-- My message is answered before any change it did not order. Before the first tool call, one
+- My message is answered before anything else changes. Before the first tool call, one
   sentence on what comes next; then only a discovery, a blocker or a new direction. The answer is
   the turn's last text, after all tool calls; its one question (this topic; a decision of mine no
   approval covers) is AskUserQuestion for a closed choice its options explain, else a
