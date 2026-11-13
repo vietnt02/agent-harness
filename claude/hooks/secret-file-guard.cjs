@@ -25,14 +25,15 @@
  * - Viet approves one read: `# secret-ok: "<his words, 8+ chars>"` matched against `userTexts`.
  * Known limits: a script (`python3 x.py ./.env`, `node app.js`) or unlisted subcommand (`git diff` /
  * `git show` on a dotenv) that prints secret values itself, command substitution feeding a dotenv
- * into `export`/`env` without `source`/`.`, or an unquoted dotenv line that fails shell parsing, is
- * not caught; this hook is a guardrail naming the risk on ordinary commands, never a wall.
+ * into `export`/`env` without `source`/`.`, an unquoted dotenv line that fails shell parsing, a key
+ * fed by `<<<` to a filter inside `$(…)` that an echo prints, or an escaped backtick (`\``) around
+ * a key in an echo, is not caught; this hook is a guardrail naming the risk on ordinary commands, never a wall.
  * Fails open on an unexpected internal error of the guard itself (checker failure fails closed).
  */
 
 const os = require('os');
 const path = require('path');
-const { commands, program, dropHeredocs, assignments } = require('./lib/shell-words.cjs');
+const { commands, program, dropHeredocs, assignments, closeParen, closeTick } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
@@ -193,22 +194,13 @@ function setsTrace(args) {
 
 // A word without its `$(…)` and backtick substitutions: their output is printed, not the variables
 // passed to them; the commands inside are judged on their own (`commands` lists them).
+// Arithmetic `$((…))` stays: it prints the value it computes.
 function dropSubstitutions(word) {
   let out = '';
   for (let i = 0; i < word.length; i++) {
-    if (word[i] === '`') {
-      const end = word.indexOf('`', i + 1);
-      if (end === -1) return out;
-      i = end;
-    } else if (word[i] === '$' && word[i + 1] === '(') {
-      let depth = 0;
-      for (i++; i < word.length; i++) {
-        if (word[i] === '(') depth++;
-        else if (word[i] === ')' && --depth === 0) break;
-      }
-    } else {
-      out += word[i];
-    }
+    if (word[i] === '$' && word[i + 1] === '(' && word[i + 2] !== '(') i = closeParen(word, i + 1);
+    else if (word[i] === '`') i = closeTick(word, i);
+    else out += word[i];
   }
   return out;
 }
@@ -252,9 +244,13 @@ function printedSecrets(command, isSecret, cwd) {
   const sourced = [];
   let printsAll = false;
   const named = [];
-  // The shell's directory as `cd`/`pushd` move it (`cdTarget`); after `env -C`/`sudo -D` or a `cd`
-  // with no single target it is unknown (null), so a relative file loaded after it cannot be read.
-  let dir = path.resolve(cwd || process.cwd());
+  // The directory a command runs in: the last `cd`/`pushd` (`cdTarget`) in its own shell or one
+  // enclosing it (a `cd` inside `(…)` or `$(…)` ends there); after `popd`, `env -C`/`sudo -D` or a
+  // `cd` with no single target it is unknown (null), so a relative file loaded there cannot be read.
+  const start = path.resolve(cwd || process.cwd());
+  const cds = [];
+  const inScope = (scope, of) => scope === of || String(scope).startsWith(`${of}.`);
+  const dirIn = (scope) => cds.reduce((d, cd) => (inScope(scope, cd.scope) ? cd.dir : d), start);
   const aliases = {}; // `X=$A_KEY`: X carries A_KEY; `X=$(curl $A_KEY)` holds curl's output
   const refs = (w) => [...dropSubstitutions(String(w)).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
   for (const words of commands(command)) {
@@ -264,9 +260,9 @@ function printedSecrets(command, isSecret, cwd) {
     const prog = program(argv);
     const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
     const args = prog.slice(1);
-    if (name === 'cd' || name === 'pushd') dir = cdTarget(dir, args);
-    else if (prog.chdir !== undefined) dir = null;
-    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], dir });
+    if (name === 'cd' || name === 'pushd') cds.push({ scope: words.scope, dir: cdTarget(dirIn(words.scope), args) });
+    else if (name === 'popd' || prog.chdir !== undefined) cds.push({ scope: words.scope, dir: null });
+    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], dir: dirIn(words.scope) });
     const files = printerFiles(name, args);
     if (files !== null) {
       for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);

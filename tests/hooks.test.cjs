@@ -1189,9 +1189,11 @@ test('secret-file-guard: a dotenv loaded with `set -a` then used by curl inside 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sfg-subst-'));
   fs.mkdirSync(path.join(tmp, 'app'));
   fs.writeFileSync(path.join(tmp, 'app', '.env'), 'SUPABASE_URL=x\nSERVICE_KEY=y\n');
+  fs.writeFileSync(path.join(tmp, '.env'), 'DATABASE_URL=z\n');
   const isSecret = (f) => path.basename(f) === '.env';
   const leak = (c) => printedSecrets(c, isSecret, tmp);
   const load = 'cd app && set -a; . ./.env; set +a; ';
+  const root = 'set -a; . ./.env; set +a; echo "db=$DATABASE_URL"';
   try {
     for (const c of [
       load + 'H=(-H "apikey: $SERVICE_KEY"); U=$SUPABASE_URL\nfor e in a@example.com; do\n  echo "=== $e"\n' +
@@ -1209,6 +1211,12 @@ test('secret-file-guard: a dotenv loaded with `set -a` then used by curl inside 
       'cd "$D" && . ./.env; echo "$e"',
       'cd - && . ./.env; echo "$e"',
       'env -C /x true; cd app && . ./.env; echo "$e"',
+      load + 'echo "v: $(echo "$v" | sed \'s/ (.*//\') k=$SERVICE_KEY"',
+      load + 'echo "$(( $SERVICE_KEY + 1 ))"',
+      '(cd app && npm ci); ' + root,
+      'D=$(cd app && pwd); ' + root,
+      'pushd app >/dev/null; npm run build; popd >/dev/null; ' + root,
+      'cd app && (set -a; . ./.env; set +a; echo "k=$SERVICE_KEY")',
     ]) assert.deepEqual(leak(c), ['./.env'], c);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
