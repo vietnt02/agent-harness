@@ -29,8 +29,9 @@
  * `lark-cli <domain> +<shortcut>` whose name holds no read verb (get, list, search…), a bare
  * `+<object>-<write verb>`, `lark-cli api POST|PUT|PATCH|DELETE`, or an n8n tool that changes or
  * runs a workflow (`n8n_create_*`, `n8n_update_*`, `n8n_delete_*`, `n8n_test_*`, `n8n_autofix_*`).
- * A line passes when it holds `--dry-run`, or a negated run verb ("không chạy", "đừng gọi", "do not
- * run") before the write. The text is the command plus `--spec-file` and `$(cat <file>)`, resolved
+ * A line passes when it holds `--dry-run`, a negated run verb ("không chạy", "đừng gọi", "do not
+ * run") before the write, or opens with a prohibition label ("KHÔNG (worker): …", "Cấm: …") that
+ * lists the writes the worker must not run. The text is the command plus `--spec-file` and `$(cat <file>)`, resolved
  * after a leading `cd <dir> &&`. A `# Prod-write: "<câu của user>"` line passes it when that sentence
  * (a write or permission word in it) is in one of the user's last 10 prompts. An Orca worker session
  * is not judged (its reports carry commands for the coordinator). The write found, a transcript that
@@ -80,6 +81,8 @@ const PROD_WRITE = new RegExp([
   /(?:^|[^a-z0-9])n8n_(?:create|update|delete|test|autofix|deploy|trigger|manage)_?\w*/.source,
   /(?:^|[^a-z0-9])n8n_(?:workflow_versions|executions)\b[^\n]{0,200}?\b(?:rollback|delete|prune)\b/.source,
 ].join('|'), 'i');
+// A line that opens with a prohibition label lists what the worker must not run: "KHÔNG (worker): …".
+const PROHIBITION_LINE = /^(?:[-*>•\s]|\*\*)*(?:không|cấm|never|not|do not|don't|must not)(?:\s+\([^)\n]*\))?\s*\**\s*:/iu;
 // A run verb negated, with no sentence break before the write: "không chạy", "đừng gọi", "do not run".
 const NEGATED_RUN = /(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)\s+(?:được\s+)?(?:tự\s+)?(?:chạy|gọi|ghi|thực thi|dùng|run|call|execute|use|invoke)(?=$|[^\p{L}])[^.,:;!?\n]*$/iu;
 
@@ -224,7 +227,7 @@ function prodWrites(text) {
     const w = l.match(PROD_WRITE);
     if (w && (at < 0 || w.index < at)) at = w.index;
     // `--dry-run` counts only on the write itself, after it on the line, not as a word before it.
-    return at >= 0 && !NEGATED_RUN.test(l.slice(0, at)) && !/--dry-run\b/.test(l.slice(at));
+    return at >= 0 && !PROHIBITION_LINE.test(l) && !NEGATED_RUN.test(l.slice(0, at)) && !/--dry-run\b/.test(l.slice(at));
   });
 }
 

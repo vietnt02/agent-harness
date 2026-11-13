@@ -436,11 +436,15 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
         'lark-cli sheets +cells-clear --range A1', 'Chạy lark-cli base +record-batch-update cho các dòng không có ngày',
         'chạy +record-delete, đừng quên đọc lại', 'never mind, run +record-delete', 'n8n_deploy_template id=1',
         'n8n_workflow_versions mode=rollback', 'n8n_trigger_webhook_workflow', "don't use the UI, run lark-cli base +record-delete",
-        'Không dùng --dry-run, chạy thật lark-cli base +record-delete', 'lark-cli api --as user POST /open-apis/x'];
+        'Không dùng --dry-run, chạy thật lark-cli base +record-delete', 'lark-cli api --as user POST /open-apis/x',
+        'Lưu ý: chạy lark-cli im +messages-reply cho tin này', 'Không dùng UI: chạy +record-delete'];
       const miss = ['lark-cli base +record-batch-update --dry-run --json @a.json', 'KHÔNG chạy +record-delete',
         'đừng gọi n8n_create_workflow', 'lark-cli base +field-list --table t', 'lark-cli api GET /open-apis/x',
         'lark-cli base +field-search-options --x', 'lark-cli base +dashboard-block-get-data', 'n8n_get_workflow id=1',
-        'git push --set-upstream origin x', '+on-update', 'n8n_workflow_versions mode=list'];
+        'git push --set-upstream origin x', '+on-update', 'n8n_workflow_versions mode=list',
+        'KHÔNG: merge, deploy, gửi tin Lark, gọi lệnh ghi Lark (`+messages-reply`, `task +create`, `+flag-cancel`).',
+        '  KHÔNG (worker): merge, deploy, publish, ghi prod: lark-cli base +record-delete, n8n_update_partial_workflow',
+        '- **Cấm:** lark-cli im +messages-send'];
       for (const l of hit) assert.equal(dispatchSplitGuard.prodWrites(l).length, 1, l);
       for (const l of miss) assert.equal(dispatchSplitGuard.prodWrites(l).length, 0, l);
     });
