@@ -51,7 +51,7 @@ theo dõi CI, ghi production (`ntv-implement` § Who works).
 
 **Worker lặp lại cùng một lỗi:** không vá từng ca. Coordinator yêu cầu worker phân tích nguyên nhân
 gốc (cơ chế sinh ra cả lớp lỗi) và gửi kế hoạch mới; coordinator duyệt. Hết vòng mà vẫn sai → đổi
-worker hoặc đổi model. Lỗi do skill chỉ sai bước hoặc luật mơ hồ thì ghi kaizen (`ntv-kaizen`); spec thiếu thì sửa spec.
+worker; model theo **Chọn model** (§ 2). Lỗi do skill chỉ sai bước hoặc luật mơ hồ thì ghi kaizen (`ntv-kaizen`); spec thiếu thì sửa spec.
 
 **Mọi dòng model đều lập kế hoạch.** `gemini-flash`/`gpt-luna` không tự phản biện spec, nên ở
 chặng 4 coordinator đối chiếu từng con số trong kế hoạch với output thô worker dán.
@@ -181,7 +181,8 @@ bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo m
 các finding đã sửa. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
 thật; PASS của reviewer chỉ là đầu vào. **Tiêu chí dừng:** chỉ finding làm sai output thật khi dùng
 bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" vào PR. Sau khi thiết kế ổn định tối đa
-2 vòng review; muốn vòng 3 thì hỏi user như một câu về chi phí.
+2 vòng review; hydrogen trượt cả hai thì đổi sang carbon (§ 2) thay cho vòng 3; muốn vòng 3 với
+cùng worker thì hỏi user như một câu về chi phí.
 
 **Nghiệm thu** — user chỉ nhận bản đã qua nghiệm thu:
 

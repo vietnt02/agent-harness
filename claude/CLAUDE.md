@@ -83,8 +83,8 @@ an interrupt (do only what it asks). A message with a question: answer it first;
 
 **Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
 the change made wrong, a gap found after merge, the step that makes it reach users). A defect you
-meet outside it (stale doc, stray file): its fix goes to my next plan question, with its check
-(in `~/.claude`: per `ntv-kaizen`); never report it bare. A **new branch goes
+meet outside it (stale doc, stray file): its fix is one item of the next plan question (no plan
+open: ask it now), with its check (in `~/.claude`: per `ntv-kaizen`); never report it bare. A **new branch goes
 in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: a plan set to `status:

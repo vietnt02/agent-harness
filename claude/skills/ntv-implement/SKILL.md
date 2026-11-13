@@ -70,8 +70,8 @@ description: "How Claude does execution work itself: before Claude itself edits 
 ## Manufacture the condition, don't wait for it
 
 - A check needing a state that has not arrived: create it on the test surface (a dev-DB
-  timestamp, a `probe-*` row deleted in-turn), or run the deployed job by hand on its schedule
-  config. Never wait on a scheduled run over 5 minutes away: trigger it, unless timing itself is
+  timestamp, a `probe-*` row deleted in-turn), or run the job by hand on a copy of its schedule
+  config and of every state it reads (`ntv-test` § 2). Never wait on a scheduled run over 5 minutes away: trigger it, unless timing itself is
   under test.
 - A test run of a local app still runs on Viet's machine: it never triggers (click or API call) an
   action that reaches the OS (`open`, Finder, a browser launch) unless the app stubs it on that run.
