@@ -1199,7 +1199,7 @@ test('secret-file-guard: a dotenv loaded with `set -a` then used by curl inside 
         '  echo "orders: $(curl -s "${H[@]}" "$U/rest/v1/orders?email=eq.$e" | python3 -c "import json,sys;print(json.load(sys.stdin))")"\ndone',
       load + 'echo "n: `curl -s $SUPABASE_URL`"',
       load + 'echo "n: $(curl -s "$(date)" -H "k: $SERVICE_KEY")"',
-      `cd ${path.join(tmp, 'app')} && set -a; . ./.env; set +a; echo "x $e"`,
+      `cd "${path.join(tmp, 'app').replace(/\\/g, '/')}" && set -a; . ./.env; set +a; echo "x $e"`,
       'cd app; cd ..; cd app && . ./.env; echo "$OTHER"',
     ]) assert.deepEqual(leak(c), [], c);
     for (const c of [
