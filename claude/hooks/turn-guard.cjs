@@ -10,22 +10,28 @@
  * - Stop: a final reply written in English (2026-10-12, two reports after a compaction)
  *   is sent back to be rewritten in Vietnamese (communication-style.md § Language).
  * - Stop: a final reply that names a problem it left (a drift, a leftover, out of scope) with no
- *   PR/MR/Issue ref on that line and no `**Cần bạn:**` line is sent back to fix it (CLAUDE.md
- *   § Mutation gate: a found defect is fixed in its own PR, the report carries its link).
+ *   PR/MR/Issue ref on that line, no `**Cần bạn:**` step and no AskUserQuestion answered this turn
+ *   (read from `transcript_path`) is sent back to fix it (CLAUDE.md § Mutation gate: a found defect
+ *   is fixed in its own PR, the report carries its link).
  * - Stop: a final reply that voices a guess ("rất có thể", "có lẽ", "nghi") and hands the user a
  *   check ("bạn kiểm", "đăng xuất rồi đăng nhập lại") is sent back to run the reads that settle the
  *   guess first (CLAUDE.md § Verification: proactive in thinking, never hand me a read-only check).
- * - Stop: a final reply asking in a `**Cần bạn:**` block (a `?` in that line up to a blank line) is
- *   sent back to ask in AskUserQuestion: an agent left to judge "closed choice" kept writing yes/no
- *   and approval questions as text (communication-style.md § Format: `**Cần bạn:**` is only a step
- *   the user does by hand). Two `**Cần bạn:**` lines are sent back to keep one handoff.
+ * - Stop: a final reply asking the user in text is sent back to ask in AskUserQuestion: a
+ *   `**Cần bạn:**` block (that line up to a blank line) holding a `?` or opening with a reply verb
+ *   ("duyệt", "đồng ý", "chốt", "chọn" …), or a last paragraph ending in `?`. An agent left to judge
+ *   "closed choice" kept writing yes/no and approval questions as text (communication-style.md
+ *   § Format: `**Cần bạn:**` is only a step the user does outside the chat). Only these common
+ *   shapes are read; a question worded otherwise passes.
  *   The Stop checks report together: after one send-back `stop_hook_active` skips them.
  * Fails open on any error.
  */
+const fs = require('fs');
+const { promptText } = require('./lib/user-intent.cjs');
+
 const BYPASS_NOTE =
   'turn-guard: bypass permissions is on. Inside a block the user assigned (an instruction naming the change, ' +
   'or a yes to your ask) they expect the finished chain (CLAUDE.md § Mutation gate, Standing permission, ' +
-  '"làm đến end"): settle open questions before starting (one per reply, communication-style.md), then run to the end. Steps that bring an ' +
+  '"làm đến end"): settle open questions before starting (in one AskUserQuestion, communication-style.md), then run to the end. Steps that bring an ' +
   'approved change to its target need no new ask; never wait on a schedule or controller to do a step you ' +
   'can do now. Tier C outside what was approved is asked the moment you know it, never after waiting. ' +
   'A message that names no change (a fact, a question, an opinion), or arrives after the block closed, ' +
@@ -51,7 +57,7 @@ const ASK = /\*\*Cần bạn:?\*\*:?/;
 
 // The phrase naming a problem the reply leaves behind, or null. Judged per line, sentence by
 // sentence: a sentence that names a problem needs a PR/MR/Issue ref in itself or the next sentence
-// of that line, unless the reply asks the user in a **Cần bạn:** line. Code blocks never count;
+// of that line, unless the reply hands it to the user in a **Cần bạn:** line (or the turn asked: main). Code blocks never count;
 // inline code and quotes cite, so they name nothing; a question, a negation ("không … còn sót")
 // or a condition ("… lệch thì …") is not a report.
 function parkedProblem(text) {
@@ -137,48 +143,67 @@ function handedGuess(text) {
   return null;
 }
 
-// The `**Cần bạn:**` lines of a reply, with code, inline code and URLs blanked (they never count).
-function askLines(text) {
-  const lines = String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
-    .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/[^\s)]+?(?=[?!.,;:]*(?:[\s)]|$))/g, ' '));
-  return { lines, at: lines.map((l, i) => (ASK.test(l) ? i : -1)).filter((i) => i >= 0) };
+// A reply's lines with code, inline code, quotes and URLs blanked: they cite, they never ask.
+function proseLines(text) {
+  return String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
+    .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/"[^"\n]*"|“[^”\n]*”/g, ' ')
+      .replace(/https?:\/\/[^\s)]+?(?=[?!.,;:]*(?:[\s)]|$))/g, ' '));
 }
 
-// A reply holding more than one handoff: two `**Cần bạn:**` lines, else null.
-function manyAsks(text) {
-  const { at } = askLines(text);
-  return at.length >= 2 ? `${at.length} \`**Cần bạn:**\` lines` : null;
-}
+// What the user replies to Claude, as the first word after the label: a pick, an approval, a yes/no.
+const REPLY_VERB = /^\s*(bạn\s+)?(duyệt|đồng ý|xác nhận|chốt|chọn|trả lời|cho (Claude\s+)?biết)(?=[\s:,]|$)/i;
 
-// The first `**Cần bạn:**` block (that line up to a blank line, its list included) holding a `?`,
-// as its first line trimmed, else null: a question written as text instead of AskUserQuestion.
+// A question the reply asks in text instead of AskUserQuestion, as its line trimmed, else null:
+// a `**Cần bạn:**` block (that line up to a blank line, its list included) holding a `?` or opening
+// with a reply verb, or the last paragraph ending in `?`.
 function textQuestion(text) {
-  const { lines, at } = askLines(text);
-  for (const start of at) {
+  const lines = proseLines(text);
+  const quote = (l) => l.replace(ASK, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  for (let start = 0; start < lines.length; start++) {
+    if (!ASK.test(lines[start])) continue;
     const block = [];
     for (let i = start; i < lines.length && (i === start || lines[i].trim()); i++) block.push(lines[i]);
-    if (block.join('\n').includes('?')) return block[0].replace(ASK, '').trim().slice(0, 80);
+    const first = block[0].slice(block[0].search(ASK)).replace(ASK, '');
+    const asking = block.find((l) => l.includes('?'));
+    if (asking) return quote(asking);
+    if (REPLY_VERB.test(first)) return quote(block[0]);
   }
-  return null;
+  const last = lines.map((l) => l.trim()).filter(Boolean).pop() || '';
+  return /\?[*_)\s]*$/.test(last) ? quote(last) : null;
 }
 
-const asksNote = (what) =>
-  `the reply hands the user more than one step (${what}). Keep the one this topic needs now; the others ` +
-  'wait for later replies (communication-style.md § Format).';
-
 const textQuestionNote = (line) =>
-  `the reply asks the user in a **Cần bạn:** block ("${line}"). Ask it in AskUserQuestion instead, ` +
-  'yes/no and approvals included, the question standing alone (the box hides the text above it), ' +
-  'recommended option first, then end the turn with the answer as its last text. **Cần bạn:** is only a ' +
-  'step the user does by hand, an imperative with no "?" (communication-style.md § Format). With no ' +
-  'AskUserQuestion tool in this session, keep the question as a plain line without the label.';
+  `the reply asks the user in text ("${line}"). Ask it in AskUserQuestion instead, yes/no and approvals ` +
+  'included, every question of this topic in one call, each standing alone (the box hides the text above ' +
+  'it), recommended option first; then end the turn with the answer as its last text. **Cần bạn:** is ' +
+  'only a step the user does outside this chat, never a reply to Claude (communication-style.md § Format). ' +
+  'With no AskUserQuestion tool in this session, leave the reply as it is.';
+
+// True when an AskUserQuestion was answered since the user's latest message: the reply's open
+// point went to the user there, which last_assistant_message cannot show. False when unreadable.
+const ASK_ANSWER = /(Your questions have been answered|User has answered your questions?)/;
+function askedThisTurn(transcript) {
+  try {
+    const records = fs.readFileSync(transcript, 'utf8').split('\n').slice(-2000);
+    for (let i = records.length - 1; i >= 0; i--) {
+      let rec;
+      try { rec = JSON.parse(records[i]); } catch { continue; }
+      if (rec.type !== 'user' || rec.isMeta) continue;
+      const c = rec.message?.content;
+      if (Array.isArray(c) && c.some((b) => b?.type === 'tool_result' &&
+        ASK_ANSWER.test(typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '')))) return true;
+      if (promptText(rec) !== null) return false;
+    }
+  } catch (_) { /* unreadable: no ask seen */ }
+  return false;
+}
 
 const ENGLISH_NOTE =
   'the reply you just ended the turn with is in English. Send it again in Vietnamese, labels ' +
   'included (communication-style.md § Language); technical terms and code stay as they are.';
 const parkedNote = (phrase) =>
   `the reply names a problem it leaves ("${phrase}") with no PR/MR/Issue ref on that line and no ` +
-  '**Cần bạn:** line. Re-check it; if it is real, fix it now in its own PR and report the link; ' +
+  'ask. Re-check it; if it is real, fix it now in its own PR and report the link; ' +
   'only a business call or a tier-C step goes to the user, as one AskUserQuestion ' +
   '(CLAUDE.md § Mutation gate). If you were wrong about it, drop the line.';
 
@@ -203,10 +228,10 @@ if (require.main === module) {
         const reply = input.last_assistant_message;
         const parked = parkedProblem(reply);
         const guess = handedGuess(reply);
-        const asks = manyAsks(reply);
         const asked = textQuestion(reply);
-        const notes = [isEnglishReply(reply) && ENGLISH_NOTE, parked && parkedNote(parked), guess && guessNote(guess),
-          asks && asksNote(asks), asked && textQuestionNote(asked)]
+        const notes = [isEnglishReply(reply) && ENGLISH_NOTE,
+          parked && !askedThisTurn(input.transcript_path) && parkedNote(parked), guess && guessNote(guess),
+          asked !== null && textQuestionNote(asked)]
           .filter(Boolean);
         if (notes.length) {
           process.stderr.write(`turn-guard: ${notes.join(' Also: ')}\n`);
@@ -218,4 +243,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { isEnglishReply, parkedProblem, handedGuess, manyAsks, textQuestion };
+module.exports = { isEnglishReply, parkedProblem, handedGuess, textQuestion, askedThisTurn };

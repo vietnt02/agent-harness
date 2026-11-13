@@ -758,8 +758,8 @@ function handleStop(payload) {
     const parked = parkedProblem(reply);
     if (parked) {
       notes.push(
-        `the reply names a problem it leaves ("${parked}") with no PR/MR/Issue ref on that line and no **Cần bạn:** line. ` +
-          'Re-check it; if it is real, fix it now in its own PR and report the link, or ask one **Cần bạn:** question.'
+        `the reply names a problem it leaves ("${parked}") with no PR/MR/Issue ref on that line and no ask. ` +
+          'Re-check it; if it is real, fix it now in its own PR and report the link, or ask the user once with your question tool, never as a **Cần bạn:** line.'
       );
     }
     const guess = handedGuess(reply);
