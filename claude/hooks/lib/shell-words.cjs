@@ -226,4 +226,4 @@ function expandVars(word, vars) {
   return /[$`]/.test(out) ? null : out;
 }
 
-module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars };
+module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick };

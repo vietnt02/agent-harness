@@ -1184,6 +1184,45 @@ test('secret-file-guard: a relative dotenv loaded after a `cd` counts every vari
   }
 });
 
+test('secret-file-guard: a dotenv loaded with `set -a` then used by curl inside `$(…)` passes, after a literal `cd` too', () => {
+  const { printedSecrets } = require('../claude/hooks/secret-file-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sfg-subst-'));
+  fs.mkdirSync(path.join(tmp, 'app'));
+  fs.writeFileSync(path.join(tmp, 'app', '.env'), 'SUPABASE_URL=x\nSERVICE_KEY=y\n');
+  fs.writeFileSync(path.join(tmp, '.env'), 'DATABASE_URL=z\n');
+  const isSecret = (f) => path.basename(f) === '.env';
+  const leak = (c) => printedSecrets(c, isSecret, tmp);
+  const load = 'cd app && set -a; . ./.env; set +a; ';
+  const root = 'set -a; . ./.env; set +a; echo "db=$DATABASE_URL"';
+  try {
+    for (const c of [
+      load + 'H=(-H "apikey: $SERVICE_KEY"); U=$SUPABASE_URL\nfor e in a@example.com; do\n  echo "=== $e"\n' +
+        '  id=$(curl -s "${H[@]}" "$U/rest/v1/rpc/find" -d "{\\"p\\":\\"$e\\"}" | tr -d \'"\')\n  echo "user_id: $id"\n' +
+        '  echo "orders: $(curl -s "${H[@]}" "$U/rest/v1/orders?email=eq.$e" | python3 -c "import json,sys;print(json.load(sys.stdin))")"\ndone',
+      load + 'echo "n: `curl -s $SUPABASE_URL`"',
+      load + 'echo "n: $(curl -s "$(date)" -H "k: $SERVICE_KEY")"',
+      `cd "${path.join(tmp, 'app').replace(/\\/g, '/')}" && set -a; . ./.env; set +a; echo "x $e"`,
+      'cd app; cd ..; cd app && . ./.env; echo "$OTHER"',
+    ]) assert.deepEqual(leak(c), [], c);
+    for (const c of [
+      load + 'echo "$SERVICE_KEY"',
+      load + 'U=$SUPABASE_URL; echo "$U"',
+      load + 'echo "$(echo $SERVICE_KEY)"',
+      'cd "$D" && . ./.env; echo "$e"',
+      'cd - && . ./.env; echo "$e"',
+      'env -C /x true; cd app && . ./.env; echo "$e"',
+      load + 'echo "v: $(echo "$v" | sed \'s/ (.*//\') k=$SERVICE_KEY"',
+      load + 'echo "$(( $SERVICE_KEY + 1 ))"',
+      '(cd app && npm ci); ' + root,
+      'D=$(cd app && pwd); ' + root,
+      'pushd app >/dev/null; npm run build; popd >/dev/null; ' + root,
+      'cd app && (set -a; . ./.env; set +a; echo "k=$SERVICE_KEY")',
+    ]) assert.deepEqual(leak(c), ['./.env'], c);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('user-intent: every Orca message header is not the user\'s words, whatever its priority or type', () => {
   for (const text of [
     '──── From: TERM_4041-AB (term_4041-ab) (worker_done) ────\nSubject: x',

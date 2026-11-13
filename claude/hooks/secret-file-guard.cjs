@@ -14,8 +14,9 @@
  * - Loading a secret file (`source`, `.`) in the same command as shell trace (`set -x`, `set -v`,
  *   `set -o xtrace|verbose`) or a variable-printing command (`env` with no command to run,
  *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` naming a key the loaded file
- *   sets; `echo exit=$?` or a variable the file does not set passes; an unreadable file counts
- *   every named variable).
+ *   sets; `echo exit=$?`, a variable the file does not set, or one only passed to a `$(…)` inside
+ *   the echo passes; a relative file after a `cd` resolves from its literal target; an unreadable
+ *   file, or one loaded after a `cd` to an unknown place, counts every named variable).
  * Everything else naming a secret file (`set -a; . ./.env; set +a; <cmd>`, passing its path to a
  * `python3`/`node` script, `--env-file`, `ssh -i <key>`, `cp .env.example .env`, prose in heredocs
  * or quoted strings) passes.
@@ -24,14 +25,15 @@
  * - Viet approves one read: `# secret-ok: "<his words, 8+ chars>"` matched against `userTexts`.
  * Known limits: a script (`python3 x.py ./.env`, `node app.js`) or unlisted subcommand (`git diff` /
  * `git show` on a dotenv) that prints secret values itself, command substitution feeding a dotenv
- * into `export`/`env` without `source`/`.`, or an unquoted dotenv line that fails shell parsing, is
- * not caught; this hook is a guardrail naming the risk on ordinary commands, never a wall.
+ * into `export`/`env` without `source`/`.`, an unquoted dotenv line that fails shell parsing, a key
+ * fed by `<<<` to a filter inside `$(…)` that an echo prints, or an escaped backtick (`\``) around
+ * a key in an echo, is not caught; this hook is a guardrail naming the risk on ordinary commands, never a wall.
  * Fails open on an unexpected internal error of the guard itself (checker failure fails closed).
  */
 
 const os = require('os');
 const path = require('path');
-const { commands, program, dropHeredocs, assignments } = require('./lib/shell-words.cjs');
+const { commands, program, dropHeredocs, assignments, closeParen, closeTick } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
@@ -190,6 +192,27 @@ function setsTrace(args) {
   return false;
 }
 
+// A word without its `$(…)` and backtick substitutions: their output is printed, not the variables
+// passed to them; the commands inside are judged on their own (`commands` lists them).
+// Arithmetic `$((…))` stays: it prints the value it computes.
+function dropSubstitutions(word) {
+  let out = '';
+  for (let i = 0; i < word.length; i++) {
+    if (word[i] === '$' && word[i + 1] === '(' && word[i + 2] !== '(') i = closeParen(word, i + 1);
+    else if (word[i] === '`') i = closeTick(word, i);
+    else out += word[i];
+  }
+  return out;
+}
+
+// The directory a `cd`/`pushd` moves to from `dir`, or null when unknown. A target the shell would
+// expand (`-`, `$D`, a glob) resolves to a path that does not exist, so its dotenv stays unreadable.
+function cdTarget(dir, args) {
+  const target = args.filter((a) => a !== '--' && a !== '-P' && a !== '-L');
+  if (dir === null || target.length !== 1) return null;
+  return path.resolve(dir, target[0].replace(/^~(?=\/|$)/, os.homedir()));
+}
+
 // `all`: the command prints every variable (env, printenv, bare set, export/declare -p).
 // `names`: the variables an echo/printf prints (`$X`, `${X}`; `$?`, `$1` are no variables).
 function printsVars(argv, prog) {
@@ -200,7 +223,7 @@ function printsVars(argv, prog) {
   if (name === 'set') return { all: args.length === 0, names: [] };
   if (name === 'export' || name === 'declare') return { all: args.some((a) => /^-[a-zA-Z]*p/.test(a)), names: [] };
   if (name === 'echo' || name === 'printf') {
-    const names = args.flatMap((a) => [...a.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
+    const names = args.flatMap((a) => [...dropSubstitutions(a).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
     return { all: false, names };
   }
   return { all: false, names: [] };
@@ -221,9 +244,15 @@ function printedSecrets(command, isSecret, cwd) {
   const sourced = [];
   let printsAll = false;
   const named = [];
-  let moved = false; // a `cd`/`pushd`/`env -C`/`sudo -D` ran before: a relative path no longer resolves from cwd
-  const aliases = {}; // `X=$A_KEY`: X carries A_KEY
-  const refs = (w) => [...String(w).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
+  // The directory a command runs in: the last `cd`/`pushd` (`cdTarget`) in its own shell or one
+  // enclosing it (a `cd` inside `(…)` or `$(…)` ends there); after `popd`, `env -C`/`sudo -D` or a
+  // `cd` with no single target it is unknown (null), so a relative file loaded there cannot be read.
+  const start = path.resolve(cwd || process.cwd());
+  const cds = [];
+  const inScope = (scope, of) => scope === of || String(scope).startsWith(`${of}.`);
+  const dirIn = (scope) => cds.reduce((d, cd) => (inScope(scope, cd.scope) ? cd.dir : d), start);
+  const aliases = {}; // `X=$A_KEY`: X carries A_KEY; `X=$(curl $A_KEY)` holds curl's output
+  const refs = (w) => [...dropSubstitutions(String(w)).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
   for (const words of commands(command)) {
     const set = assignments(words);
     for (const [name, value] of set || []) aliases[name] = refs(value).flatMap((r) => [r, ...(aliases[r] || [])]);
@@ -231,8 +260,9 @@ function printedSecrets(command, isSecret, cwd) {
     const prog = program(argv);
     const name = (prog[0] || '').replace(/^.*[\\/]/, '').toLowerCase();
     const args = prog.slice(1);
-    if (name === 'cd' || name === 'pushd' || prog.chdir !== undefined) moved = true;
-    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], moved });
+    if (name === 'cd' || name === 'pushd') cds.push({ scope: words.scope, dir: cdTarget(dirIn(words.scope), args) });
+    else if (name === 'popd' || prog.chdir !== undefined) cds.push({ scope: words.scope, dir: null });
+    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], dir: dirIn(words.scope) });
     const files = printerFiles(name, args);
     if (files !== null) {
       for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);
@@ -241,8 +271,8 @@ function printedSecrets(command, isSecret, cwd) {
     if ((name === 'set' && setsTrace(args)) || vars.all) printsAll = true;
     named.push(...vars.names);
   }
-  for (const { file, moved: after } of sourced) {
-    const keys = after && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, cwd);
+  for (const { file, dir: from } of sourced) {
+    const keys = from === null && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, from || cwd);
     const carries = (n) => [n, ...(aliases[n] || [])];
     if (printsAll || named.some((n) => keys === null || carries(n).some((k) => keys.has(k)))) leaked.push(file);
   }
