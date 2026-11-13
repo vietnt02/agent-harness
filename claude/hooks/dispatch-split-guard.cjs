@@ -82,7 +82,8 @@ const PROD_WRITE = new RegExp([
   /(?:^|[^a-z0-9])n8n_(?:workflow_versions|executions)\b[^\n]{0,200}?\b(?:rollback|delete|prune)\b/.source,
 ].join('|'), 'i');
 // A line that opens with a prohibition label lists what the worker must not run: "KHÔNG (worker): …".
-const PROHIBITION_LINE = /^(?:[-*>•\s]|\*\*)*(?:không|cấm|never|not|do not|don't|must not)(?:\s+\([^)\n]*\))?\s*\**\s*:/iu;
+// A write inside the label's parentheses ("KHÔNG (trừ … +messages-reply):") is no prohibition.
+const PROHIBITION_LINE = /^(?:[-*>•|\s]|\d+[.)]|\*\*)*(?:không|cấm|never|not|do not|don't|must not)(?:\s+(?:được|làm))?(?:\s+\([^)+\n]*\))?\s*\**\s*:/iu;
 // A run verb negated, with no sentence break before the write: "không chạy", "đừng gọi", "do not run".
 const NEGATED_RUN = /(?:^|[^\p{L}])(?:không|đừng|cấm|never|do not|don't|must not)\s+(?:được\s+)?(?:tự\s+)?(?:chạy|gọi|ghi|thực thi|dùng|run|call|execute|use|invoke)(?=$|[^\p{L}])[^.,:;!?\n]*$/iu;
 
