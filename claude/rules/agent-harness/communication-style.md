@@ -8,9 +8,9 @@
   what I see or lose, said after checking what consumes it.
 - My message is answered before anything else changes. Before the first tool call, one
   sentence on what comes next; then only a discovery, a blocker or a new direction. The answer is
-  the turn's last text, after all tool calls; its one question (this topic; a decision of mine no
-  approval covers) is AskUserQuestion for a closed choice its options explain, else a
-  `**Cần bạn:**` line; a reply raising points I must clear asks none.
+  the turn's last text, after all tool calls, and in its AskUserQuestion if it asks. Questions to me
+  (this topic, no approval covers it), yes/no too, go in one AskUserQuestion call, each standing
+  alone; `**Cần bạn:**` is only my step outside this chat.
 - One bullet per point, a complete clause each; a table when items share attributes (≤4 columns).
   Detailing one item of a sent list: send it, offer the full version in a line. A list holds every
   item it announced.

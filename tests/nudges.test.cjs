@@ -162,22 +162,64 @@ test('dispatch-split-guard: a codex worker needs no ritual line; a full claude i
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('turn-guard: a reply asking two things is sent back once', () => {
-  const { manyAsks } = require('../claude/hooks/turn-guard.cjs');
-  assert.equal(manyAsks('**Cần bạn:** đồng ý merge !67 không?'), null);
-  assert.match(manyAsks('**Cần bạn:** merge !67?\n\n**Cần bạn:** báo khách?'), /2 `\*\*Cần bạn:\*\*` lines/);
-  assert.equal(manyAsks('**Cần bạn:** cho phép lệnh `git push origin x` không?\n- rule: Protected Branch Push\n- file: ~/.claude/settings.json\n- tác động: push lên nhánh x'), null, 'the ask to allow a blocked command lists its parts');
-  assert.equal(manyAsks('**Cần bạn:** chọn một:\n1. merge ngay\n2. chờ CI xanh rồi merge'), null, 'a closed choice lists its options');
-  assert.equal(manyAsks('**Cần bạn:** mở https://example.com/a?b=1 rồi duyệt không?'), null, 'a URL query is no question');
-  assert.match(manyAsks('**Cần bạn:** merge [#21](https://github.com/o/r/pull/21)? Và báo khách không?'), /2 questions/, 'a ? after a link counts');
-  assert.equal(manyAsks('**Cần bạn:** chọn một:\n1. merge ngay?\n2. chờ CI xanh rồi merge?'), null, 'options ending in ? are one choice');
-  assert.match(manyAsks('**Cần bạn:** merge !67 không? Có báo khách không?'), /2 questions/);
-  assert.equal(manyAsks('**Cần bạn:** đồng ý không?\n\nGhi chú: vì sao? chưa rõ?'), null, 'text after the block does not count');
-  assert.equal(manyAsks('```\n**Cần bạn:** a?\n```\n**Cần bạn:** chạy `a?b` không?'), null, 'code never counts');
-  const stop = (active) => hook('turn-guard.cjs', { hook_event_name: 'Stop', stop_hook_active: active,
-    last_assistant_message: 'Đã xong.\n\n**Cần bạn:** merge !67?\n**Cần bạn:** báo khách?' });
-  assert.equal(stop(false).status, 2);
-  assert.equal(stop(true).status, 0, 'never twice in a row');
+test('turn-guard: a question asked in text is sent back to AskUserQuestion once', () => {
+  const { textQuestion } = require('../claude/hooks/turn-guard.cjs');
+  // hits: yes/no, approvals and picks written as text
+  assert.match(textQuestion('Đã xong.\n\n**Cần bạn:** đồng ý merge !67 không?'), /đồng ý merge !67/);
+  assert.ok(textQuestion('**Cần bạn:** chốt "Stand-in Agent", hay bạn muốn tên khác?'));
+  assert.match(textQuestion('# Xong\n\nĐã sửa.\n\n**Cần bạn:**\n- đồng ý merge !67 không?'), /đồng ý merge !67/, 'label alone on its line');
+  assert.ok(textQuestion('**Cần bạn:** chọn một:\n1. merge ngay\n2. chờ CI xanh rồi merge'), 'a pick with no ?');
+  assert.ok(textQuestion('**Cần bạn:** duyệt plan để Claude chạy.'), 'an approval worded as a step');
+  assert.match(textQuestion('**Cần bạn:**\n- Duyệt nháp trên để Claude gửi.'), /Duyệt nháp/, 'a reply verb under a lone label');
+  assert.ok(textQuestion('**Cần bạn:** đồng ý thì Claude sửa `AGENTS.md` theo hai điểm trên.'));
+  assert.ok(textQuestion('**Cần bạn:** merge [#21](https://github.com/o/r/pull/21)? Và báo khách không?'), 'a ? after a link counts');
+  assert.ok(textQuestion('**Cần bạn**: duyệt ba việc trên để Claude làm tiếp?'), 'label with the colon outside');
+  assert.ok(textQuestion('# Xong\n\nĐã sửa.\n\nBạn muốn Claude merge !67 luôn hay chờ CI?'), 'a last paragraph ending in ?');
+  assert.ok(textQuestion('# Xong\n\n- **Merge luôn không?**'), 'markdown after the ?');
+  // misses: a step the user does outside the chat, ? only in code, quotes, URLs or mid-reply
+  assert.equal(textQuestion('**Cần bạn:** gắn label `AFK Agent` cho các nhóm rồi báo Claude.'), null);
+  assert.equal(textQuestion('**Cần bạn:** allow lệnh `git push origin x`:\n- rule: Protected Branch Push\n- file: ~/.claude/settings.json\n- tác động: push lên nhánh x'), null, 'the step to allow a blocked command');
+  assert.equal(textQuestion('**Cần bạn:** mở https://example.com/a?b=1 rồi bấm Duyệt.'), null, 'a URL query is no question');
+  assert.equal(textQuestion('**Cần bạn:** mở Lark, bấm nút "Xoá bản ghi?" rồi chọn Có.'), null, 'a quoted UI label is no question');
+  assert.equal(textQuestion('**Cần bạn:** chạy `a?b` trong terminal.\n\nGhi chú: vì sao? chưa rõ, đang đọc log.'), null, 'code and a ? mid-reply never count');
+  assert.equal(textQuestion('```\n**Cần bạn:** a?\n```\nĐã xong.'), null, 'a code block never counts');
+  assert.equal(textQuestion('# Nháp tin\n\nĐã soạn tin gửi chị Lương, bạn tự gửi:\n\n> Chị xem lại giúp em được không ạ?'), null, 'a drafted message quoted for the user');
+  assert.equal(textQuestion('**Cần bạn:**\n- Gắn label `AFK Agent` rồi báo Claude.'), null, 'a manual step under a lone label');
+  assert.equal(textQuestion('# Xong\n\nVì sao lỗi? Do token hết hạn; đã đổi token và chạy lại xanh.'), null, 'a question answered in the reply');
+  const stop = (active, msg, transcript) => hook('turn-guard.cjs', { hook_event_name: 'Stop', stop_hook_active: active, last_assistant_message: msg, transcript_path: transcript });
+  const asked = stop(false, '# Xong\n\nĐã sửa.\n\n**Cần bạn:** đồng ý merge !67 không?');
+  assert.equal(asked.status, 2);
+  assert.match(asked.stderr, /AskUserQuestion/);
+  assert.equal(stop(true, '**Cần bạn:** đồng ý merge !67 không?').status, 0, 'never twice in a row');
+  assert.equal(stop(false, '# Xong\n\nĐã sửa và merge.\n\n**Cần bạn:** gắn label `AFK Agent` rồi báo Claude.\n\n**Cần bạn:** mở Lark.').status, 0, 'two manual steps pass');
+  // a leftover the user already settled in an AskUserQuestion this turn is no parked problem
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-'));
+  try {
+    const t = path.join(dir, 't.jsonl');
+    const rec = (o) => JSON.stringify(o);
+    const leftover = '# Xong\n\nĐã merge !12 và deploy.\n\nDoc runbook còn lệch với lệnh deploy mới; bạn đã chọn để Claude sửa ở lượt sau.';
+    fs.writeFileSync(t, [rec({ type: 'user', message: { content: 'merge đi' } }),
+      rec({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'AskUserQuestion', input: {} }] } }),
+      rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: 'Your questions have been answered: "x"="sửa sau". You can now continue with these answers in mind.' }] } })].join('\n'));
+    assert.equal(stop(false, leftover, t).status, 0, 'the ask settled it');
+    fs.writeFileSync(t, [rec({ type: 'user', message: { content: 'merge đi' } }),
+      rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: 'The user answered: "x"="sửa sau". Read the answers carefully.' }] } })].join('\n'));
+    assert.equal(stop(false, leftover, t).status, 0, 'the other answer shape settles it too');
+    fs.writeFileSync(t, rec({ type: 'user', message: { content: 'merge đi' } }));
+    assert.equal(stop(false, leftover, t).status, 2, 'no ask this turn: sent back');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('answer-first: a mid-turn question is answered now and again in the last text', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-'));
+  try {
+    const t = path.join(dir, 't.jsonl');
+    fs.writeFileSync(t, [JSON.stringify({ type: 'user', message: { content: 'làm plan đi' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: {} }] } }),
+      JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command', prompt: 'sao không hỏi tôi triển khai luôn không?', origin: { kind: 'human' } } })].join('\n'));
+    const out = JSON.parse(hook('answer-first.cjs', { hook_event_name: 'PreToolUse', transcript_path: t }).stdout);
+    assert.match(out.hookSpecificOutput.additionalContext, /Answer it now in one line, and again in the turn's last text/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('worker-start-receipt: each new dispatch gets its stall watch, ready to run', () => {

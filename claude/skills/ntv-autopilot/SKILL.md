@@ -39,13 +39,17 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
    promised for later (an outline, a draft), is an open question.
 4. Check or render everything the block has produced so far, and run every prerequisite check.
-5. End the turn that writes or changes the plan with a message: the plan's full path and a
-   summary (the design settled, actions by group, each tier C step by name, Done when,
-   prerequisites with their results, defaults, out of scope). From the next turn, ask in one
-   AskUserQuestion call: every open question, the role question if the user named none
-   (`CLAUDE.md` § Scope). Recommended option first. Only
-   when none is left, ask the final gate in one AskUserQuestion: run this plan on autopilot?
-   Never ask it while a question is open.
+5. In the turn that writes or changes the plan, ask at once, in one AskUserQuestion call, every
+   open question, recommended option first; each names the plan's full path and what it decides,
+   since the box hides the text above it. Write each answer into the plan (its action's `chốt làm`
+   or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
+   left, in that same turn, ask the final gate in one AskUserQuestion: run this plan on autopilot?
+   Its question names the plan's path, the actions by group, each tier C step by name, the
+   prerequisites with their results, the defaults and out of scope. Never ask it while a question
+   is open. A plan written on a yes to `ntv-architect`'s final gate is approved then: no second gate.
+   Unless a yes starts the run (its Report ends the turn), end the turn with the plan's full path
+   and a summary (the design settled, actions by group, each tier C step by name, Done when,
+   prerequisites with their results, defaults, out of scope).
 
 ## Approve
 

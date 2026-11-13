@@ -5,7 +5,10 @@
  * `origin.kind: "human"`; any assistant text block after it counts as the reply.
  * Never blocks; what it says comes back as additionalContext, so the reply can still put it right:
  * - A question with no reply text yet (CLAUDE.md § Mutation gate: a message with a question is
- *   answered first): answer it in the next visible text.
+ *   answered first): answer it now in one line, and again in the turn's last text, after the last
+ *   tool call, and in the AskUserQuestion when the turn asks (communication-style.md § Format): a
+ *   chat client may fold text written before a tool call out of sight, so an answer placed there
+ *   alone reads as ignored.
  * - Anything else (an instruction, a notice): the first tool call after it gets the message back so
  *   it is acted on and acknowledged.
  * Fails open whenever the transcript cannot be read.
@@ -65,7 +68,9 @@ process.stdin.on('end', () => {
     if (pending && (isQuestion(pending.prompt) || pending.calls <= 1)) {
       const quote = pending.prompt.replace(/\s+/g, ' ').slice(0, 200);
       notes.push(isQuestion(pending.prompt)
-        ? `answer-first: the user asked mid-turn ("${quote}") and no reply text followed. Answer it in your next visible text.`
+        ? `answer-first: the user asked mid-turn ("${quote}") and no reply text followed. ` +
+          'Answer it now in one line, and again in the turn\'s last text, after your last tool call (inside the ' +
+          'AskUserQuestion too if this turn asks): text before a tool call may be folded out of sight.'
         : `answer-first: the user wrote mid-turn ("${quote}"). Not a question, so work goes on: ` +
           'follow it if it is an instruction, and acknowledge it in your next text.');
     }
