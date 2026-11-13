@@ -38,6 +38,13 @@ follows `CLAUDE.md` § Verification and claims: planned under one ceiling and ap
 ad hoc. A repo with no such check for that layer: that layer is `CHƯA kiểm` in the report and the
 PR/MR names the missing check; it is never reported green.
 
+A test is only a test, the suite and the reality check alike: it runs in an isolated environment,
+with its own copy of every state the live system reads (its ledger, lock, cursor, config), never
+the live state, even the system's own; real input is read, never written. A repo with no way to
+point a run at such a copy gets one as part of the change, never a run on the live state instead.
+Side effects that leave the machine or reach a person (an OS notification, a sent message, an API
+write) are blocked by default in the suite, and a test that needs one fakes it.
+
 ## 3. Measure the diff with mutation
 
 A diff that changes logic in a module (a branch, a comparison, a computation, a returned value)
