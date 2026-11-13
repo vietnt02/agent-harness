@@ -15,9 +15,10 @@
  * - Stop: a final reply that voices a guess ("rất có thể", "có lẽ", "nghi") and hands the user a
  *   check ("bạn kiểm", "đăng xuất rồi đăng nhập lại") is sent back to run the reads that settle the
  *   guess first (CLAUDE.md § Verification: proactive in thinking, never hand me a read-only check).
- * - Stop: a final reply asking the user more than one thing (two `**Cần bạn:**` lines, or one whose
- *   block holds two questions) is sent back to keep one: a short answer must say which
- *   ask it settles (communication-style.md § Format: its one question).
+ * - Stop: a final reply asking in a `**Cần bạn:**` block (a `?` in that line up to a blank line) is
+ *   sent back to ask in AskUserQuestion: an agent left to judge "closed choice" kept writing yes/no
+ *   and approval questions as text (communication-style.md § Format: `**Cần bạn:**` is only a step
+ *   the user does by hand). Two `**Cần bạn:**` lines are sent back to keep one handoff.
  *   The Stop checks report together: after one send-back `stop_hook_active` skips them.
  * Fails open on any error.
  */
@@ -136,26 +137,41 @@ function handedGuess(text) {
   return null;
 }
 
-// The asks of a reply when it holds more than one, else null: two `**Cần bạn:**` lines, or two `?` in
-// the block of one (that line up to a blank line). A list under it is not counted: the ask to allow a
-// blocked command lists its rule, settings file and impact, and a closed choice lists its options.
-// Code, inline code and URLs never count.
-function manyAsks(text) {
+// The `**Cần bạn:**` lines of a reply, with code, inline code and URLs blanked (they never count).
+function askLines(text) {
   const lines = String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
     .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/https?:\/\/[^\s)]+?(?=[?!.,;:]*(?:[\s)]|$))/g, ' '));
-  const at = lines.map((l, i) => (ASK.test(l) ? i : -1)).filter((i) => i >= 0);
-  if (at.length >= 2) return `${at.length} \`**Cần bạn:**\` lines`;
-  if (!at.length) return null;
-  const block = [];
-  for (let i = at[0]; i < lines.length && (i === at[0] || lines[i].trim()); i++) block.push(lines[i]);
-  const prose = block.filter((l, i) => i === 0 || !/^\s*([-*+]|\d+[.)])\s/.test(l));
-  const questions = (prose.join('\n').match(/\?/g) || []).length;
-  return questions >= 2 ? `${questions} questions in the \`**Cần bạn:**\` block` : null;
+  return { lines, at: lines.map((l, i) => (ASK.test(l) ? i : -1)).filter((i) => i >= 0) };
+}
+
+// A reply holding more than one handoff: two `**Cần bạn:**` lines, else null.
+function manyAsks(text) {
+  const { at } = askLines(text);
+  return at.length >= 2 ? `${at.length} \`**Cần bạn:**\` lines` : null;
+}
+
+// The first `**Cần bạn:**` block (that line up to a blank line, its list included) holding a `?`,
+// as its first line trimmed, else null: a question written as text instead of AskUserQuestion.
+function textQuestion(text) {
+  const { lines, at } = askLines(text);
+  for (const start of at) {
+    const block = [];
+    for (let i = start; i < lines.length && (i === start || lines[i].trim()); i++) block.push(lines[i]);
+    if (block.join('\n').includes('?')) return block[0].replace(ASK, '').trim().slice(0, 80);
+  }
+  return null;
 }
 
 const asksNote = (what) =>
-  `the reply asks the user more than one thing (${what}). Keep the one ask this topic needs now; the others ` +
-  'wait for later replies, so a short answer ("không", "ok") can only mean one thing (communication-style.md § Format).';
+  `the reply hands the user more than one step (${what}). Keep the one this topic needs now; the others ` +
+  'wait for later replies (communication-style.md § Format).';
+
+const textQuestionNote = (line) =>
+  `the reply asks the user in a **Cần bạn:** block ("${line}"). Ask it in AskUserQuestion instead, ` +
+  'yes/no and approvals included, the question standing alone (the box hides the text above it), ' +
+  'recommended option first, then end the turn with the answer as its last text. **Cần bạn:** is only a ' +
+  'step the user does by hand, an imperative with no "?" (communication-style.md § Format). With no ' +
+  'AskUserQuestion tool in this session, keep the question as a plain line without the label.';
 
 const ENGLISH_NOTE =
   'the reply you just ended the turn with is in English. Send it again in Vietnamese, labels ' +
@@ -163,7 +179,7 @@ const ENGLISH_NOTE =
 const parkedNote = (phrase) =>
   `the reply names a problem it leaves ("${phrase}") with no PR/MR/Issue ref on that line and no ` +
   '**Cần bạn:** line. Re-check it; if it is real, fix it now in its own PR and report the link; ' +
-  'only a business call or a tier-C step goes to the user as one **Cần bạn:** question ' +
+  'only a business call or a tier-C step goes to the user, as one AskUserQuestion ' +
   '(CLAUDE.md § Mutation gate). If you were wrong about it, drop the line.';
 
 const guessNote = (phrase) =>
@@ -188,8 +204,9 @@ if (require.main === module) {
         const parked = parkedProblem(reply);
         const guess = handedGuess(reply);
         const asks = manyAsks(reply);
+        const asked = textQuestion(reply);
         const notes = [isEnglishReply(reply) && ENGLISH_NOTE, parked && parkedNote(parked), guess && guessNote(guess),
-          asks && asksNote(asks)]
+          asks && asksNote(asks), asked && textQuestionNote(asked)]
           .filter(Boolean);
         if (notes.length) {
           process.stderr.write(`turn-guard: ${notes.join(' Also: ')}\n`);
@@ -201,4 +218,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { isEnglishReply, parkedProblem, handedGuess, manyAsks };
+module.exports = { isEnglishReply, parkedProblem, handedGuess, manyAsks, textQuestion };
