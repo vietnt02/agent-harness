@@ -11,7 +11,7 @@
 ## Chọn model và Spawn Worker
 
 - **Phân vai (`SKILL.md` § 2, § 4):**
-  - Worker và Checker task nhỏ đến trung bình: `gemini-4-hydrogen` (`--effort high`); worker task phức tạp: `gemini-4-carbon` (`--effort high`); `gemini-3.8-flash` chỉ khi user chỉ định. Mọi model Gemini chung một quota (`agy -p "/usage"`).
+  - Worker và Checker mọi mức độ: `gemini-4-hydrogen` (`--effort high`); `gemini-4-carbon` (`--effort high`) chỉ khi user chỉ định hoặc hydrogen hỏng hai lần trên cùng thiết kế; `gemini-3.8-flash` chỉ khi user chỉ định. Mọi model Gemini chung một quota (`agy -p "/usage"`).
   - Reviewer mặc định và Coordinator (khi user mở trực tiếp): `gemini-4-argon` (`--effort high`).
   - Không dùng model Claude qua `agy`. Luôn ghi kèm tên agent (`agy gemini-4-hydrogen high`) trong manifest, spec và báo cáo để tránh nhầm quota với agent khác.
 - **Truyền đủ `--model` và `--effort`:** bỏ trống `--model` sẽ lấy model của Coordinator trong settings:
@@ -35,6 +35,6 @@
 | `requires --effort (available: ...)` | Slug trần thiếu `--effort`; truyền thêm `--effort <mức>` hợp lệ theo `agy models`. |
 | `conflicts with --effort=<mức>` hoặc `not recognized as a known model` | Đã truyền slug kèm đuôi effort hoặc chuỗi lạ vào `--model`; đổi sang slug trần kèm `--effort`. |
 | `has no "<mức>" effort` | Model không có mức đó (`max` không có trên `agy`; `xhigh` chỉ có ở `gemini-4-hydrogen`); tra lại đuôi trong `agy models`. |
-| `plan model not specified`, `outcome_unknown` hoặc `turn_start_unobserved` | Spec vào trước khi `agy` đăng nhập xong hoặc sai cờ model. Kiểm cờ; nếu đúng thì `worker-abandon --dispatch <id>` rồi `worker-start --task <task> --retry-of <id>` kèm `--worktree`, `--agent` (`SKILL.md` § 6). |
+| `plan model not specified`, `outcome_unknown` hoặc `turn_start_unobserved` | Spec vào trước khi `agy` đăng nhập xong hoặc sai cờ model. Luôn gọi `worker-start --full`: bản concise trả 0 cả khi lượt đầu chưa được quan sát, `--full` trả 1 cho mọi trạng thái khác `ready`. Kiểm cờ; nếu đúng thì `worker-abandon --dispatch <id>` rồi `worker-start --task <task> --retry-of <id> --full` kèm lại `--worktree`, `--agent`, `--model`, `--effort` và `--keep-open` (retry không thừa hưởng placement hay keep-open; `SKILL.md` § 6). |
 | `lastError: The native Antigravity account changed…` | Lệch tài khoản giữa vault Orca và `agy`. Khởi động qua shell trống: `orca terminal create --worktree path:<wt> --title <w> --json` → `orca terminal send --terminal <h> --text "agy --model <slug> --effort <mức>" --enter` → `orca terminal read --terminal <h>` (hỏi trust thư mục thì gửi `--enter`; chờ dòng email + gói) → `orca orchestration worker-start --spec … --terminal <h> --worktree path:<wt>`. Xong việc tự `orca terminal close` sau `worker-release`. |
 | Worker đứng chờ duyệt hoặc bị Policy Guardian chặn | Kiểm `toolPermission` trong `~/.claude/knowledge/orca.md`; nếu chạm ngoài workspace hoặc vướng Policy Guardian thì sửa phạm vi spec. |

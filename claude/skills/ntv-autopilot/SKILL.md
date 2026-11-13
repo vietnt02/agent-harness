@@ -1,7 +1,6 @@
 ---
 name: ntv-autopilot
-description: Lock what the user and Claude agreed into a plan, clear every open question, then ask the final gate; a yes switches the session from manual to Claude running the whole plan alone, tier C included, whether or not the user is at the machine. Invoked only when the user types /ntv-autopilot.
-disable-model-invocation: true
+description: Lock what the user and Claude agreed into a plan, clear every open question, then ask the final gate; a yes switches the session from manual to Claude running the whole plan alone, tier C included, whether or not the user is at the machine. Load before the first change of any block that changes a repo, data, config or automation (`CLAUDE.md` § Mutation gate), or when the user types /ntv-autopilot; never for a question or read-only work.
 ---
 
 # /ntv-autopilot
@@ -24,6 +23,9 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    - **Files and repos** it touches.
    - **Done when**: the check for each action, at the layer of its claim
      (`CLAUDE.md` § Verification and claims).
+   - **Test strategy**: one line per behaviour or risk: what is checked, where (an isolated copy
+     of every state the live system reads, never the live one: `ntv-test` § 2), and what counts as
+     done at its layer; what cannot be checked is named here, before the run.
    - **Prerequisites**: everything a listed action needs that the run cannot obtain alone (a
      login, a token, a permission, a secret's presence, quota or credit, a free port, a file at
      an agreed path), each with its read-only check and today's result. One not ready is an open
@@ -59,9 +61,9 @@ again.
 - Every listed action runs without a new ask, tier C included, after the checks
   `CLAUDE.md` § Irreversible actions puts before a tier-C step.
 - Never stop the plan to ask. A question the plan or the user's words already answer is no
-  question; reads, probes and checks never need a yes. Whatever surfaces runs the three checks
-  (`CLAUDE.md` § Mutation gate): all yes → fix, check, one-line report; otherwise park it and
-  continue with the rest. A run the plan depends on: wait in the background with
+  question; reads, probes and checks never need a yes. Whatever surfaces: a fix that makes a
+  listed action's output do what the plan approved (`CLAUDE.md` § Mutation gate, Fixes need no
+  ask) → fix, check, one-line report; anything else → park it and continue with the rest. A run the plan depends on: wait in the background with
   `~/.claude/scripts/watch.sh`, never on the user.
 - An action the plan does not list, or one needing intent the plan does not state: park it.
 - The user interrupts: stop; every tier-C step is asked again.
@@ -75,3 +77,7 @@ bạn:**`, each technical choice inside a listed action that the plan did not st
 changes nothing the user feels, one line with its reason (a choice needing intent was parked,
 never listed here), then `**Đã park:**`, each item with why and the exact command or decision
 it needs. Every listed action done → `status: done`.
+
+Then, in one AskUserQuestion (recommended option first): every `Đã park` item and anything new the
+run surfaced. The answers revise the plan, back to `status: draft`; then ask the final gate for
+the next run. Never ask mid-run.

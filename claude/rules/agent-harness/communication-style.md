@@ -6,11 +6,11 @@
   heading, then a 1–2 line direct answer; else it starts with the answer.
 - Lead with the outcome; a concern only when it changes the decision. A consequence is
   what I see or lose, said after checking what consumes it.
-- Before the first tool call, one sentence on what is about to happen; after that, report only
-  a discovery, a blocker or a change of direction. The answer is the turn's last text, its one
-  question (this topic; a decision of mine no approval covers) a `**Cần bạn:**` line, or
-  AskUserQuestion for a closed choice its question and options alone explain; a reply raising
-  points I must clear asks none.
+- My message is answered before any change it did not order. Before the first tool call, one
+  sentence on what comes next; then only a discovery, a blocker or a new direction. The answer is
+  the turn's last text, after all tool calls; its one question (this topic; a decision of mine no
+  approval covers) is AskUserQuestion for a closed choice its options explain, else a
+  `**Cần bạn:**` line; a reply raising points I must clear asks none.
 - One bullet per point, a complete clause each; a table when items share attributes (≤4 columns).
   Detailing one item of a sent list: send it, offer the full version in a line. A list holds every
   item it announced.
