@@ -170,6 +170,7 @@ test('turn-guard: a question asked in text is sent back to AskUserQuestion once'
   assert.match(textQuestion('# Xong\n\nĐã sửa.\n\n**Cần bạn:**\n- đồng ý merge !67 không?'), /đồng ý merge !67/, 'label alone on its line');
   assert.ok(textQuestion('**Cần bạn:** chọn một:\n1. merge ngay\n2. chờ CI xanh rồi merge'), 'a pick with no ?');
   assert.ok(textQuestion('**Cần bạn:** duyệt plan để Claude chạy.'), 'an approval worded as a step');
+  assert.match(textQuestion('**Cần bạn:**\n- Duyệt nháp trên để Claude gửi.'), /Duyệt nháp/, 'a reply verb under a lone label');
   assert.ok(textQuestion('**Cần bạn:** đồng ý thì Claude sửa `AGENTS.md` theo hai điểm trên.'));
   assert.ok(textQuestion('**Cần bạn:** merge [#21](https://github.com/o/r/pull/21)? Và báo khách không?'), 'a ? after a link counts');
   assert.ok(textQuestion('**Cần bạn**: duyệt ba việc trên để Claude làm tiếp?'), 'label with the colon outside');
@@ -182,6 +183,8 @@ test('turn-guard: a question asked in text is sent back to AskUserQuestion once'
   assert.equal(textQuestion('**Cần bạn:** mở Lark, bấm nút "Xoá bản ghi?" rồi chọn Có.'), null, 'a quoted UI label is no question');
   assert.equal(textQuestion('**Cần bạn:** chạy `a?b` trong terminal.\n\nGhi chú: vì sao? chưa rõ, đang đọc log.'), null, 'code and a ? mid-reply never count');
   assert.equal(textQuestion('```\n**Cần bạn:** a?\n```\nĐã xong.'), null, 'a code block never counts');
+  assert.equal(textQuestion('# Nháp tin\n\nĐã soạn tin gửi chị Lương, bạn tự gửi:\n\n> Chị xem lại giúp em được không ạ?'), null, 'a drafted message quoted for the user');
+  assert.equal(textQuestion('**Cần bạn:**\n- Gắn label `AFK Agent` rồi báo Claude.'), null, 'a manual step under a lone label');
   assert.equal(textQuestion('# Xong\n\nVì sao lỗi? Do token hết hạn; đã đổi token và chạy lại xanh.'), null, 'a question answered in the reply');
   const stop = (active, msg, transcript) => hook('turn-guard.cjs', { hook_event_name: 'Stop', stop_hook_active: active, last_assistant_message: msg, transcript_path: transcript });
   const asked = stop(false, '# Xong\n\nĐã sửa.\n\n**Cần bạn:** đồng ý merge !67 không?');
@@ -197,8 +200,11 @@ test('turn-guard: a question asked in text is sent back to AskUserQuestion once'
     const leftover = '# Xong\n\nĐã merge !12 và deploy.\n\nDoc runbook còn lệch với lệnh deploy mới; bạn đã chọn để Claude sửa ở lượt sau.';
     fs.writeFileSync(t, [rec({ type: 'user', message: { content: 'merge đi' } }),
       rec({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'AskUserQuestion', input: {} }] } }),
-      rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: 'User has answered your questions: "x"="sửa sau"' }] } })].join('\n'));
+      rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: 'Your questions have been answered: "x"="sửa sau". You can now continue with these answers in mind.' }] } })].join('\n'));
     assert.equal(stop(false, leftover, t).status, 0, 'the ask settled it');
+    fs.writeFileSync(t, [rec({ type: 'user', message: { content: 'merge đi' } }),
+      rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: 'The user answered: "x"="sửa sau". Read the answers carefully.' }] } })].join('\n'));
+    assert.equal(stop(false, leftover, t).status, 0, 'the other answer shape settles it too');
     fs.writeFileSync(t, rec({ type: 'user', message: { content: 'merge đi' } }));
     assert.equal(stop(false, leftover, t).status, 2, 'no ask this turn: sent back');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

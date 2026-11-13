@@ -143,10 +143,10 @@ function handedGuess(text) {
   return null;
 }
 
-// A reply's lines with code, inline code, quotes and URLs blanked: they cite, they never ask.
+// A reply's lines with code, inline code, quotes, block quotes and URLs blanked: they cite, they never ask.
 function proseLines(text) {
   return String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
-    .map((l) => l.replace(/`[^`]*`/g, ' ').replace(/"[^"\n]*"|“[^”\n]*”/g, ' ')
+    .map((l) => (/^\s*>/.test(l) ? ' ' : l).replace(/`[^`]*`/g, ' ').replace(/"[^"\n]*"|“[^”\n]*”/g, ' ')
       .replace(/https?:\/\/[^\s)]+?(?=[?!.,;:]*(?:[\s)]|$))/g, ' '));
 }
 
@@ -163,10 +163,12 @@ function textQuestion(text) {
     if (!ASK.test(lines[start])) continue;
     const block = [];
     for (let i = start; i < lines.length && (i === start || lines[i].trim()); i++) block.push(lines[i]);
-    const first = block[0].slice(block[0].search(ASK)).replace(ASK, '');
     const asking = block.find((l) => l.includes('?'));
     if (asking) return quote(asking);
-    if (REPLY_VERB.test(first)) return quote(block[0]);
+    // The label's own words, or the block's next line when the label stands alone, list marker dropped.
+    const rest = block[0].slice(block[0].search(ASK)).replace(ASK, '');
+    const first = rest.trim() ? rest : (block[1] || '').replace(/^\s*([-*+]|\d+[.)])\s+/, '');
+    if (REPLY_VERB.test(first)) return quote(rest.trim() ? block[0] : block[1]);
   }
   const last = lines.map((l) => l.trim()).filter(Boolean).pop() || '';
   return /\?[*_)\s]*$/.test(last) ? quote(last) : null;
@@ -181,17 +183,17 @@ const textQuestionNote = (line) =>
 
 // True when an AskUserQuestion was answered since the user's latest message: the reply's open
 // point went to the user there, which last_assistant_message cannot show. False when unreadable.
-const ASK_ANSWER = /(Your questions have been answered|User has answered your questions?)/;
+const ASK_ANSWER = /^(Your questions have been answered|The user answered):/;
 function askedThisTurn(transcript) {
   try {
-    const records = fs.readFileSync(transcript, 'utf8').split('\n').slice(-2000);
+    const records = fs.readFileSync(transcript, 'utf8').split('\n');
     for (let i = records.length - 1; i >= 0; i--) {
       let rec;
       try { rec = JSON.parse(records[i]); } catch { continue; }
       if (rec.type !== 'user' || rec.isMeta) continue;
       const c = rec.message?.content;
       if (Array.isArray(c) && c.some((b) => b?.type === 'tool_result' &&
-        ASK_ANSWER.test(typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '')))) return true;
+        ASK_ANSWER.test(typeof b.content === 'string' ? b.content.trim() : (b.content || []).map((x) => x?.text || '').join('').trim()))) return true;
       if (promptText(rec) !== null) return false;
     }
   } catch (_) { /* unreadable: no ask seen */ }
