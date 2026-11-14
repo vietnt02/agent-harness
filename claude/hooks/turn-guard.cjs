@@ -16,12 +16,6 @@
  * - Stop: a final reply that voices a guess ("rất có thể", "có lẽ", "nghi") and hands the user a
  *   check ("bạn kiểm", "đăng xuất rồi đăng nhập lại") is sent back to run the reads that settle the
  *   guess first (CLAUDE.md § Verification: proactive in thinking, never hand me a read-only check).
- * - Stop: a final reply asking the user in text is sent back to ask in AskUserQuestion: a
- *   `**Cần bạn:**` block (that line up to a blank line) holding a `?` or opening with a reply verb
- *   ("duyệt", "đồng ý", "chốt", "chọn" …), or a last paragraph ending in `?`. An agent left to judge
- *   "closed choice" kept writing yes/no and approval questions as text (communication-style.md
- *   § Format: `**Cần bạn:**` is only a step the user does outside the chat). Only these common
- *   shapes are read; a question worded otherwise passes.
  *   The Stop checks report together: after one send-back `stop_hook_active` skips them.
  * Fails open on any error.
  */
@@ -143,44 +137,6 @@ function handedGuess(text) {
   return null;
 }
 
-// A reply's lines with code, inline code, quotes, block quotes and URLs blanked: they cite, they never ask.
-function proseLines(text) {
-  return String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n')
-    .map((l) => (/^\s*>/.test(l) ? ' ' : l).replace(/`[^`]*`/g, ' ').replace(/"[^"\n]*"|“[^”\n]*”/g, ' ')
-      .replace(/https?:\/\/[^\s)]+?(?=[?!.,;:]*(?:[\s)]|$))/g, ' '));
-}
-
-// What the user replies to Claude, as the first word after the label: a pick, an approval, a yes/no.
-const REPLY_VERB = /^\s*(bạn\s+)?(duyệt|đồng ý|xác nhận|chốt|chọn|trả lời|cho (Claude\s+)?biết)(?=[\s:,]|$)/i;
-
-// A question the reply asks in text instead of AskUserQuestion, as its line trimmed, else null:
-// a `**Cần bạn:**` block (that line up to a blank line, its list included) holding a `?` or opening
-// with a reply verb, or the last paragraph ending in `?`.
-function textQuestion(text) {
-  const lines = proseLines(text);
-  const quote = (l) => l.replace(ASK, '').replace(/\s+/g, ' ').trim().slice(0, 80);
-  for (let start = 0; start < lines.length; start++) {
-    if (!ASK.test(lines[start])) continue;
-    const block = [];
-    for (let i = start; i < lines.length && (i === start || lines[i].trim()); i++) block.push(lines[i]);
-    const asking = block.find((l) => l.includes('?'));
-    if (asking) return quote(asking);
-    // The label's own words, or the block's next line when the label stands alone, list marker dropped.
-    const rest = block[0].slice(block[0].search(ASK)).replace(ASK, '');
-    const first = rest.trim() ? rest : (block[1] || '').replace(/^\s*([-*+]|\d+[.)])\s+/, '');
-    if (REPLY_VERB.test(first)) return quote(rest.trim() ? block[0] : block[1]);
-  }
-  const last = lines.map((l) => l.trim()).filter(Boolean).pop() || '';
-  return /\?[*_)\s]*$/.test(last) ? quote(last) : null;
-}
-
-const textQuestionNote = (line) =>
-  `the reply asks the user in text ("${line}"). Ask it in AskUserQuestion instead, yes/no and approvals ` +
-  'included, every question of this topic in one call, each standing alone (the box hides the text above ' +
-  'it), recommended option first; then end the turn with the answer as its last text. **Cần bạn:** is ' +
-  'only a step the user does outside this chat, never a reply to Claude (communication-style.md § Format). ' +
-  'With no AskUserQuestion tool in this session, leave the reply as it is.';
-
 // True when an AskUserQuestion was answered since the user's latest message: the reply's open
 // point went to the user there, which last_assistant_message cannot show. False when unreadable.
 const ASK_ANSWER = /^(Your questions have been answered|The user answered):/;
@@ -230,10 +186,8 @@ if (require.main === module) {
         const reply = input.last_assistant_message;
         const parked = parkedProblem(reply);
         const guess = handedGuess(reply);
-        const asked = textQuestion(reply);
         const notes = [isEnglishReply(reply) && ENGLISH_NOTE,
-          parked && !askedThisTurn(input.transcript_path) && parkedNote(parked), guess && guessNote(guess),
-          asked !== null && textQuestionNote(asked)]
+          parked && !askedThisTurn(input.transcript_path) && parkedNote(parked), guess && guessNote(guess)]
           .filter(Boolean);
         if (notes.length) {
           process.stderr.write(`turn-guard: ${notes.join(' Also: ')}\n`);
@@ -245,4 +199,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { isEnglishReply, parkedProblem, handedGuess, textQuestion, askedThisTurn };
+module.exports = { isEnglishReply, parkedProblem, handedGuess, askedThisTurn };
