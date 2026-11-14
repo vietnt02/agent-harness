@@ -1070,6 +1070,10 @@ test('main-checkout-guard: a variable naming a linked worktree survives commands
       `${G}; git -C $G status --short | head; git -C $G checkout -q --detach HEAD && git -C $G log -1`,
       `${G}; rm -f $G/build.log $G/test.log; git -C $G checkout -q --detach HEAD`,
       `${G}; echo $G && git -C "$G" checkout -q --detach HEAD`,
+      `${G}\nif [ -d "$G" ]; then\n  git -C "$G" checkout -q --detach HEAD\nfi`,
+      `${G}; for s in a b; do\n  git -C $G checkout -q --detach HEAD\ndone`,
+      `${G}; { echo start; }; git -C $G checkout -q --detach HEAD`,
+      `${G}; printf '%s\\n' start; git -C $G checkout -q --detach HEAD`,
     ]) assert.equal(writes(c), false, c);
     for (const c of [
       `${G}; unset G; git -C $G checkout -q --detach HEAD`,
@@ -1078,6 +1082,8 @@ test('main-checkout-guard: a variable naming a linked worktree survives commands
       `${G}; declare G=.; git -C $G checkout x`,
       `${G}; source ./env.sh; git -C $G checkout x`,
       `${G}; { G=.; }; git -C $G checkout x`,
+      `${G}; f() { G=.; }; f; git -C $G checkout x`,
+      `${G}; printf -v G '%s' .; git -C $G checkout x`,
       'git checkout -b x',
       `git -C ${main.split(path.sep).join('/')} switch main`,
       `git worktree remove --force ${gate.split(path.sep).join('/')}`,

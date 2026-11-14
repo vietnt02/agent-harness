@@ -34,12 +34,15 @@ const PULL_VALUE = new Set(['-s', '-X', '-j', '-o', '--strategy', '--strategy-op
   '--shallow-since', '--shallow-exclude', '--upload-pack', '--server-option', '--negotiation-tip', '--recurse-submodules']);
 // Global options that take the next word as their value.
 const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
-// Builtins that can set or unset a shell variable. An empty program is shell syntax (`{ … }`, a
-// function definition) whose body may rebind one too. Any other command (`rm`, `git`, `head`)
-// runs in its own process and leaves the shell's variables as they were.
-const REBINDS = new Set(['unset', 'read', 'readarray', 'mapfile', 'for', 'select', 'export', 'declare', 'local', 'typeset',
-  'readonly', 'source', '.', 'eval', 'getopts', 'printf', 'let']);
-const rebinds = (words) => words.length === 0 || REBINDS.has(words[0]);
+// Builtins that can set or unset a shell variable (`printf` only with `-v`). A command with no
+// program is shell syntax: a bare keyword (`then`, `do`, `}`) rebinds nothing, but one holding an
+// assignment (`{ X=…; }`, a function body) does. Any other command (`rm`, `git`, `head`) runs in
+// its own process and leaves the shell's variables as they were.
+const REBINDS = new Set(['unset', 'read', 'readarray', 'mapfile', 'export', 'declare', 'local', 'typeset',
+  'readonly', 'source', '.', 'eval', 'getopts', 'let']);
+const rebinds = (raw, words) => words.length === 0
+  ? raw.some((w) => /^[A-Za-z_]\w*\+?=/.test(w))
+  : REBINDS.has(words[0]) || (words[0] === 'printf' && words[1] === '-v');
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
 
@@ -153,7 +156,9 @@ function writesMainCheckout(command, cwd) {
       cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars) });
       continue;
     }
-    if (rebinds(words)) sets.push({ forget: true, scope: raw.scope });
+    // `for X in …` and `select X in …` rebind only X.
+    if (['for', 'select'].includes(words[0]) && /^[A-Za-z_]\w*$/.test(words[1] || '')) sets.push({ scope: raw.scope, name: words[1], value: null });
+    else if (rebinds(raw, words)) sets.push({ forget: true, scope: raw.scope });
     const script = innerScript(words);
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);

@@ -41,10 +41,10 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
    promised for later (an outline, a draft), is an open question.
 4. Check or render everything the block has produced so far, and run every prerequisite check.
-5. In the turn that writes or changes the plan, ask at once (unless the user's last reply was a
-   question: that turn only answers it, and the ask waits for the next reply), in one
-   AskUserQuestion call, every open question, recommended option first; each names the plan's full path and what it decides,
-   since the box hides the text above it. Write each answer into the plan (its action's `chốt làm`
+5. In the turn that writes or changes the plan, ask at once, in one AskUserQuestion call, every
+   open question, recommended option first (the user's last reply was a question: that turn
+   answers it and neither changes the plan nor asks; both wait for the next reply); each names
+   the plan's full path and what it decides, since the box hides the text above it. Write each answer into the plan (its action's `chốt làm`
    or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
    left, in that same turn, ask the final gate in one AskUserQuestion: run this plan on autopilot?
    Its question names the plan's path, the actions by group, each tier C step by name, the
