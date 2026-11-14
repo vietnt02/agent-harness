@@ -53,8 +53,8 @@ theo dõi CI, ghi production (`ntv-implement` § Who works).
 gốc (cơ chế sinh ra cả lớp lỗi) và gửi kế hoạch mới; coordinator duyệt. Hết vòng mà vẫn sai → đổi
 worker; model theo **Chọn model** (§ 2). Lỗi do skill chỉ sai bước hoặc luật mơ hồ thì ghi kaizen (`ntv-kaizen`); spec thiếu thì sửa spec.
 
-**Mọi dòng model đều lập kế hoạch.** `gemini-flash`/`gpt-luna` không tự phản biện spec, nên ở
-chặng 4 coordinator đối chiếu từng con số trong kế hoạch với output thô worker dán.
+**Mọi dòng model đều lập kế hoạch.** `gpt-luna` không tự phản biện spec, nên ở chặng 4 coordinator
+đối chiếu từng con số trong kế hoạch với output thô worker dán.
 
 ## 2. Giao việc
 
@@ -133,11 +133,10 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Builder và
   research mọi mức độ → `agy gemini-4-hydrogen high`; `agy gemini-4-carbon high` chỉ khi user chỉ
-  định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt; `gemini-flash` chỉ khi user chỉ
-  định. Mọi model Gemini trên `agy` chung một quota, nên hết quota thì không đổi
-  sang model Gemini khác. Reviewer mặc định `agy gemini-4-argon high`.
-- Không giao task dài cho model context ngắn (`gemini-flash`, `gpt-luna`): chia task nhỏ, mỗi task
-  một worker mới, commit + push mỗi nhóm việc ≤ 30 phút.
+  định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt. Mọi model Gemini trên
+  `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác. Reviewer mặc định `agy gemini-4-argon high`.
+- Không giao task dài cho model context ngắn (`gpt-luna`): chia task nhỏ, mỗi task một worker mới,
+  commit + push mỗi nhóm việc ≤ 30 phút.
 - Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter. Slug: agy `agy models`;
   codex `~/.codex/models_cache.json`. Lỗi trích lại đúng chuỗi vừa gõ (`'luna'`) nghĩa là sai slug,
   không phải model thiếu năng lực. Sau spawn, so `launch.effective` với `launch.requested`.

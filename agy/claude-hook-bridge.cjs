@@ -619,7 +619,7 @@ function handlePreToolUse(payload) {
         JSON.stringify({
           decision: 'deny',
           reason:
-            'dispatch-split-guard: an antigravity worker needs `--effort` (e.g. `--model gemini-3.8-flash --effort high`); ' +
+            'dispatch-split-guard: an antigravity worker needs `--effort` (e.g. `--model gemini-4-hydrogen --effort high`); ' +
             'without it agy runs Medium. Said once: if the command is right as it is, run it again unchanged.',
         })
       );
