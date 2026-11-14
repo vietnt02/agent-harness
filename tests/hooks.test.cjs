@@ -1056,6 +1056,37 @@ test('main-checkout-guard: a repo in the session scratchpad is a fixture, made o
   }
 });
 
+test('main-checkout-guard: a variable naming a linked worktree survives commands that cannot rebind it', () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcg-vars-')));
+  const main = path.join(tmp, 'main');
+  const gate = path.join(tmp, 'gate');
+  try {
+    execFileSync('git', ['init', '-q', main]);
+    execFileSync('git', ['-C', main, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--allow-empty']);
+    execFileSync('git', ['-C', main, 'worktree', 'add', '-q', '--detach', gate]);
+    const writes = (command) => mainCheckoutGuard.writesMainCheckout(command, main);
+    const G = `G=${gate.split(path.sep).join('/')}`;
+    for (const c of [
+      `${G}; git -C $G status --short | head; git -C $G checkout -q --detach HEAD && git -C $G log -1`,
+      `${G}; rm -f $G/build.log $G/test.log; git -C $G checkout -q --detach HEAD`,
+      `${G}; echo $G && git -C "$G" checkout -q --detach HEAD`,
+    ]) assert.equal(writes(c), false, c);
+    for (const c of [
+      `${G}; unset G; git -C $G checkout -q --detach HEAD`,
+      `${G}; read G; git -C $G checkout -q --detach HEAD`,
+      `${G}; for G in a; do git -C $G checkout x; done`,
+      `${G}; declare G=.; git -C $G checkout x`,
+      `${G}; source ./env.sh; git -C $G checkout x`,
+      `${G}; { G=.; }; git -C $G checkout x`,
+      'git checkout -b x',
+      `git -C ${main.split(path.sep).join('/')} switch main`,
+      `git worktree remove --force ${gate.split(path.sep).join('/')}`,
+    ]) assert.equal(writes(c), true, c);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('tier-c-guard: a production write runs alone, never after another step of the same call', () => {
   for (const c of [
     "ssh box1 'sudo app.enable-https lets-encrypt 2>&1 | tail -3' && cf tunnels config update abc --body x",

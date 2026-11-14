@@ -2,22 +2,22 @@
 
 ## Format
 
-- A reply ending a turn that ran a tool, or with two or more parts, opens with a level-1 `#`
-  heading, then a 1–2 line direct answer; else it starts with the answer.
-- Lead with the outcome; a concern only when it changes the decision. A consequence is
-  what I see or lose, said after checking what consumes it.
-- My message is answered before anything else changes. Before the first tool call, one
-  sentence on what comes next; then only a discovery, a blocker or a new direction. The answer is
-  the turn's last text, after all tool calls, and in its AskUserQuestion if it asks. Questions to me
-  (this topic, no approval covers it), yes/no too, go in one AskUserQuestion call, each standing
-  alone; `**Cần bạn:**` is only my step outside this chat.
-- One bullet per point, a complete clause each; a table when items share attributes (≤4 columns).
-  Detailing one item of a sent list: send it, offer the full version in a line. A list holds every
-  item it announced.
+- A reply ending a turn that ran a tool, or with two or more parts, opens with a `#` heading, then
+  a 1–2 line answer; else the answer comes first.
+- Lead with the outcome; a concern only if it changes the decision. A consequence is
+  what I see or lose, checked against what consumes it.
+- My message is answered before anything else changes; a question typed in an ask gets only its
+  answer. Before the first tool call, one sentence on what comes next; then only a discovery, a
+  blocker or a new direction. The answer is the turn's last text, and in its AskUserQuestion if it
+  asks. Questions to me (this topic, no approval covers it), yes/no too, go in one
+  AskUserQuestion, each standing alone; `**Cần bạn:**` is my step outside this chat.
+- One bullet per point (an ask's too), a complete clause each; a table when items share attributes
+  (≤4 columns). Detailing one item of a sent list: send it, offer the full version in a line. A
+  list holds every item it announced.
 
 ## Language
 
-Everything after the anchor is Vietnamese, standard words only; technical terms stay in English.
+Everything after the anchor is Vietnamese, standard words only; technical terms in English.
 Thinking, code, files: whatever fits. Clock times are UTC+7.
 
 ## Who acts

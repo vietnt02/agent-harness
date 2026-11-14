@@ -31,6 +31,8 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
      an agreed path), each with its read-only check and today's result. One not ready is an open
      question naming what makes it ready (where the user puts it, what frees it, when it resets);
      a secret is never pasted into the conversation.
+   - **Manifest**, when the plan hands work to Orca workers: load `ntv-orca` before writing it;
+     each worker's agent, model, effort and worktree follow its § 2, never a Defaults line.
    - **Defaults**: each reversible technical choice Claude made that the plan relies on, one line
      with its reason; the user may override any at the gate. An irreversible or user-visible
      choice (a name others will read, a send time) is an open question, not a default.
@@ -39,8 +41,9 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
    promised for later (an outline, a draft), is an open question.
 4. Check or render everything the block has produced so far, and run every prerequisite check.
-5. In the turn that writes or changes the plan, ask at once, in one AskUserQuestion call, every
-   open question, recommended option first; each names the plan's full path and what it decides,
+5. In the turn that writes or changes the plan, ask at once (unless the user's last reply was a
+   question: that turn only answers it, and the ask waits for the next reply), in one
+   AskUserQuestion call, every open question, recommended option first; each names the plan's full path and what it decides,
    since the box hides the text above it. Write each answer into the plan (its action's `chốt làm`
    or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
    left, in that same turn, ask the final gate in one AskUserQuestion: run this plan on autopilot?
