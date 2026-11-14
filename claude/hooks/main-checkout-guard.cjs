@@ -34,6 +34,15 @@ const PULL_VALUE = new Set(['-s', '-X', '-j', '-o', '--strategy', '--strategy-op
   '--shallow-since', '--shallow-exclude', '--upload-pack', '--server-option', '--negotiation-tip', '--recurse-submodules']);
 // Global options that take the next word as their value.
 const GLOBAL_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
+// Builtins that can set or unset a shell variable (`printf` only with `-v`). A command with no
+// program is shell syntax: a bare keyword (`then`, `do`, `}`) rebinds nothing, but one holding an
+// assignment (`{ X=…; }`, a function body) does. Any other command (`rm`, `git`, `head`) runs in
+// its own process and leaves the shell's variables as they were.
+const REBINDS = new Set(['unset', 'read', 'readarray', 'mapfile', 'export', 'declare', 'local', 'typeset',
+  'readonly', 'source', '.', 'eval', 'getopts', 'let']);
+const rebinds = (raw, words) => words.length === 0
+  ? raw.some((w) => /^[A-Za-z_]\w*\+?=/.test(w))
+  : REBINDS.has(words[0]) || (words[0] === 'printf' && words[1] === '-v');
 const unquote = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
 const resolveDir = (p, base) => path.resolve(base, expandHome(unquote(p)));
 
@@ -121,9 +130,9 @@ function writesMainCheckout(command, cwd) {
     return dir;
   };
   // The literal variables a command in `scope` sees; a value that cannot be known unsets its name.
-  // Any command other than a plain assignment or a `cd` may rebind a name (`unset`, `read`, `for`,
-  // `{ X=…; }`, a function), so it forgets them all for its own shell: a variable is followed only
-  // right after it is set. A command inside `$(…)` or `(…)` cannot rebind the outer shell's names.
+  // A command that can rebind a name (`rebinds`: `unset`, `read`, `for`, `{ X=…; }`, a function)
+  // forgets them all for its own shell. A command inside `$(…)` or `(…)` cannot rebind the outer
+  // shell's names.
   const varsIn = (scope) => {
     const vars = {};
     for (const v of sets) {
@@ -147,7 +156,9 @@ function writesMainCheckout(command, cwd) {
       cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars) });
       continue;
     }
-    sets.push({ forget: true, scope: raw.scope });
+    // `for X in …` and `select X in …` rebind only X.
+    if (['for', 'select'].includes(words[0]) && /^[A-Za-z_]\w*$/.test(words[1] || '')) sets.push({ scope: raw.scope, name: words[1], value: null });
+    else if (rebinds(raw, words)) sets.push({ forget: true, scope: raw.scope });
     const script = innerScript(words);
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);
