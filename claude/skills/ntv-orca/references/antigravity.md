@@ -6,19 +6,19 @@
 
 - **Giới hạn lệnh:** lệnh foreground tự cắt ở 600 giây; bước dài hơn phải chạy nền và ghi log.
 - **Kênh điều phối:** dùng `orca orchestration` (`SKILL.md` § 3).
-- **Context thực tế nhỏ hơn API gốc:** Flash 256K, Argon và Carbon 1M, Hydrogen chưa đo (API 1M). Gần đầy thì `agy` tự nén mà không báo lỗi — chia task nhỏ theo `SKILL.md` § 2.
+- **Context thực tế nhỏ hơn API gốc:** Argon và Carbon 1M, Hydrogen chưa đo (API 1M). Gần đầy thì `agy` tự nén mà không báo lỗi — chia task nhỏ theo `SKILL.md` § 2.
 
 ## Chọn model và Spawn Worker
 
 - **Phân vai (`SKILL.md` § 2, § 4):**
-  - Worker và Checker mọi mức độ: `gemini-4-hydrogen` (`--effort high`); `gemini-4-carbon` (`--effort high`) chỉ khi user chỉ định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt; `gemini-3.8-flash` chỉ khi user chỉ định. Mọi model Gemini chung một quota (`agy -p "/usage"`).
+  - Worker và Checker mọi mức độ: `gemini-4-hydrogen` (`--effort high`); `gemini-4-carbon` (`--effort high`) chỉ khi user chỉ định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt. Mọi model Gemini chung một quota (`agy -p "/usage"`).
   - Reviewer mặc định và Coordinator (khi user mở trực tiếp): `gemini-4-argon` (`--effort high`).
   - Không dùng model Claude qua `agy`. Luôn ghi kèm tên agent (`agy gemini-4-hydrogen high`) trong manifest, spec và báo cáo để tránh nhầm quota với agent khác.
 - **Truyền đủ `--model` và `--effort`:** bỏ trống `--model` sẽ lấy model của Coordinator trong settings:
   ```bash
   orca orchestration worker-start --agent antigravity --model <slug trần> --effort <mức> ...
   ```
-- **Tra slug và effort:** chạy `agy models` lúc dispatch (`<slug>\t<tên>`). Bỏ đuôi `-low|-medium|-high|-xhigh` ra **slug trần** cho `--model`; các đuôi hiện có của model là các mức `--effort` hợp lệ (`gemini-4-argon`, `gemini-4-carbon`, `gemini-3.8-flash`: `low`/`medium`/`high`; `gemini-4-hydrogen`: thêm `xhigh`; `gpt-oss-120b`: `medium`). Không truyền slug còn đuôi vào `--model`. Sau spawn, so `launch.effective` với `launch.requested` (`SKILL.md` § 2).
+- **Tra slug và effort:** chạy `agy models` lúc dispatch (`<slug>\t<tên>`). Bỏ đuôi `-low|-medium|-high|-xhigh` ra **slug trần** cho `--model`; các đuôi hiện có của model là các mức `--effort` hợp lệ (`gemini-4-argon`, `gemini-4-carbon`: `low`/`medium`/`high`; `gemini-4-hydrogen`: thêm `xhigh`; `gpt-oss-120b`: `medium`). Không truyền slug còn đuôi vào `--model`. Sau spawn, so `launch.effective` với `launch.requested` (`SKILL.md` § 2).
 
 ## Quyền thực thi và Policy Guardian
 
