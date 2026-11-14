@@ -44,8 +44,8 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
 5. In the turn that writes or changes the plan, ask at once, in one AskUserQuestion call, every
    open question, recommended option first (the user's last reply was a question: that turn
    answers it and neither changes the plan nor asks; both wait for the next reply); each names
-   the plan's full path and what it decides, since the box hides the text above it. Write each answer into the plan (its action's `chốt làm`
-   or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
+   the plan's full path and what it decides, since the box hides the text above it. Write each
+   answer into the plan (its action's `chốt làm` or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
    left, in that same turn, ask the final gate in one AskUserQuestion: run this plan on autopilot?
    Its question names the plan's path, the actions by group, each tier C step by name, the
    prerequisites with their results, the defaults and out of scope. Never ask it while a question
