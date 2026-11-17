@@ -63,7 +63,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
   Orca worker `agy gemini-4-argon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
   subagent only when Viet names one. A change to anything in `~/.claude`, the harness repo it installs
-  from, or a repo's `.claude/`, whoever wrote it, is reviewed by a Claude subagent: only an agent running this
+  from, or a repo's `.claude/` or agent rules (`CLAUDE.md`, `AGENTS.md`), whoever wrote it, is reviewed by a Claude subagent: only an agent running this
   harness can judge a hook's contract or how a rule is read; never Codex or agy. Its brief names the
   commands agents actually write, never a hunt for routes around the hook (`ntv-kaizen`). A doc that
   describes a project, its code or a procedure is reviewed against that code; a record of an incident
