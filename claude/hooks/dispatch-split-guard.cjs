@@ -157,10 +157,16 @@ function unpinnedClaudeModel(command, { segs }) {
   return null;
 }
 
+// A heredoc fed to an interpreter (`python3 - "$F" <<'EOF'`, in the same simple command) is code run
+// here, not text a worker receives: a `replace('<old line>', …)` in it is what takes that line out of the message.
+const INTERPRETER_HEREDOC = /((?:^|[;&|\n])[ \t]*(?:\w+=\S*\s+)*(?:python3?|node|ruby|perl)\b[^\n;&|()]*?<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g;
+
 // Text a worker will receive from this command: the command itself (comment lines of this hook's
-// own markers dropped), plus every `--spec-file <path>` and `$(cat <path>)` / `$(< <path>)` it reads.
+// own markers and interpreter heredocs dropped), plus every `--spec-file <path>` and `$(cat <path>)`
+// / `$(< <path>)` it reads.
 function workerText(command, cwd) {
-  const parts = [command.split('\n').filter((l) => !/^\s*#\s*(Gate|Track|Model|Prod-write):/.test(l)).join('\n')];
+  const parts = [command.replace(INTERPRETER_HEREDOC, '$1')
+    .split('\n').filter((l) => !/^\s*#\s*(Gate|Track|Model|Prod-write):/.test(l)).join('\n')];
   const PATH = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s'")]+))`;
   const pick = (m) => m[1] ?? m[2] ?? m[3];
   // A leading `cd <dir> &&` moves where relative paths resolve.

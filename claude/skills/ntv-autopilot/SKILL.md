@@ -29,7 +29,9 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    - **Prerequisites**: everything a listed action needs that the run cannot obtain alone (a
      login, a token, a permission, a secret's presence, quota or credit, a free port, a file at
      an agreed path), each with its read-only check and today's result. One not ready is an open
-     question naming what makes it ready (where the user puts it, what frees it, when it resets);
+     question naming what makes it ready (where the user puts it, what frees it, when it resets)
+     until its check passes: a step the user does at the machine (a login, a popup) is done and
+     checked again before the gate, in the turn the answer arrives, never left to the run;
      a secret is never pasted into the conversation.
    - **Manifest**, when the plan hands work to Orca workers: load `ntv-orca` before writing it;
      each worker's agent, model, effort and worktree follow its § 2, never a Defaults line.

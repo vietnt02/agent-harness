@@ -525,6 +525,29 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       assert.equal(res.status, 2);
     });
 
+    await t.test('a python heredoc taking a write line out of a message is code, not worker text', () => {
+      const write = 'Lưu ý: chạy lark-cli im +messages-reply cho tin này';
+      const fix = (file) => `python3 - "${file}" <<'EOF'\nimport sys\np=sys.argv[1]; s=open(p).read()\n` +
+        `s=s.replace('${write}', 'chỉ sửa tài liệu, không chạy lệnh reply')\nopen(p,'w').write(s)\nEOF\n` +
+        `orca orchestration reply --id m1 --body "$(cat ${file})"`;
+      fs.writeFileSync(path.join(tmp, 'clean.md'), 'chỉ sửa tài liệu, không chạy lệnh reply\n');
+      fs.writeFileSync(path.join(tmp, 'dirty.md'), `${write}\n`);
+      const clean = run(fix('clean.md'));
+      assert.equal(clean.status, 0, clean.stderr);
+      assert.equal(run(fix('dirty.md')).status, 2, 'the file sent still holds the write');
+      const written = run(`cat > fresh.md <<'EOF'\n${write}\nEOF\norca orchestration reply --id m1 --body "$(cat fresh.md)"`);
+      assert.equal(written.status, 2, 'a message written by cat in the same command is still read');
+      const ws = ['orca', 'orchestration', 'worker-start'].join(' ');
+      for (const before of ['python3 check.py && ', 'node --test tests/; ', 'perl -pi -e s/a/b/ x && ']) {
+        const spec = run(`${before}cat > fresh2.md <<'EOF'\n${write}\nEOF\n${ws} --spec-file fresh2.md`);
+        assert.equal(spec.status, 2, `an interpreter before the spec's cat on the same line: ${before}`);
+        assert.match(spec.stderr, /production write/);
+      }
+      const inline = run(`python3 c.py && ${ws} --spec "$(cat <<'EOF'\n${write}\nEOF\n)"`);
+      assert.equal(inline.status, 2, 'an inline spec after an interpreter command');
+      assert.match(inline.stderr, /production write/);
+    });
+
     await t.test('--spec-file after cd, with a quoted path holding a space, is read', () => {
       fs.mkdirSync(path.join(tmp, 'sub'));
       fs.writeFileSync(path.join(tmp, 'sub', 'my spec.md'), 'lark-cli base +record-delete --record-id r1\n');
@@ -744,6 +767,41 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
   }
 });
 
+
+test('lark-record-file-guard: names a lark-cli records file git would track, and nothing else', () => {
+  const guard = require('../claude/hooks/lark-record-file-guard.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lrfg-'));
+  const repo = path.join(tmp, 'repo');
+  const out = path.join(tmp, 'scratch');
+  try {
+    fs.mkdirSync(repo); fs.mkdirSync(out);
+    execFileSync('git', ['init', '-q', repo]);
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'ignored/\n');
+    fs.mkdirSync(path.join(repo, 'ignored'));
+    const inRepo = path.join(repo, 'tbl1_20261117_193321_093.ndjson');
+    const manifest = path.join(repo, 'tbl1_20261117_193321_093.manifest.json');
+    const ignored = path.join(repo, 'ignored', 'tbl1.ndjson');
+    const outside = path.join(out, 'tbl1.ndjson');
+    for (const f of [inRepo, manifest, ignored, outside]) fs.writeFileSync(f, '{}\n');
+    const output = JSON.stringify({ ok: true, data: { record_file: inRepo, manifest_file: manifest } }, null, 2);
+    assert.deepEqual(guard.recordFiles(output, repo), [inRepo, manifest]);
+    assert.deepEqual(guard.recordFiles('{"record_file": "./rel.ndjson"}', repo), [path.join(repo, 'rel.ndjson')]);
+    assert.ok(guard.trackableIn(inRepo), 'a file in the working tree');
+    assert.equal(guard.trackableIn(ignored), null, 'a file git ignores');
+    assert.equal(guard.trackableIn(outside), null, 'a file outside any repo');
+    const hook = (command, stdout) => spawnSync(process.execPath, [path.join(HOOKS_DIR, 'lark-record-file-guard.cjs')], {
+      input: JSON.stringify({ tool_name: 'Bash', cwd: repo, tool_input: { command }, tool_response: { stdout, stderr: '' } }),
+      encoding: 'utf8',
+    });
+    const get = 'lark-cli --profile p base +record-get --base-token b --table-id tbl1 --record-id r1';
+    const hit = hook(get, output);
+    assert.equal(hit.status, 0);
+    assert.match(hit.stdout, /lark-record-file-guard/);
+    assert.ok(hit.stdout.includes('tbl1_20261117_193321_093.ndjson'));
+    assert.equal(hook(`cd ${out} && ${get}`, JSON.stringify({ record_file: outside })).stdout, '', 'written to scratchpad: silent');
+    assert.equal(hook(`cat ${inRepo}`, output).stdout, '', 'not a lark-cli run: silent');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
 
 test('worktree-after-release: reads the worktree from either worker-show shape, and says when it cannot', () => {
   const show = (result) => () => JSON.stringify({ ok: true, result });
@@ -1204,6 +1262,12 @@ test('watch-guard: a loop inside `bash -c`, `sh -c` or `eval` is this shell\'s l
   assert.equal(shape("bash -c 'until curl -sf x; do sleep 2; done'").poll, true);
   const remote = shape("bash -c 'for h in a b; do ssh $h x; done'");
   assert.equal(remote.loop && remote.remote, true);
+  assert.equal(remote.loopRemote, true, 'a remote call inside the loop of a `bash -c` script');
+  assert.equal(shape('for x in a b; do ssh h cmd $x; done').loopRemote, true);
+  assert.equal(shape('while read d; do glab api x/$d; done < ids').loopRemote, true);
+  assert.equal(shape('ssh h cat log > f; for x in a b; do grep $x f; done').loopRemote, false, 'a remote call before the loop runs once');
+  assert.equal(shape('for x in a b; do grep $x f; done; glab api y').loopRemote, false, 'and one after it');
+  assert.equal(shape('for x in a; do for y in b; do echo; done; ssh h z; done').loopRemote, true, 'after a nested loop closes, still inside the outer one');
   assert.equal(shape("eval 'while true; do sleep 1; done'").poll, true);
   assert.equal(shape("ssh host 'for f in *; do cat $f; done'").loop, false, 'a script for another machine is one remote call');
 });

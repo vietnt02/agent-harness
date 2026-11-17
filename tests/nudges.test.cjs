@@ -110,6 +110,8 @@ test('watch-guard: only a loop of this shell around remote calls is one; scripts
     "cat > /tmp/k.md <<'EOF'\nfor h in a b; do ssh $h uptime; done\nEOF",
     "cat >/tmp/k.md <<'EOF'\nx\nEOF\ncat > /tmp/l.md <<'EOF'\nfor h in a; do docker exec c airflow dags trigger d; done\nEOF",
     `python3 -c 'print(1)' "for h in a; do ssh $h x; done"`,
+    'ssh vps cat /srv/x.log > /tmp/L; for o in 101 102 103; do grep -c $o /tmp/L; done',
+    "glab mr update 590 --ready | tail -1 && glab api -X POST projects/a/merge_requests/590/pipelines | jq -r .id; for d in ctx_1 ctx_2; do orca orchestration worker-release --dispatch $d | tail -1; done",
   ]) assert.equal(run({ command, timeout: 110000 }).status, 0, command);
   const local = { command: 'for h in a b; do ssh $h uptime; done' };
   assert.equal(run(local).status, 2, 'a local loop of remote calls is held once');

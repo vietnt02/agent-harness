@@ -49,7 +49,8 @@ function remoteScripts(text) {
 }
 
 // What the shell itself runs: { loop: a `for/while/until` of this shell, wait: a `while/until`
-// loop, poll: one with a `sleep`, sleeps: a `sleep` command, remote: a remote call }. `deep` also
+// loop, poll: one with a `sleep`, sleeps: a `sleep` command, remote: a remote call, loopRemote: a
+// remote call inside a loop's own commands (one before or after the loop runs once) }. `deep` also
 // reads the scripts handed to another machine for waits (`ssh h 'while …; sleep 5; done'` polls too).
 function shape(text, deep = true) {
   const inner = deep ? remoteScripts(text).map((t) => shape(t, false)) : [];
@@ -60,8 +61,19 @@ function shape(text, deep = true) {
   const loops = all.map(first).filter((w) => /^(for|while|until)$/.test(w || ''));
   const progs = all.map(program);
   const sleeps = progs.some((w) => w[0] === 'sleep');
-  const remote = progs.some((w) => w[0] === 'ssh' || w[0] === 'airflow' ||
-    (w[0] === 'docker' && w[1] === 'exec') || ((w[0] === 'gh' || w[0] === 'glab') && w[1] === 'api'));
+  const isRemote = (w) => w[0] === 'ssh' || w[0] === 'airflow' ||
+    (w[0] === 'docker' && w[1] === 'exec') || ((w[0] === 'gh' || w[0] === 'glab') && w[1] === 'api');
+  const remote = progs.some(isRemote);
+  // Commands come flat in order: a loop opens at its `for/while/until` and closes at `done`.
+  // A nested loop's header follows a keyword (`do for …`, `then while …`).
+  const head = (w) => w.find((x) => !/^(\{|\(|!|time|do|then|else|elif)$/.test(x));
+  let depth = 0;
+  let loopRemote = false;
+  all.forEach((w, k) => {
+    if (/^(for|while|until)$/.test(head(w) || '')) depth += 1;
+    if (depth > 0 && isRemote(progs[k])) loopRemote = true;
+    if (w[0] === 'done' && depth > 0) depth -= 1;
+  });
   const wait = loops.some((w) => w !== 'for') || inner.some((x) => x.wait) || own.some((x) => x.wait);
   const poll = (loops.some((w) => w !== 'for') && sleeps) || inner.some((x) => x.poll) || own.some((x) => x.poll);
   return {
@@ -70,6 +82,7 @@ function shape(text, deep = true) {
     poll,
     sleeps: sleeps || inner.some((x) => x.sleeps) || own.some((x) => x.sleeps),
     remote: remote || own.some((x) => x.remote),
+    loopRemote: loopRemote || own.some((x) => x.loopRemote),
   };
 }
 
@@ -140,7 +153,7 @@ process.stdin.on('end', () => {
       process.exit(2);
     }
     const shapes = sources.map((x) => shape(x));
-    if (!bg && shapes.some((x) => x.loop && x.remote)) {
+    if (!bg && shapes.some((x) => x.loopRemote)) {
       once('watch-guard: this foreground loop makes remote calls one after another and can hold the session. ' +
         'Make the remote reads one call (one query, one API list, one ssh with the loop inside), or run it in the background.');
     }
