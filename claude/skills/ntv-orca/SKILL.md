@@ -2,7 +2,7 @@
 name: ntv-orca
 description: "Vai coordinator (PM/SA) khi giao việc cho worker Orca: ai làm gì, coordinator chịu trách nhiệm gì, giao việc, duyệt kế hoạch, giữ cổng merge và production. Không phải tham chiếu lệnh Orca — lệnh, cờ và cách gỡ lỗi tra bằng `orca <lệnh> --help` và `orca skills get orchestration`."
 user-invocable: true
-when_to_use: "Đọc trước khi soạn manifest, trước khi spawn worker Orca đầu tiên của phiên, khi user nói \"giao worker\", \"supervised agent/worker\", và khi một câu hỏi của user cần rà repo con. Chỉ dành cho agent điều phối, không dành cho worker."
+when_to_use: "Đọc trước khi soạn manifest, trước khi spawn worker Orca đầu tiên của phiên, khi user nói \"giao worker\", \"supervised agent/worker\", khi user nhờ review một PR/MR của bất kỳ ai, và khi một câu hỏi của user cần rà repo con. Chỉ dành cho agent điều phối, không dành cho worker."
 category: utilities
 keywords: [orca, orchestration, worker, coordinator, dispatch, review, gate]
 ---

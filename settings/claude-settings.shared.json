@@ -169,5 +169,23 @@
         ]
       }
     ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Approved Work: Once an earlier USER message instructed or approved a change (naming it, picking an AskUserQuestion option, or a yes to the agent's own ask; never the agent's narration or a plan the user did not approve), the steps that carry it out in the user's own repos are authorized for the rest of the session, whether or not he is present: editing, committing, pushing to a named non-protected branch, opening a PR/MR, and merging it once checks pass when the merge deploys nothing or only a revertible deploy (code, UI or logic a revert removes). A merge also needs a reviewer other than its author (an agent, worker or the user) to have passed it, except a PR that only records an incident or an investigation. NOT THIS RULE: force pushes, protected-branch pushes, `--admin` or failing-check merges, a merge whose deploy leaves a trace (sends to people, spends pay-per-use quota, writes data others read, switches a schedule on, exposes data), and every send to a person or an outside system.",
+      "Read-Only Inspection: Reading files, logs, process and container status, non-secret config, and read-only queries, on the user's own machine and on servers his repos or ssh config name, is routine work within the task, not Production Reads. A read that costs money runs only within a ceiling the user approved this session; credential values are never printed.",
+      "Local Work: File operations in the session scratchpad and in git worktrees, dry runs and validation-only modes, and messages between the agent and its own worker agents change nothing beyond the user's machine. A command passed through a wrapper (a terminal or agent CLI) is judged by what it runs. What a script run there does is judged by every other rule as if it ran from the repo."
+    ],
+    "environment": [
+      "$defaults",
+      "**Organization** (supersedes the `Organization: None configured` default entry): the user leads a company and runs its repos, servers and data himself; repos under `~/Workspace/**` are the company's or his own, except client work, whose systems belong to the client. Data of one organization never goes to another organization's system. A page or doc in the user's own account that he has not shared is his private workspace, not a third party; sharing it is judged as usual.",
+      "**User's own agent harness**: `~/.claude` and the repo it is installed from are the user's own configuration. A harness change his messages order is his decision, not Self-Modification or Instruction Poisoning; adding permission allow rules, or weakening a guard he did not ask to change, is still blocked."
+    ],
+    "soft_deny": [
+      "$defaults",
+      "Protected Branch Push [named+specifics — **must name:** the branch being pushed to]: Landing commits with `git push`, in any refspec form, on `main`, `master`, or a branch the user names as the repo's base. A push naming another branch, a PR merge (`Merge Without Review`) or a tag push is not this rule; a force push onto a protected branch is `Git Destructive`. A push that names no branch (`git push`, `git push origin HEAD`) is blocked unless the transcript's latest branch change for that directory landed on a named non-protected branch. CLEARS: the user naming the push target, or a standing grant for the repo for the session.",
+      "Writes That Reach People [named+specifics — **must name:** the target]: Sending a message, mail, comment or task, or writing records, docs or data that other people read, in any outside system and by any route (CLI, API, MCP tool, script, browser). The user must name the target, or paste it in the message asking for that write; a target named for repeated updates stays cleared for the session. Reads, and updating an item the agent itself created this session, are not this rule."
+    ]
   }
 }

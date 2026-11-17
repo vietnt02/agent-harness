@@ -321,7 +321,15 @@ function main() {
     currentClaudeSettings.hooks[event] = groups.filter((g) => !g || !Array.isArray(g.hooks) || g.hooks.length > 0);
   }
 
-  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0 || claudeCommandsRemoved > 0) {
+  // The auto mode classifier rules belong to the harness: the shared block replaces the installed one
+  // whole, so a rule the repo drops is dropped here too.
+  let claudeAutoModeReplaced = false;
+  if (sharedClaudeObj.autoMode && JSON.stringify(currentClaudeSettings.autoMode) !== JSON.stringify(sharedClaudeObj.autoMode)) {
+    currentClaudeSettings.autoMode = sharedClaudeObj.autoMode;
+    claudeAutoModeReplaced = true;
+  }
+
+  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0 || claudeCommandsRemoved > 0 || claudeAutoModeReplaced) {
     if (!dryRun) {
       if (claudeFileExisted) {
         const backupTarget = path.join(backupDir, '.claude', 'settings.json');
@@ -385,6 +393,7 @@ function main() {
 
   // --- 3. Summary ---
   console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh, cập nhật matcher ${claudeMatchersUpdated} lệnh, gỡ ${claudeCommandsRemoved} lệnh trỏ tới file đã xoá.`);
+  if (claudeAutoModeReplaced) console.log('Claude autoMode: đã thay bằng bản của harness.');
   console.log(`Agy hooks: ${agyStatus}.`);
 }
 

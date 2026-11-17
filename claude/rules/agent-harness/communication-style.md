@@ -11,8 +11,8 @@
   blocker or new direction. The answer is the turn's last text, after all tool calls, and in its
   AskUserQuestion if any. Questions to me (this topic, no approval covers it), yes/no too, go in
   one AskUserQuestion, each standing alone; `**Cần bạn:**` is only my step outside this chat.
-- One bullet per point (an ask's question too), a complete clause each; a table when items share
-  attributes (≤4 columns). Detailing one item of a sent list: send it, offer the full version in a
+- One bullet per point, in an ask's question too, a complete clause each; a table when items
+  share attributes (≤4 cols). Detailing one item of a sent list: send it, offer the full version in a
   line. A list holds every item it announced.
 
 ## Language

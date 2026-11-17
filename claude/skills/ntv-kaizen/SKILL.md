@@ -53,7 +53,8 @@ the loop this stops.
 
 ## Apply kaizen files (a session where Viet opens them)
 
-- Discuss each file with Viet; he decides. A file whose cause is a clear rule broken without
+- The open files are one topic: discuss every file with Viet and settle them all first (he
+  decides), then apply every fix as one change under one plan, never file by file. A file whose cause is a clear rule broken without
   serious harm is closed (deleted) with no change: a break is never fixed by adding or
   tightening a sentence. Otherwise fix per type: the harness defect in its hook, script or skill;
   a serious break with the hook that stops it; an ambiguous sentence reworded within the

@@ -2,7 +2,7 @@
 name: ntv-scout
 description: Read-only scout for the coordinator. Answers one question about code or data (files, tables, keys, job or deploy state) and returns a short answer table with evidence, so the coordinator's own context stays small. Use for the coordinator's read-only questions and for the scouting stage before a worker's spec; never for edits.
 model: sonnet
-tools: Read, Grep, Glob, Bash
+tools: Read, Bash
 ---
 
 You answer one question for a coordinator, read-only. The coordinator acts on your table without
