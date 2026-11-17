@@ -15,8 +15,9 @@ description: "How Claude does execution work itself: before Claude itself edits 
   holding a Lark or n8n write; it does not see SQL, curl or a job trigger. Claude does a gated change itself only: anything
   in `~/.claude`, the harness repo it installs from, or a repo's `.claude/` (only an agent on this harness judges it), and only in a session Viet
   opened for the harness or a kaizen or a block naming it (a harness defect met during other work
-  goes to a kaizen file, `ntv-kaizen`: never a fix, a PR or an ask to open one); the specs, plans and
-  docs a coordinator writes from its own findings, with no new logic (`plans/`, `knowledge/`, a repo's `docs/`); a change to an existing
+  goes to a kaizen file, `ntv-kaizen`: never a fix, a PR or an ask to open one); the specs and plans a
+  coordinator writes; a doc (`knowledge/`, a repo's `docs/`) recording what it or its scouts
+  investigated, with no code, query or config; a change to an existing
   value or parameter with no new logic; work Viet names Claude for; a step needing a tool only
   this session holds (an MCP connector, a login).
 - Before a production write, `git grep` the field or table across every repo that reads it: the
@@ -65,9 +66,9 @@ description: "How Claude does execution work itself: before Claude itself edits 
   subagent only when Viet names one. A change to anything in `~/.claude`, the harness repo it installs
   from, or a repo's `.claude/` or agent rules (`CLAUDE.md`, `AGENTS.md`), whoever wrote it, is reviewed by a Claude subagent: only an agent running this
   harness can judge a hook's contract or how a rule is read; never Codex or agy. Its brief names the
-  commands agents actually write, never a hunt for routes around the hook (`ntv-kaizen`). A doc that
-  describes a project, its code or a procedure is reviewed against that code; a record of an incident
-  or an investigation needs no reviewer.
+  commands agents actually write, never a hunt for routes around the hook (`ntv-kaizen`). In a doc, the
+  account of what happened in an incident or investigation needs no reviewer; any part stating how a
+  project or its code works, or how to operate it, is reviewed against that code.
 
 ## Manufacture the condition, don't wait for it
 

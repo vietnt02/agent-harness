@@ -129,7 +129,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 **Chọn model** (user chốt; mỗi dòng một file trong `references/models/`):
 
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
-  lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify), và chặng rà
+  lệ: review thay đổi của harness hay rule cho agent (`CLAUDE.md`, `AGENTS.md` của repo) là subagent Claude (`ntv-implement` § Verify), và chặng rà
   là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Builder và
   research mọi mức độ → `agy gemini-4-hydrogen high`; `agy gemini-4-carbon high` chỉ khi user chỉ
