@@ -240,6 +240,7 @@ test('3. dry-run on empty home does not create any files', (t) => {
 
   const files = fs.readdirSync(home);
   assert.strictEqual(files.length, 0, `dry-run created files: ${files.join(', ')}`);
+  assert.match(res.stdout, /gỡ 0 lệnh/, 'a hook not linked yet is not reported as removed');
 });
 
 test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 20 hooks added', (t) => {

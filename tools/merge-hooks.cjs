@@ -302,6 +302,7 @@ function main() {
 
   // A hook pointing at a script under ~/.claude/hooks that no longer exists (the repo dropped it and
   // the installer removed its link) would error on every call: drop it, and a group it leaves empty.
+  // A script the repo still ships is alive: a dry run has not linked a new hook yet.
   const hooksDir = path.join(homeDir, '.claude', 'hooks').replace(/\\/g, '/');
   const norm = (p) => (isWin ? p.toLowerCase() : p);
   let claudeCommandsRemoved = 0;
@@ -313,7 +314,8 @@ function main() {
       g.hooks = g.hooks.filter((h) => {
         const k = getHookKey(h, isWin);
         const script = k && k.startsWith('cjs:') ? k.slice(4).split(' ')[0] : null;
-        const dead = script && norm(script).startsWith(norm(hooksDir + '/')) && !fs.existsSync(script);
+        const dead = script && norm(script).startsWith(norm(hooksDir + '/')) && !fs.existsSync(script) &&
+          !fs.existsSync(path.join(repoDir, 'claude', 'hooks', path.relative(hooksDir, script)));
         if (dead) claudeCommandsRemoved++;
         return !dead;
       });
