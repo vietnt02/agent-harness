@@ -537,6 +537,15 @@ test('dispatch-split-guard blocks a production write handed to a worker', async 
       assert.equal(run(fix('dirty.md')).status, 2, 'the file sent still holds the write');
       const written = run(`cat > fresh.md <<'EOF'\n${write}\nEOF\norca orchestration reply --id m1 --body "$(cat fresh.md)"`);
       assert.equal(written.status, 2, 'a message written by cat in the same command is still read');
+      const ws = ['orca', 'orchestration', 'worker-start'].join(' ');
+      for (const before of ['python3 check.py && ', 'node --test tests/; ', 'perl -pi -e s/a/b/ x && ']) {
+        const spec = run(`${before}cat > fresh2.md <<'EOF'\n${write}\nEOF\n${ws} --spec-file fresh2.md`);
+        assert.equal(spec.status, 2, `an interpreter before the spec's cat on the same line: ${before}`);
+        assert.match(spec.stderr, /production write/);
+      }
+      const inline = run(`python3 c.py && ${ws} --spec "$(cat <<'EOF'\n${write}\nEOF\n)"`);
+      assert.equal(inline.status, 2, 'an inline spec after an interpreter command');
+      assert.match(inline.stderr, /production write/);
     });
 
     await t.test('--spec-file after cd, with a quoted path holding a space, is read', () => {

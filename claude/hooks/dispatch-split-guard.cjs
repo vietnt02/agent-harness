@@ -157,9 +157,9 @@ function unpinnedClaudeModel(command, { segs }) {
   return null;
 }
 
-// A heredoc fed to an interpreter (`python3 - "$F" <<'EOF'`) is code run here, not text a worker
-// receives: a `replace('<old line>', …)` in it is what takes that line out of the message.
-const INTERPRETER_HEREDOC = /((?:^|[;&|\n])[ \t]*(?:\w+=\S*\s+)*(?:python3?|node|ruby|perl)\b[^\n]*?<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g;
+// A heredoc fed to an interpreter (`python3 - "$F" <<'EOF'`, in the same simple command) is code run
+// here, not text a worker receives: a `replace('<old line>', …)` in it is what takes that line out of the message.
+const INTERPRETER_HEREDOC = /((?:^|[;&|\n])[ \t]*(?:\w+=\S*\s+)*(?:python3?|node|ruby|perl)\b[^\n;&|()]*?<<-?\s*(['"]?)(\w+)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g;
 
 // Text a worker will receive from this command: the command itself (comment lines of this hook's
 // own markers and interpreter heredocs dropped), plus every `--spec-file <path>` and `$(cat <path>)`
