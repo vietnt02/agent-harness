@@ -99,7 +99,7 @@ function countHooksInSettings(settings) {
   return count;
 }
 
-test('1. clean home: symlinks, repo resolution, 19 hooks format, templates, no backup', (t) => {
+test('1. clean home: symlinks, repo resolution, 20 hooks format, templates, no backup', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -127,7 +127,7 @@ test('1. clean home: symlinks, repo resolution, 19 hooks format, templates, no b
     );
   }
 
-  // Settings has exactly 19 hooks in correct OS format
+  // Settings has exactly 20 hooks in correct OS format
   const settingsPath = path.join(home, '.claude', 'settings.json');
   assert.ok(fs.existsSync(settingsPath), 'settings.json does not exist');
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -151,7 +151,7 @@ test('1. clean home: symlinks, repo resolution, 19 hooks format, templates, no b
       }
     }
   }
-  assert.strictEqual(hookCount, 19, `Expected 19 hooks, found ${hookCount}`);
+  assert.strictEqual(hookCount, 20, `Expected 20 hooks, found ${hookCount}`);
 
   // 3 templates copied
   const templates = ['identities.md', 'knowledge-index.md', 'user-profile.md'];
@@ -242,7 +242,7 @@ test('3. dry-run on empty home does not create any files', (t) => {
   assert.strictEqual(files.length, 0, `dry-run created files: ${files.join(', ')}`);
 });
 
-test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 19 hooks added', (t) => {
+test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 20 hooks added', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -290,7 +290,7 @@ test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom 
   const backedUpSettings = path.join(backupFolder, '.claude', 'settings.json');
   assert.ok(fs.existsSync(backedUpSettings), `Backed up settings.json missing: ${backedUpSettings}`);
 
-  // In new settings: custom hook kept, 19 hooks added -> total 20 hooks
+  // In new settings: custom hook kept, 20 hooks added -> total 21 hooks
   const newSettings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
   let foundCustomHook = false;
   for (const group of newSettings.hooks.PostToolUse || []) {
@@ -301,10 +301,10 @@ test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom 
     }
   }
   assert.ok(foundCustomHook, 'Custom hook was removed');
-  assert.strictEqual(countHooksInSettings(newSettings), 20, 'Expected 20 total hooks (1 custom + 19 added)');
+  assert.strictEqual(countHooksInSettings(newSettings), 21, 'Expected 21 total hooks (1 custom + 20 added)');
 });
 
-test('5. settings already has 19 hooks in shell form: merge adds 0 hooks on any OS', (t) => {
+test('5. settings already has 20 hooks in shell form: merge adds 0 hooks on any OS', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -324,7 +324,7 @@ test('5. settings already has 19 hooks in shell form: merge adds 0 hooks on any 
   assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
 
   const updatedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  assert.strictEqual(countHooksInSettings(updatedSettings), 19, 'Should still have exactly 19 hooks');
+  assert.strictEqual(countHooksInSettings(updatedSettings), 20, 'Should still have exactly 20 hooks');
   assert.ok(!fs.existsSync(path.join(claudeDir, 'backups')), 'No backup should be created when 0 hooks added');
 });
 
@@ -457,7 +457,7 @@ test('7. run each hook in installed settings: Claude Code invocation, exit 0 or 
     }
   }
 
-  assert.strictEqual(testedHooks, 19, `Expected to test 19 hooks, tested ${testedHooks}`);
+  assert.strictEqual(testedHooks, 20, `Expected to test 20 hooks, tested ${testedHooks}`);
 });
 
 test('8. install --node <path> uses specified node binary', (t) => {

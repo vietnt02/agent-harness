@@ -24,6 +24,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/lark-record-file-guard.cjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/rules-budget.cjs\""
           }
         ]

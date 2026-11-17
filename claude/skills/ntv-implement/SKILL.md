@@ -13,7 +13,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
   scouts, builds the command and runs it `--dry-run`; Claude reads that output, runs it for real
   and reads the result back. `hooks/dispatch-split-guard.cjs` blocks a worker spec or message
   holding a Lark or n8n write; it does not see SQL, curl or a job trigger. Claude does a gated change itself only: anything
-  in `~/.claude`, the harness repo it installs from, or a repo's `.claude/` (only an agent on this harness judges it), and only in a session Viet
+  in `~/.claude`, the harness repo it installs from, or a repo's `.claude/` or agent rules (`CLAUDE.md`, `AGENTS.md`) (only an agent on this harness judges it), and only in a session Viet
   opened for the harness or a kaizen or a block naming it (a harness defect met during other work
   goes to a kaizen file, `ntv-kaizen`: never a fix, a PR or an ask to open one); the specs and plans a
   coordinator writes; a doc (`knowledge/`, a repo's `docs/`) recording what it or its scouts
