@@ -2,7 +2,7 @@
 name: ntv-orca
 description: "Vai coordinator (PM/SA) khi giao việc cho worker Orca: ai làm gì, coordinator chịu trách nhiệm gì, giao việc, duyệt kế hoạch, giữ cổng merge và production. Không phải tham chiếu lệnh Orca — lệnh, cờ và cách gỡ lỗi tra bằng `orca <lệnh> --help` và `orca skills get orchestration`."
 user-invocable: true
-when_to_use: "Đọc trước khi soạn manifest, trước khi spawn worker Orca đầu tiên của phiên, khi user nói \"giao worker\", \"supervised agent/worker\", và khi một câu hỏi của user cần rà repo con. Chỉ dành cho agent điều phối, không dành cho worker."
+when_to_use: "Đọc trước khi soạn manifest, trước khi spawn worker Orca đầu tiên của phiên, khi user nói \"giao worker\", \"supervised agent/worker\", khi user nhờ review một PR/MR của bất kỳ ai, và khi một câu hỏi của user cần rà repo con. Chỉ dành cho agent điều phối, không dành cho worker."
 category: utilities
 keywords: [orca, orchestration, worker, coordinator, dispatch, review, gate]
 ---
@@ -129,7 +129,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 **Chọn model** (user chốt; mỗi dòng một file trong `references/models/`):
 
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
-  lệ: review thay đổi của chính harness là subagent Claude (`ntv-implement` § Verify), và chặng rà
+  lệ: review thay đổi của harness hay rule cho agent (`CLAUDE.md`, `AGENTS.md` của repo) là subagent Claude (`ntv-implement` § Verify), và chặng rà
   là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Builder và
   research mọi mức độ → `agy gemini-4-hydrogen high`; `agy gemini-4-carbon high` chỉ khi user chỉ

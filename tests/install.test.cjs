@@ -375,6 +375,26 @@ test('5c. a hook pointing at a harness script the repo dropped is removed; a use
   assert.ok(commands.some((c) => c.includes('my-hooks/mine.cjs')), 'a hook outside ~/.claude/hooks is the user\'s');
 });
 
+test('5d. autoMode: the shared block replaces the installed one whole; other settings are kept', (t) => {
+  const home = makeTempHome();
+  t.after(() => cleanupTempHome(home));
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const settingsPath = path.join(claudeDir, 'settings.json');
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    permissions: { allow: ['Bash(git status:*)'] },
+    autoMode: { allow: ['$defaults', 'Old Rule: a rule the repo no longer ships.'] },
+  }, null, 2), 'utf8');
+
+  const res = runInstall(home);
+  assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
+  const shared = JSON.parse(fs.readFileSync(path.join(repoDir, 'settings', 'claude-settings.shared.json'), 'utf8'));
+  const after = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  assert.deepStrictEqual(after.autoMode, shared.autoMode, 'autoMode equals the shared block');
+  assert.ok(!JSON.stringify(after.autoMode).includes('Old Rule'), 'a rule the repo dropped is gone');
+  assert.deepStrictEqual(after.permissions, { allow: ['Bash(git status:*)'] }, 'permissions untouched');
+});
+
 test('6. existing .gemini/config/hooks.json with orca-status: claude-bridge added, orca-status preserved', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));

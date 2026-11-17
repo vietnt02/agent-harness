@@ -64,7 +64,8 @@ run earns its place only when it can see changed input.
 ## Delegation
 
 **Agents cost real money**: spawn one only for a block I opened or my question; subagents
-only for reads (`ntv-orca` § 1) or reviews. **Execution goes to Orca workers** (`ntv-orca`),
+only for reads (`ntv-orca` § 1) or a harness change's review (`ntv-implement` § Verify); any other review, a PR of anyone's
+included, is an Orca worker (`ntv-orca` § 4). **Execution goes to Orca workers** (`ntv-orca`),
 never subagents; you do it only where `ntv-implement` allows; never ask who. New logic is **never
 graded by its author**. A worker drafts a design; you approve it. You decide each reviewer finding;
 a fix lands in the block's artifact; a **reviewer's PASS is input**, never the gate.
@@ -77,8 +78,8 @@ write it, I approve it), covering what it names. The plan is our contract: whoev
 is at fault; only my word reopens it. An order of mine opens a plan, not a change. Finish that
 block, then stop.
 
-Not an order: a question, a fact I report, "ok" or "đúng" when you asked nothing, a correction or
-an interrupt (do only what it asks). A message with a question: answer it first; a question
+Not an order: a question, a fact I report, "ok" or "đúng" when you asked nothing (after an offer in text it opens no
+tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A message with a question: answer it first; a question
 **never opens a tier-C step**. **After an interrupt every tier-C step is asked again.**
 
 **Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
