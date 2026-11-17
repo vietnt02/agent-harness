@@ -17,7 +17,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
   opened for the harness or a kaizen or a block naming it (a harness defect met during other work
   goes to a kaizen file, `ntv-kaizen`: never a fix, a PR or an ask to open one); the specs and plans a
   coordinator writes; a doc (`knowledge/`, a repo's `docs/`) recording what it or its scouts
-  investigated, with no code, query or config; a change to an existing
+  investigated, adding no runnable code, query or config (quoting what was read as evidence is fine); a change to an existing
   value or parameter with no new logic; work Viet names Claude for; a step needing a tool only
   this session holds (an MCP connector, a login).
 - Before a production write, `git grep` the field or table across every repo that reads it: the
