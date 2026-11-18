@@ -7,14 +7,15 @@
  * Closed blocklist: blocks ordinary calls that print a secret file's content into the conversation:
  * - Reading or printing a secret file in Bash/PowerShell (command names matched case-insensitively):
  *   `cat`, `head`, `tail`, `less`, `more`, `bat`, `get-content`/`gc`/`type`,
- *   `grep`/`egrep`/`fgrep`/`rg`/`select-string`/`sls` that print matching lines, `cut`,
+ *   `grep`/`egrep`/`fgrep`/`rg`/`select-string`/`sls` that print matching lines (`grep -o` of key
+ *   names only, `^[A-Z_][A-Z0-9_]*=`, passes), `cut`,
  *   `awk`/`gawk`, `sed` without `-i`/`--in-place`, `<`/`<>` into one of those printing commands,
  *   `base64`, `xxd`, `strings`.
  * - The `Read` and `Edit`/`MultiEdit` tools on a secret file (`Write` and `.pub` public keys pass).
  * - Loading a secret file (`source`, `.`) in the same command as shell trace (`set -x`, `set -v`,
  *   `set -o xtrace|verbose`) or a variable-printing command (`env` with no command to run,
  *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` naming a key the loaded file
- *   sets; `echo exit=$?`, a variable the file does not set, or one only passed to a `$(…)` inside
+ *   sets; `echo exit=$?`, `${KEY:+text}`, `${#KEY}`, a variable the file does not set, or one only passed to a `$(…)` inside
  *   the echo passes; a relative file after a `cd` resolves from its literal target; an unreadable
  *   file, or one loaded after a `cd` to an unknown place, counts every named variable).
  * Everything else naming a secret file (`set -a; . ./.env; set +a; <cmd>`, passing its path to a
@@ -43,6 +44,10 @@ const SIMPLE_PRINTERS = new Set([
   'cat', 'head', 'tail', 'less', 'more', 'bat', 'cut', 'base64', 'xxd', 'strings',
   'get-content', 'gc', 'type', 'select-string', 'sls',
 ]);
+// A `grep -o` pattern that matches only a key name and its `=` (`^[A-Z_][A-Z0-9_]*=`, `^AWS_REGION=`):
+// anchored, made of word characters, classes of word characters and `-` ranges, and quantifiers. A range
+// spanning `=` (`[0-z]`) or a context option (`-A2`) still prints values: a known limit, not caught.
+const KEY_NAME_PATTERN = /^\^(?:\[[\w-]+\]|\w)(?:\[[\w-]+\]|\w|[*+?])*=$/;
 const GREP_OPT_VAL = /^(--(max-count|after-context|before-context|context|label|include|exclude|exclude-dir|color|colour|directories|binary-files))$/;
 const REDIR = /(\d*<<<|\d*<<-?|\d*<>|&>>?|\d*>>?&?|\d*<&?)/;
 const APPROVAL = /#\s*secret-ok:\s*"([^"\n]{8,})"/;
@@ -102,15 +107,18 @@ function splitRedirects(words) {
 
 function grepFiles(args) {
   const pos = [];
+  const pats = [];
   let hasPat = false;
+  let onlyMatching = false;
   let opts = true;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (!opts) { pos.push(a); continue; }
     if (a === '--') { opts = false; continue; }
     if (/^--(quiet|silent|count|files-with(out)?-match(es)?)$/.test(a)) return null;
-    if (/^--regexp=/.test(a)) { hasPat = true; continue; }
-    if (a === '--regexp') { hasPat = true; i++; continue; }
+    if (/^--regexp=/.test(a)) { hasPat = true; pats.push(a.slice(9)); continue; }
+    if (a === '--regexp') { hasPat = true; pats.push(args[i + 1]); i++; continue; }
+    if (a === '--only-matching') { onlyMatching = true; continue; }
     if (GREP_OPT_VAL.test(a)) { i++; continue; }
     if (a.startsWith('--')) continue;
     if (!a.startsWith('-')) { pos.push(a); continue; }
@@ -118,10 +126,14 @@ function grepFiles(args) {
     for (let k = 0; k < letters.length; k++) {
       const ch = letters[k];
       if ('qclL'.includes(ch)) return null;
-      if (ch === 'e') { hasPat = true; if (k === letters.length - 1) i++; break; }
+      if (ch === 'o') onlyMatching = true;
+      if (ch === 'e') { hasPat = true; pats.push(k === letters.length - 1 ? args[i + 1] : letters.slice(k + 1)); if (k === letters.length - 1) i++; break; }
       if ('mABCdf'.includes(ch)) { if (ch === 'f') hasPat = true; if (k === letters.length - 1) i++; break; }
     }
   }
+  if (!hasPat && pos.length) pats.push(pos[0]);
+  // `grep -o` of key names prints `KEY=` and nothing after it.
+  if (onlyMatching && pats.length && pats.every((pt) => KEY_NAME_PATTERN.test(String(pt)))) return null;
   return hasPat ? pos : pos.slice(1);
 }
 
@@ -223,7 +235,8 @@ function printsVars(argv, prog) {
   if (name === 'set') return { all: args.length === 0, names: [] };
   if (name === 'export' || name === 'declare') return { all: args.some((a) => /^-[a-zA-Z]*p/.test(a)), names: [] };
   if (name === 'echo' || name === 'printf') {
-    const names = args.flatMap((a) => [...dropSubstitutions(a).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
+    // `${X:+text}` prints only text when X is set; `${X:-text}` prints X's value, so it still counts.
+    const names = args.flatMap((a) => [...dropSubstitutions(a).replace(/\$\{[A-Za-z_]\w*:?\+[^$}]*\}/g, '').matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
     return { all: false, names };
   }
   return { all: false, names: [] };
@@ -351,7 +364,8 @@ function decide(data, opts = {}) {
     `secret-file-guard: this ${tool} call would print a secret file into the conversation (${what}). ` +
     (access.onlyDotenv
       ? 'Use the file without printing it: `set -a; . ./.env; set +a; <command>`, `--env-file=<file>`, ' +
-        'or pass its path to a script that parses it without printing (`grep -q`/`grep -c \'^KEY=\' <file>` to check a key is set). '
+        'or pass its path to a script that parses it without printing (`grep -q`/`grep -c \'^KEY=\' <file>` to check a key is set, ' +
+        '`grep -o \'^[A-Z_][A-Z0-9_]*=\' <file>` to list its keys). '
       : 'Keys and credentials stay unprinted; pass the path to a command or script that uses it without printing. ') +
     'If Viet must see a value, ask him; once he agrees, rerun the Bash command with the comment ' +
     '`# secret-ok: "<his exact words, 8+ characters>"`, and print only what he asked for.'

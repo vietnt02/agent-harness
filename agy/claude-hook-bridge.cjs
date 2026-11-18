@@ -19,7 +19,7 @@
  *     3. `push-after-pr-guard` (blocks git push onto a branch with a MERGED/CLOSED PR/MR)
  *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_airflow)
  *   - Direct interactive session (non-Orca worker):
- *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, blocks once per sub-repo/worktree per session before non-Read tools in `repos/*`, reminding to read `AGENTS.md`)
+ *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, reminds once per sub-repo/worktree per session, on the first non-Read tool in `repos/*`, to read `AGENTS.md`; the reminder reaches agy before its next step)
  *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
  *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill` and `trigger --conf` when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
@@ -528,20 +528,22 @@ function handlePreToolUse(payload) {
             pattern: args.Query || args.Pattern || '',
           },
         });
+        // agy loads AGENTS.md, not CLAUDE.md, and reads files with read_file.
+        const toAgy = (text) => String(text || '')
+          .replace(/([^\s,`]+[/\\])CLAUDE\.md\b/g, (_, dir) =>
+            fs.existsSync(`${dir}AGENTS.md`) ? `${dir}AGENTS.md` : `${dir}CLAUDE.md`)
+          .replace(/\bRead\b/g, 'Dùng tool read_file đọc');
         if (out?.hookSpecificOutput?.permissionDecision === 'deny') {
-          const rawReason = String(out.hookSpecificOutput.permissionDecisionReason || '');
-          const agyReason = rawReason
-            .replace(/(\bRead |, )([^,\n]+?[/\\])CLAUDE\.md\b/g, (_, prefix, dir) =>
-              `${prefix}${fs.existsSync(`${dir}AGENTS.md`) ? `${dir}AGENTS.md` : `${dir}CLAUDE.md`}`)
-            .replace(/\bRead\b/g, 'Dùng tool read_file đọc');
           process.stdout.write(
             JSON.stringify({
               decision: 'deny',
-              reason: agyReason,
+              reason: toAgy(out.hookSpecificOutput.permissionDecisionReason),
             })
           );
           return;
         }
+        // The hook reminds instead of blocking: agy gets the reminder before its next step.
+        if (out?.hookSpecificOutput?.additionalContext) queueEphemeral(payload, toAgy(out.hookSpecificOutput.additionalContext));
       } catch (_) {}
     }
   }
