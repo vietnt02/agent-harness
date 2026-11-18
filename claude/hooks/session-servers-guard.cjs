@@ -9,9 +9,10 @@
  * $TMPDIR/session-servers-guard/<session>.json, so a kept server costs no further turns and another
  * Stop hook's send-back (`stop_hook_active`) does not hide a new one.
  * While a background Bash call of this session still runs (a shell sourcing `shell-snapshots`, child
- * of the `claude` process that runs this hook), the check waits: that call may own the listeners (a
- * test that starts and stops its own Postgres), the harness wakes Claude when it ends, and the next
- * Stop checks what is left; a background server ends with its call at the harness timeout.
+ * of the `claude` process that runs this hook), a listener started after the oldest such call waits:
+ * that call may own it (a test that starts and stops its own Postgres), the harness wakes Claude when
+ * it ends, and the next Stop checks what is left; a background server ends with its call at the
+ * harness timeout. A listener older than every running call is reported as before.
  * Sees TCP listeners only: a watcher with no port is not caught. Background subagents share the
  * session id, so a server one of them still needs is listed too. Fails open on any error.
  * Giới hạn: trên win32 không đọc được env của process khác nên hook thoát 0 ngay.
@@ -52,10 +53,10 @@ function startedByShell(pid) {
   } catch (_) { return false; }
 }
 
-// True when `rows` (`{pid, ppid, args}` of every process) hold a Bash call of this session still running:
-// a `shell-snapshots` shell whose parent is the nearest `claude` ancestor of `self`, and that is not
-// itself an ancestor of `self` (the hook's own chain).
-function bashTaskRunning(rows, self) {
+// Start time (ms) of the oldest Bash call of this session still running, or null: in `rows`
+// (`{pid, ppid, start, args}` of every process), a `shell-snapshots` shell whose parent is the nearest
+// `claude` ancestor of `self`, and that is not itself an ancestor of `self` (the hook's own chain).
+function oldestBashTask(rows, self) {
   const byPid = new Map(rows.map((r) => [r.pid, r]));
   const chain = new Set();
   let claude = null;
@@ -63,16 +64,19 @@ function bashTaskRunning(rows, self) {
     chain.add(r.pid);
     if (/(^|[\\/])claude(\s|$)/.test(r.args)) { claude = r.pid; break; }
   }
-  if (!claude) return false;
-  return rows.some((r) => r.ppid === claude && !chain.has(r.pid) && /shell-snapshots/.test(r.args));
+  if (!claude) return null;
+  const starts = rows.filter((r) => r.ppid === claude && !chain.has(r.pid) && /shell-snapshots/.test(r.args)).map((r) => r.start);
+  return starts.length ? Math.min(...starts) : null;
 }
 
+// Every process as {pid, ppid, start (ms), args}; `lstart` is the fixed `Wed Nov 18 16:14:03 2026`.
 function processTable() {
-  return run('ps', ['-ax', '-o', 'pid=,ppid=,args=']).split('\n').map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
-    .filter(Boolean).map((m) => ({ pid: m[1], ppid: m[2], args: m[3] }));
+  return run('ps', ['-ax', '-o', 'pid=,ppid=,lstart=,args=']).split('\n')
+    .map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/))
+    .filter(Boolean).map((m) => ({ pid: m[1], ppid: m[2], start: Date.parse(m[3]), args: m[4] }));
 }
 
-module.exports = { bashTaskRunning };
+module.exports = { oldestBashTask };
 if (require.main !== module || process.platform === 'win32') return;
 
 let raw = '';
@@ -84,22 +88,31 @@ process.stdin.on('end', () => {
     const store = path.join(os.tmpdir(), 'session-servers-guard', `${session}.json`);
     let seen = [];
     try { seen = JSON.parse(fs.readFileSync(store, 'utf8')); } catch (_) { /* first send-back */ }
-    const fresh = [];
+    const found = [];
     const mark = new RegExp(`(?:^|\\s)CLAUDE_CODE_SESSION_ID=${session}(?:\\s|$)`);
-    const ours = [];
     for (const [pid, { cmd, ports }] of listeners()) {
       let env = '';
       try { env = run('ps', ['eww', '-o', 'command=', '-p', pid]); } catch (_) { continue; }
       if (!mark.test(env) || !startedByShell(pid)) continue;
       let key = pid;
-      try { key = `${pid}@${run('ps', ['-o', 'lstart=', '-p', pid]).trim()}`; } catch (_) { /* pid only */ }
+      let start = NaN;
+      try {
+        const lstart = run('ps', ['-o', 'lstart=', '-p', pid]).trim();
+        key = `${pid}@${lstart}`;
+        start = Date.parse(lstart);
+      } catch (_) { /* pid only */ }
       if (seen.includes(key)) continue;
-      fresh.push(key);
       const args = env.split(/\s+\w+=/)[0].trim().slice(0, 120);
-      ours.push(`pid ${pid} (${cmd}) cổng ${[...ports].join(',')}: ${args}`);
+      found.push({ key, start, line: `pid ${pid} (${cmd}) cổng ${[...ports].join(',')}: ${args}` });
     }
-    if (!ours.length) process.exit(0);
-    if (bashTaskRunning(processTable(), String(process.pid))) process.exit(0);
+    if (!found.length) process.exit(0);
+    let since = null;
+    try { since = oldestBashTask(processTable(), String(process.pid)); } catch (_) { /* report all */ }
+    // A listener started once a background call was running may be that call's: the next Stop checks it.
+    const due = since === null ? found : found.filter((f) => !(f.start >= since));
+    if (!due.length) process.exit(0);
+    const fresh = due.map((f) => f.key);
+    const ours = due.map((f) => f.line);
     fs.mkdirSync(path.dirname(store), { recursive: true });
     fs.writeFileSync(store, JSON.stringify([...seen, ...fresh]));
     process.stdout.write(JSON.stringify({

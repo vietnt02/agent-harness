@@ -45,7 +45,8 @@ const SIMPLE_PRINTERS = new Set([
   'get-content', 'gc', 'type', 'select-string', 'sls',
 ]);
 // A `grep -o` pattern that matches only a key name and its `=` (`^[A-Z_][A-Z0-9_]*=`, `^AWS_REGION=`):
-// anchored, made of word characters, classes without `=` and quantifiers, so no value can match.
+// anchored, made of word characters, classes of word characters and `-` ranges, and quantifiers. A range
+// spanning `=` (`[0-z]`) or a context option (`-A2`) still prints values: a known limit, not caught.
 const KEY_NAME_PATTERN = /^\^(?:\[[\w-]+\]|\w)(?:\[[\w-]+\]|\w|[*+?])*=$/;
 const GREP_OPT_VAL = /^(--(max-count|after-context|before-context|context|label|include|exclude|exclude-dir|color|colour|directories|binary-files))$/;
 const REDIR = /(\d*<<<|\d*<<-?|\d*<>|&>>?|\d*>>?&?|\d*<&?)/;

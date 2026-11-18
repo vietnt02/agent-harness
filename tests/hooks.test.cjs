@@ -1466,24 +1466,26 @@ test('main-checkout-guard: removing a detached worktree is flagged only when no 
   }
 });
 
-test('session-servers-guard: waits while a Bash call of this session still runs in the background', () => {
-  const { bashTaskRunning } = require('../claude/hooks/session-servers-guard.cjs');
+test('session-servers-guard: a listener newer than a running background Bash call of this session waits', () => {
+  const { oldestBashTask } = require('../claude/hooks/session-servers-guard.cjs');
   const snap = '/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval';
   const rows = [
-    { pid: '1', ppid: '0', args: '/sbin/launchd' },
-    { pid: '10', ppid: '1', args: '/Users/u/.local/bin/claude --output-format stream-json' },
-    { pid: '20', ppid: '10', args: '/bin/sh -c node /Users/u/.claude/hooks/session-servers-guard.cjs' },
-    { pid: '21', ppid: '20', args: 'node /Users/u/.claude/hooks/session-servers-guard.cjs' },
-    { pid: '30', ppid: '10', args: 'node /Users/u/.ccs/mcp/server.cjs' },
-    // A server left by `nohup … &` after its call ended: orphaned, no shell under claude.
-    { pid: '50', ppid: '1', args: 'node server.js' },
+    { pid: '1', ppid: '0', start: 0, args: '/sbin/launchd' },
+    { pid: '10', ppid: '1', start: 100, args: '/Users/u/.local/bin/claude --output-format stream-json' },
+    { pid: '20', ppid: '10', start: 900, args: '/bin/sh -c node /Users/u/.claude/hooks/session-servers-guard.cjs' },
+    { pid: '21', ppid: '20', start: 900, args: 'node /Users/u/.claude/hooks/session-servers-guard.cjs' },
+    { pid: '30', ppid: '10', start: 110, args: 'node /Users/u/.ccs/mcp/server.cjs' },
   ];
-  assert.equal(bashTaskRunning(rows, '21'), false, 'no background call: the check runs');
-  const task = [{ pid: '40', ppid: '10', args: `${snap} 'node scripts/acceptance.mjs warm'` }, { pid: '41', ppid: '40', args: 'node scripts/acceptance.mjs warm' }];
-  assert.equal(bashTaskRunning([...rows, ...task], '21'), true, 'a background call still runs: wait');
-  const otherSession = [{ pid: '60', ppid: '1', args: '/Users/u/.local/bin/claude' }, { pid: '61', ppid: '60', args: `${snap} 'sleep 9'` }];
-  assert.equal(bashTaskRunning([...rows, ...otherSession], '21'), false, "another session's call does not count");
+  assert.equal(oldestBashTask(rows, '21'), null, 'no background call: every listener is checked');
+  const tasks = [
+    { pid: '40', ppid: '10', start: 500, args: `${snap} 'node scripts/acceptance.mjs warm'` },
+    { pid: '41', ppid: '40', start: 500, args: 'node scripts/acceptance.mjs warm' },
+    { pid: '42', ppid: '10', start: 300, args: `${snap} 'gh run watch 1'` },
+  ];
+  assert.equal(oldestBashTask([...rows, ...tasks], '21'), 300, 'oldest running call: listeners started since then wait');
+  const otherSession = [{ pid: '60', ppid: '1', start: 50, args: '/Users/u/.local/bin/claude' }, { pid: '61', ppid: '60', start: 60, args: `${snap} 'sleep 9'` }];
+  assert.equal(oldestBashTask([...rows, ...otherSession], '21'), null, "another session's call does not count");
   // The hook run from inside a Bash call: its own shell is not a background call.
-  const inside = [...rows.slice(0, 2), { pid: '70', ppid: '10', args: `${snap} 'node hook.cjs'` }, { pid: '71', ppid: '70', args: 'node hook.cjs' }];
-  assert.equal(bashTaskRunning(inside, '71'), false, 'own chain ignored');
+  const inside = [...rows.slice(0, 2), { pid: '70', ppid: '10', start: 800, args: `${snap} 'node hook.cjs'` }, { pid: '71', ppid: '70', start: 800, args: 'node hook.cjs' }];
+  assert.equal(oldestBashTask(inside, '71'), null, 'own chain ignored');
 });

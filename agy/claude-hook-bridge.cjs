@@ -530,8 +530,8 @@ function handlePreToolUse(payload) {
         });
         // agy loads AGENTS.md, not CLAUDE.md, and reads files with read_file.
         const toAgy = (text) => String(text || '')
-          .replace(/(\bRead |, )([^,\n]+?[/\\])CLAUDE\.md\b/g, (_, prefix, dir) =>
-            `${prefix}${fs.existsSync(`${dir}AGENTS.md`) ? `${dir}AGENTS.md` : `${dir}CLAUDE.md`}`)
+          .replace(/([^\s,`]+[/\\])CLAUDE\.md\b/g, (_, dir) =>
+            fs.existsSync(`${dir}AGENTS.md`) ? `${dir}AGENTS.md` : `${dir}CLAUDE.md`)
           .replace(/\bRead\b/g, 'Dùng tool read_file đọc');
         if (out?.hookSpecificOutput?.permissionDecision === 'deny') {
           process.stdout.write(

@@ -203,6 +203,14 @@ if (NAP && fs.existsSync(NAP)) {
     report(ok, name, ok ? '' : `decision=${first.decision}, note=${first.note.slice(0, 120)}`);
   }
   {
+    const name = 'umbrella: one command touching two sub-repos names both AGENTS.md, no CLAUDE.md';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('chat', false);
+    const both = touch('chat', convo, run(`ls ${repo} ${otherRepo}`, umbrella), home, tmp);
+    const ok = remindsOf(both, 'demo') && remindsOf(both, 'other');
+    report(ok, name, ok ? '' : `decision=${both.decision}, note=${both.note.slice(0, 200)}`);
+  }
+  {
     const name = 'umbrella: cli payload.cwd without args.Cwd reminds once then stays silent';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('cli', false);
