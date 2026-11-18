@@ -8,11 +8,14 @@
  * Each server is sent back once, remembered by pid and start time in
  * $TMPDIR/session-servers-guard/<session>.json, so a kept server costs no further turns and another
  * Stop hook's send-back (`stop_hook_active`) does not hide a new one.
+ * While a background Bash call of this session still runs (a shell sourcing `shell-snapshots`, child
+ * of the `claude` process that runs this hook), the check waits: that call may own the listeners (a
+ * test that starts and stops its own Postgres), the harness wakes Claude when it ends, and the next
+ * Stop checks what is left; a background server ends with its call at the harness timeout.
  * Sees TCP listeners only: a watcher with no port is not caught. Background subagents share the
  * session id, so a server one of them still needs is listed too. Fails open on any error.
  * Giới hạn: trên win32 không đọc được env của process khác nên hook thoát 0 ngay.
  */
-if (process.platform === 'win32') process.exit(0);
 
 const { execFileSync } = require('child_process');
 const fs = require('fs');
@@ -49,6 +52,29 @@ function startedByShell(pid) {
   } catch (_) { return false; }
 }
 
+// True when `rows` (`{pid, ppid, args}` of every process) hold a Bash call of this session still running:
+// a `shell-snapshots` shell whose parent is the nearest `claude` ancestor of `self`, and that is not
+// itself an ancestor of `self` (the hook's own chain).
+function bashTaskRunning(rows, self) {
+  const byPid = new Map(rows.map((r) => [r.pid, r]));
+  const chain = new Set();
+  let claude = null;
+  for (let r = byPid.get(self); r && !chain.has(r.pid); r = byPid.get(r.ppid)) {
+    chain.add(r.pid);
+    if (/(^|[\\/])claude(\s|$)/.test(r.args)) { claude = r.pid; break; }
+  }
+  if (!claude) return false;
+  return rows.some((r) => r.ppid === claude && !chain.has(r.pid) && /shell-snapshots/.test(r.args));
+}
+
+function processTable() {
+  return run('ps', ['-ax', '-o', 'pid=,ppid=,args=']).split('\n').map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .filter(Boolean).map((m) => ({ pid: m[1], ppid: m[2], args: m[3] }));
+}
+
+module.exports = { bashTaskRunning };
+if (require.main !== module || process.platform === 'win32') return;
+
 let raw = '';
 process.stdin.on('data', (c) => (raw += c));
 process.stdin.on('end', () => {
@@ -73,6 +99,7 @@ process.stdin.on('end', () => {
       ours.push(`pid ${pid} (${cmd}) cổng ${[...ports].join(',')}: ${args}`);
     }
     if (!ours.length) process.exit(0);
+    if (bashTaskRunning(processTable(), String(process.pid))) process.exit(0);
     fs.mkdirSync(path.dirname(store), { recursive: true });
     fs.writeFileSync(store, JSON.stringify([...seen, ...fresh]));
     process.stdout.write(JSON.stringify({

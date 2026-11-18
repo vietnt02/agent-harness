@@ -154,8 +154,9 @@ for (const [name, mode, toolCall, want, extra, requiredLib] of cases) {
 }
 
 // Umbrella sub-repo guard: a copy of the umbrella's real nap-context-repo-con.cjs in a fake umbrella
-// above the temp dir. First non-Read touch in a sub-repo denies once (naming AGENTS.md for agy) and
-// records that sub-repo so later commands in it pass until compaction; other sub-repos still deny once.
+// above the temp dir. The hook only reminds: the first non-Read touch in a sub-repo is allowed and queues one
+// reminder naming AGENTS.md and read_file, which agy gets at its next step (PreInvocation); later commands in
+// that sub-repo stay silent until compaction; another sub-repo is reminded on its own.
 // Path of an umbrella's nap-context-repo-con.cjs: NAP_HOOK_PATH, else local.json `{"napHook": "<abs path>"}`.
 const NAP = process.env.NAP_HOOK_PATH || (() => {
   try { return JSON.parse(fs.readFileSync(path.join(LOCAL_DIR, 'local.json'), 'utf8')).napHook || ''; } catch (_) { return ''; }
@@ -176,76 +177,91 @@ if (NAP && fs.existsSync(NAP)) {
     fs.writeFileSync(path.join(r, 'AGENTS.md'), `# rules of ${path.basename(r)}\n`);
   }
   const home = { workspacePaths: [os.homedir()] };
+  // One tool call: its decision, then the reminder agy gets before its next step ('' when none).
+  const touch = (mode, convo, toolCall, ctx, tmp) => {
+    const decision = bridge(payload(mode, convo, toolCall, ctx), tmp);
+    const r = spawnSync(process.execPath, [BRIDGE, 'PreInvocation'], {
+      input: JSON.stringify(payload(mode, convo, undefined, { ...ctx, toolCall: undefined })),
+      encoding: 'utf8', timeout: 20000, env: { ...process.env, TMPDIR: tmp, BRIDGE_FIXTURE: '1' },
+    });
+    let note = '';
+    try { note = (JSON.parse(r.stdout || '{}').injectSteps || []).map((s) => s.ephemeralMessage || '').join('\n'); } catch (_) { /* none */ }
+    return { decision, note };
+  };
+  const remindsOf = (t, name) => t.decision === 'allow' && new RegExp(`${name}[\\\\/]AGENTS\\.md`).test(t.note) &&
+    !/CLAUDE\.md/.test(t.note) && /read_file/.test(t.note);
+  const silent = (t) => t.decision === 'allow' && !/AGENTS\.md/.test(t.note);
+  const show = (t) => `${t.decision}/${t.note ? 'reminded' : 'silent'}`;
+  const run = (cmd, cwd) => ({ name: 'run_command', args: { CommandLine: cmd, Cwd: cwd } });
 
   {
-    const name = 'umbrella: first command in sub-repo denies once and names AGENTS.md';
+    const name = 'umbrella: first command in sub-repo is allowed and reminds once, naming AGENTS.md and read_file';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('chat', false);
-    const first = bridgeFull(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
-    const ok = first.decision === 'deny' && /demo[\\/]AGENTS\.md/.test(first.reason) && !/CLAUDE\.md/.test(first.reason) && /read_file/.test(first.reason);
-    report(ok, name, ok ? '' : `decision=${first.decision}, reason=${first.reason.slice(0, 120)}`);
+    const first = touch('chat', convo, run('ls', repo), home, tmp);
+    const ok = remindsOf(first, 'demo');
+    report(ok, name, ok ? '' : `decision=${first.decision}, note=${first.note.slice(0, 120)}`);
   }
   {
-    const name = 'umbrella: cli payload.cwd without args.Cwd blocks once then passes';
+    const name = 'umbrella: cli payload.cwd without args.Cwd reminds once then stays silent';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('cli', false);
     const cliCtx = { workspacePaths: [os.homedir()], cwd: repo };
-    const first = bridgeFull(payload('cli', convo, { id: 'toolu_01', name: 'run_command', args: { CommandLine: 'ls' } }, cliCtx), tmp);
-    const second = bridge(payload('cli', convo, { id: 'toolu_02', name: 'run_command', args: { CommandLine: 'pwd' } }, cliCtx), tmp);
-    const ok = first.decision === 'deny' && /demo[\\/]AGENTS\.md/.test(first.reason) && second === 'allow';
-    report(ok, name, ok ? '' : `first=${first.decision}, second=${second}`);
+    const first = touch('cli', convo, { id: 'toolu_01', name: 'run_command', args: { CommandLine: 'ls' } }, cliCtx, tmp);
+    const second = touch('cli', convo, { id: 'toolu_02', name: 'run_command', args: { CommandLine: 'pwd' } }, cliCtx, tmp);
+    const ok = remindsOf(first, 'demo') && silent(second);
+    report(ok, name, ok ? '' : `first=${show(first)}, second=${show(second)}`);
   }
   {
-    const name = 'umbrella: different command in same sub-repo passes (TMPDIR=A -> TMPDIR=B, state in brain) and other sub-repo still denies once';
+    const name = 'umbrella: different command in same sub-repo stays silent (TMPDIR=A -> TMPDIR=B, state in brain) and other sub-repo is reminded once';
     const tmpA = fs.mkdtempSync(path.join(root, 'tmp-a-'));
     const tmpB = fs.mkdtempSync(path.join(root, 'tmp-b-'));
     const convo = conversation('chat', false);
     const brainDir = path.join(convo.vars['{ACP}'], 'brain', convo.cid, '.system_generated');
-    const first = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmpA);
-    const second = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: repo } }, home), tmpB);
-    const otherFirst = bridgeFull(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: otherRepo } }, home), tmpB);
-    const otherSecond = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: otherRepo } }, home), tmpB);
+    const first = touch('chat', convo, run('ls', repo), home, tmpA);
+    const second = touch('chat', convo, run('pwd', repo), home, tmpB);
+    const otherFirst = touch('chat', convo, run('ls', otherRepo), home, tmpB);
+    const otherSecond = touch('chat', convo, run('pwd', otherRepo), home, tmpB);
     const napBrainState = path.join(brainDir, 'claude-nap-context-repo-con');
     const napTmpA = path.join(tmpA, 'claude-nap-context-repo-con');
     const napTmpB = path.join(tmpB, 'claude-nap-context-repo-con');
     const stateInBrain = fs.existsSync(napBrainState) && !fs.existsSync(napTmpA) && !fs.existsSync(napTmpB);
-    const ok = first === 'deny' && second === 'allow' && stateInBrain &&
-      otherFirst.decision === 'deny' && /other[\\/]AGENTS\.md/.test(otherFirst.reason) && !/demo/.test(otherFirst.reason) &&
-      otherSecond === 'allow';
-    report(ok, name, ok ? '' : `first=${first}, second=${second}, stateInBrain=${stateInBrain}, otherFirst=${otherFirst.decision}, otherSecond=${otherSecond}`);
+    const ok = remindsOf(first, 'demo') && silent(second) && stateInBrain &&
+      remindsOf(otherFirst, 'other') && !/demo/.test(otherFirst.note) && silent(otherSecond);
+    report(ok, name, ok ? '' : `first=${show(first)}, second=${show(second)}, stateInBrain=${stateInBrain}, otherFirst=${show(otherFirst)}, otherSecond=${show(otherSecond)}`);
   }
   {
-    const name = 'umbrella: after compaction (CHECKPOINT + PreInvocation), sub-repo denies once again';
+    const name = 'umbrella: after compaction (CHECKPOINT + PreInvocation), sub-repo is reminded once again';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('chat', false);
     bridgeFull(payload('chat', convo, undefined, { ...home, toolCall: undefined }), tmp, 'PreInvocation');
-    const first = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
-    const second = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: repo } }, home), tmp);
+    const first = touch('chat', convo, run('ls', repo), home, tmp);
+    const second = touch('chat', convo, run('pwd', repo), home, tmp);
     fs.appendFileSync(convo.transcript, JSON.stringify({ type: 'CHECKPOINT', step_index: 5 }) + '\n');
     bridgeFull(payload('chat', convo, undefined, { ...home, toolCall: undefined }), tmp, 'PreInvocation');
-    const afterCompact = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls -a', Cwd: repo } }, home), tmp);
-    const afterCompactNext = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls -1', Cwd: repo } }, home), tmp);
-    const ok = first === 'deny' && second === 'allow' && afterCompact === 'deny' && afterCompactNext === 'allow';
-    report(ok, name, ok ? '' : `first=${first}, second=${second}, afterCompact=${afterCompact}, afterCompactNext=${afterCompactNext}`);
+    const afterCompact = touch('chat', convo, run('ls -a', repo), home, tmp);
+    const afterCompactNext = touch('chat', convo, run('ls -1', repo), home, tmp);
+    const ok = remindsOf(first, 'demo') && silent(second) && remindsOf(afterCompact, 'demo') && silent(afterCompactNext);
+    report(ok, name, ok ? '' : `first=${show(first)}, second=${show(second)}, afterCompact=${show(afterCompact)}, afterCompactNext=${show(afterCompactNext)}`);
   }
   {
-    const name = 'umbrella: git read-only status passes without marking sub-repo loaded';
+    const name = 'umbrella: git status in a sub-repo counts as its first touch (reminded once, then silent)';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('chat', false);
-    const gitPass = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'git status --short', Cwd: repo } }, home), tmp);
-    const nextTouch = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
-    const ok = gitPass === 'allow' && nextTouch === 'deny';
-    report(ok, name, ok ? '' : `gitPass=${gitPass}, nextTouch=${nextTouch}`);
+    const gitTouch = touch('chat', convo, run('git status --short', repo), home, tmp);
+    const nextTouch = touch('chat', convo, run('ls', repo), home, tmp);
+    const ok = remindsOf(gitTouch, 'demo') && silent(nextTouch);
+    report(ok, name, ok ? '' : `gitTouch=${show(gitTouch)}, nextTouch=${show(nextTouch)}`);
   }
   {
     const name = 'umbrella: fallback to os.tmpdir() when brain dir is missing';
     const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
     const convo = conversation('chat', false, false);
-    const first = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'ls', Cwd: repo } }, home), tmp);
-    const second = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: 'pwd', Cwd: repo } }, home), tmp);
+    const first = touch('chat', convo, run('ls', repo), home, tmp);
+    const second = touch('chat', convo, run('pwd', repo), home, tmp);
     const napTmp = path.join(tmp, 'claude-nap-context-repo-con');
-    const fellBack = first === 'deny' && second === 'allow' && fs.existsSync(napTmp);
-    report(fellBack, name, fellBack ? '' : `first=${first}, second=${second}, napInTmp=${fs.existsSync(napTmp)}`);
+    const fellBack = remindsOf(first, 'demo') && silent(second) && fs.existsSync(napTmp);
+    report(fellBack, name, fellBack ? '' : `first=${show(first)}, second=${show(second)}, napInTmp=${fs.existsSync(napTmp)}`);
   }
 } else {
   console.log(`SKIP  umbrella guard (${NAP ? `${NAP} not found` : 'no napHook in local.json'})`);

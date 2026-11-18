@@ -938,6 +938,8 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     `uv run --env-file ${E} python -c x`,
     `test -f ${E} && ls -la ${E}`,
     `grep -q DB_URL ${E}`, `grep -c KEY ${E}`, `grep --count K ${E}`, `grep -L K ${E}`,
+    `grep -o "^[A-Z_][A-Z0-9_]*=" ${E} | tr -d =`, `grep -oE '^[A-Z_][A-Z0-9_]*=' ${E}`, `grep -o -e '^AWS_REGION=' ${E}`,
+    `source ${E} && echo "region set: \${K:+yes}"`, `source ${E} && echo "len \${#K}"`,
     `grep ${E} .gitignore`,
     `sed -i 's/A=1/A=2/' ${E}`, `sed 's/\\${E}/x/' README.md`,
     `ps aux | awk '/\\${E}/{print $1}'`,
@@ -957,6 +959,8 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     `sed -n '1,5p' ${E}`,
     `base64 ${E}`, `xxd ${E}`, `strings ${E}`,
     `source ${E}; echo $K`, `. ./${E} && printf '%s\\n' "$K"`,
+    `source ${E}; echo "\${K:-none}"`, `source ${E}; echo "\${K:+$K}"`,
+    `grep -o '^AWS_SECRET.*' ${E}`, `grep -o '^.*=' ${E}`, `grep '^AWS_REGION=' ${E}`,
     `source ${E}; env`, `source ${E}; printenv`, `source ${E}; set`,
     `source ${E}; export -p`, `source ${E}; declare -p`,
     `set -x; source ${E}`, `source ${E}; set -x`, `set -v; source ${E}`, `set -o xtrace; . ./${E}`,
@@ -966,6 +970,7 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
   ];
   for (const cmd of blocked) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   assert.match(run('Bash', `cat ${E}`), /set -a; \. \.\/\.env; set \+a;/);
+  assert.match(run('Bash', `cat ${E}`), /grep -o '\^\[A-Z_\]\[A-Z0-9_\]\*=' <file>/);
 
   for (const ps of [`Get-Content ${E}`, `gc ${E}`, `TYPE ${E}`, `Select-String KEY ${E}`, `sls -Pattern KEY -Path ${E}`])
     assert.match(run('PowerShell', ps), /secret-file-guard/, ps);
@@ -1459,4 +1464,26 @@ test('main-checkout-guard: removing a detached worktree is flagged only when no 
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('session-servers-guard: waits while a Bash call of this session still runs in the background', () => {
+  const { bashTaskRunning } = require('../claude/hooks/session-servers-guard.cjs');
+  const snap = '/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval';
+  const rows = [
+    { pid: '1', ppid: '0', args: '/sbin/launchd' },
+    { pid: '10', ppid: '1', args: '/Users/u/.local/bin/claude --output-format stream-json' },
+    { pid: '20', ppid: '10', args: '/bin/sh -c node /Users/u/.claude/hooks/session-servers-guard.cjs' },
+    { pid: '21', ppid: '20', args: 'node /Users/u/.claude/hooks/session-servers-guard.cjs' },
+    { pid: '30', ppid: '10', args: 'node /Users/u/.ccs/mcp/server.cjs' },
+    // A server left by `nohup … &` after its call ended: orphaned, no shell under claude.
+    { pid: '50', ppid: '1', args: 'node server.js' },
+  ];
+  assert.equal(bashTaskRunning(rows, '21'), false, 'no background call: the check runs');
+  const task = [{ pid: '40', ppid: '10', args: `${snap} 'node scripts/acceptance.mjs warm'` }, { pid: '41', ppid: '40', args: 'node scripts/acceptance.mjs warm' }];
+  assert.equal(bashTaskRunning([...rows, ...task], '21'), true, 'a background call still runs: wait');
+  const otherSession = [{ pid: '60', ppid: '1', args: '/Users/u/.local/bin/claude' }, { pid: '61', ppid: '60', args: `${snap} 'sleep 9'` }];
+  assert.equal(bashTaskRunning([...rows, ...otherSession], '21'), false, "another session's call does not count");
+  // The hook run from inside a Bash call: its own shell is not a background call.
+  const inside = [...rows.slice(0, 2), { pid: '70', ppid: '10', args: `${snap} 'node hook.cjs'` }, { pid: '71', ppid: '70', args: 'node hook.cjs' }];
+  assert.equal(bashTaskRunning(inside, '71'), false, 'own chain ignored');
 });
