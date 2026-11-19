@@ -194,6 +194,8 @@ test('answer-first: a mid-turn question is answered now and again in the last te
       JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command', prompt: 'sao không hỏi tôi triển khai luôn không?', origin: { kind: 'human' } } })].join('\n'));
     const out = JSON.parse(hook('answer-first.cjs', { hook_event_name: 'PreToolUse', transcript_path: t }).stdout);
     assert.match(out.hookSpecificOutput.additionalContext, /Answer it now in one line, and again in the turn's last text/);
+    assert.match(out.hookSpecificOutput.additionalContext, /just before the AskUserQuestion/, 'the report goes as text before the ask (communication-style.md)');
+    assert.doesNotMatch(out.hookSpecificOutput.additionalContext, /inside the AskUserQuestion/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

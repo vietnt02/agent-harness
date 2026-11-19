@@ -927,20 +927,43 @@ test('dispatch-split-guard: a claude worker id outside the bare aliases is caugh
   assert.equal(pin(`${ws} --agent antigravity --model gemini-3.8-flash --effort high`), null);
 });
 
-test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a finished one, where the new dispatch is', () => {
+test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a released one, stop the dispatch Orca reopened and start the task again with its model', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
-  const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded', released: true, worktree: 'wt1::/w' }, ctx_b3: { state: 'succeeded', released: false }, ctx_b4: { state: 'stopped', released: true, exited: true }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true } };
-  const lines = (c) => receipt.sendLines(c, (d) => states[d]);
+  const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded', released: true, worktree: 'wt1::/w' }, ctx_b3: { state: 'succeeded', released: false }, ctx_b4: { state: 'stopped', released: true, exited: true }, ctx_b5: { state: 'succeeded', released: true }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true }, ctx_e5: { state: 'ready', worktree: 'wt1::/w/My Repo/a::b' }, ctx_e6: { state: 'ready' } };
+  const lines = (c, out = '') => receipt.sendLines(c, out, (d) => states[d]);
+  const stopped = (l) => /worker-stop --dispatch (ctx_[0-9a-f]+)/.exec(l)?.[1];
+  const worktree = (l) => /--worktree '([^']*)'/.exec(l)?.[1];
   assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
   assert.match(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /check --peek.*worker-stop --dispatch ctx_a1/);
   assert.doesNotMatch(lines('orca orchestration send --to dispatch:ctx_a1 --subject x')[0], /Cần bạn/);
   assert.match(lines('orca orchestration send --to=dispatch:ctx_c3 --subject x')[0], /state=ready/);
-  assert.match(lines('orca orchestration send --to dispatch:ctx_b2 --subject x')[0], /dispatch mới.*worker-list.*wt1::\/w.*không giao thêm worker/);
+  // Shapes of real replies (Orca 1.4.263 concise view; a `send --json` of 11/11), ids and paths replaced. The
+  // addressed dispatch shows no released terminal (Orca handed it to a follow-up): the output tells.
+  const concise = 'delivery=reopened followUpOf=ctx_b3 dispatchId=ctx_e5 taskId=task_1 runId=run_1 state=ready agent=antigravity terminal=term_1 workspace=wt1::/w/My Repo/a::b';
+  const reopened = lines('orca orchestration send --to dispatch:ctx_b3 --subject x', concise);
+  assert.equal(reopened.length, 1);
+  assert.equal(stopped(reopened[0]), 'ctx_e5', 'stops the dispatch Orca reopened, not the one addressed');
+  assert.equal(worktree(reopened[0]), 'path:/w/My Repo/a::b', 'the path after the first `::`, quoted');
+  assert.match(reopened[0], /không kèm `--model`, `--effort`.*worker-start --spec-file.*`--model`/);
+  assert.doesNotMatch(reopened[0], /theo dõi dispatch đó|không giao thêm worker/, 'never keeps the reopened dispatch, which runs without its model');
+  const json = '{"ok":true,"result":{"delivery":"reopened","followUpOf":"ctx_b3","dispatchId":"ctx_e6","taskId":"task_2","state":"ready","workspace":"wt1::/w"}}';
+  const fromJson = lines('orca orchestration send --to dispatch:ctx_b3 --subject x --json', json);
+  assert.equal(stopped(fromJson[0]), 'ctx_e6');
+  assert.equal(worktree(fromJson[0]), undefined, 'no worktree id read: no path guessed');
+  assert.doesNotMatch(fromJson[0], /undefined/);
+  // Output filtered away: the addressed worker's released terminal is the only sign.
+  const filtered = lines('orca orchestration send --to dispatch:ctx_b2 --subject x > /dev/null')[0];
+  assert.match(filtered, /không cho thấy `delivery=`.*`wt1::\/w`.*`dispatch\.followUpOf` = `ctx_b2`.*worker-stop --dispatch <id đó>/);
+  assert.equal(worktree(filtered), 'path:/w');
+  assert.doesNotMatch(lines('orca orchestration send --to dispatch:ctx_b5 --subject x')[0], /undefined/);
+  assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --subject x', 'delivery=follow_up followUpOf=ctx_b2 dispatchId=ctx_f7'), [], 'the output shows another delivery: nothing reopened');
+  assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --help'), [], 'help sends nothing');
+  assert.equal(stopped(lines('orca orchestration send --to dispatch:ctx_b3 --subject x --body "đọc worker-start --help"', concise)[0]), 'ctx_e5', 'a `--help` inside the message never hides what Orca printed');
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b3 --subject x'), [], 'terminal still retained: not seen, silent');
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b4 --subject x'), [], 'other finished states: silent');
   assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);
-  assert.deepEqual(lines('echo "orca orchestration send --to dispatch:ctx_a1"'), []);
-  assert.deepEqual(receipt.sendLines('orca orchestration send --to dispatch:ctx_zz', () => { throw new Error('x'); }), []);
+  assert.deepEqual(lines('echo "orca orchestration send --to dispatch:ctx_a1"', concise), []);
+  assert.deepEqual(receipt.sendLines('orca orchestration send --to dispatch:ctx_zz', '', () => { throw new Error('x'); }), []);
 });
 
 

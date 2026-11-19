@@ -87,9 +87,9 @@ changes nothing the user feels, one line with its reason (a choice needing inten
 never listed here), then `**Đã park:**`, each item with why and the exact command or decision
 it needs. Every listed action done → `status: done`.
 
-Anything parked or surfaced: in the same turn, before the report, one AskUserQuestion
-(recommended option first) holds every `Đã park` item and each new point, each question standing
-alone (the box hides the text above it); the report, the turn's last text, then says what the
-answers changed. An answer approving a named action adds it to the plan, approved, and the next
+Anything parked or surfaced: in the same turn, the report as text, then one AskUserQuestion
+(recommended option first) holding every `Đã park` item and each new point, each question standing
+alone (the box hides the text above it); after the answers, only what they changed, never the
+report again. An answer approving a named action adds it to the plan, approved, and the next
 run starts with no new gate; any other change sends the plan back to `status: draft` and its gate.
 Nothing parked or surfaced: no ask, the plan stays `done`. Never ask mid-run.

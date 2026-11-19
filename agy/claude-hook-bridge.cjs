@@ -31,7 +31,7 @@
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
  *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md; session-note caps come back as a reminder)
  * - PostToolUse:
- *   - Captures `worktree-after-release` and `worker-start-receipt` reminders.
+ *   - Captures `worktree-after-release` and `worker-start-receipt` (after `worker-start` and `send`) reminders.
  * - Stop:
  *   - Enforces the full `turn-guard` trio (`isEnglishReply`, `parkedProblem`, `handedGuess`).
  *
@@ -83,6 +83,8 @@ const TOOL_MAP = {
 const TIER_C = /\bairflow\s+dags\s+(pause|unpause|backfill)\b|\bairflow\s+dags\s+trigger\b[^;&|'"\n]*?\s(-c|--conf)(\s|=)/;
 const WORKER_START = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+worker-start\b/;
 const WORKER_START_HELP = /\bworker-start\b[^;&|\n]*\s(?:--help|-h)\b/;
+// A coordinator's message to a worker: worker-start-receipt reads its output too (a released worker reopened).
+const ORCA_SEND = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+send\b/;
 
 const stripHeredocs = (s) =>
   String(s || '').replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC');
@@ -791,7 +793,7 @@ function handlePostToolUse(payload) {
       }
     }
 
-    if (WORKER_START.test(command) && !WORKER_START_HELP.test(command)) {
+    if ((WORKER_START.test(command) && !WORKER_START_HELP.test(command)) || ORCA_SEND.test(command)) {
       for (const hookName of ['worker-start-receipt.cjs']) {
         const res = runClaudeHook(
           hookName,

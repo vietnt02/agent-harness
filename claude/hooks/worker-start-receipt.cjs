@@ -17,9 +17,11 @@
  * worker; earlier it waited Queued for the next `check --peek`). The worker's chat pane shows which:
  * `worker-read --source transcript` does not show the new turn. A worker that does not act on an
  * urgent message is the coordinator's own `worker-stop` plus a new dispatch on the same worktree,
- * never an ask to the user. A send to a `succeeded` worker whose terminal is released does not fail:
- * Orca starts a new dispatch on the same worktree to take the message (knowledge/orca.md), so the
- * reminder names where to find it instead of a second worker. Other finished states: not seen, silent.
+ * never an ask to the user. A send to a worker whose terminal is released does not fail: Orca reopens
+ * it as a new dispatch on the same worktree (`delivery=reopened`, its id in `dispatchId=`) launched
+ * without `--model` or `--effort`, so the reminder, read from the send's own output, says to stop that
+ * dispatch and start the task again with its model (ntv-orca § 3). Output with no delivery (filtered)
+ * falls back to the addressed worker's state. Other finished states: not seen, silent.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -159,6 +161,7 @@ function receipts(output, max = MAX_IDS) {
 }
 
 const SEND = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+send\b/;
+const SEND_HELP = /\bsend\b[^;&|\n]*\s(?:--help|-h)\b/;
 const DONE = new Set(['succeeded', 'failed', 'stopped', 'abandoned']);
 
 // The dispatches a `send` command addresses with `--to dispatch:<ctx>`.
@@ -175,14 +178,45 @@ function showState(d) {
   return { state: r.worker?.state, exited, released: r.terminalResource?.releaseState === 'released', worktree: r.worker?.worktreeId };
 }
 
-// One reminder per addressed worker; `show` reads its state.
-function sendLines(command, show = showState) {
-  return sendTargets(command).flatMap((d) => {
-    let st;
-    try { st = show(d); } catch (_) { return []; }
+// The dispatches the send's own output says Orca opened for a released worker: `delivery=reopened …
+// dispatchId=<ctx>` on one line (concise view), or `"delivery":"reopened"` then `"dispatchId"` in one
+// object (`--json`). Orca hands a terminal to its newest follow-up, so the addressed dispatch itself may
+// show no released terminal: the output is what tells.
+function reopenedIn(output) {
+  const text = String(output || '');
+  return [...new Set([...text.matchAll(/\bdelivery=reopened\b[^\n]*?\bdispatchId=(ctx_[0-9a-f]+)/g),
+    ...text.matchAll(/"delivery"\s*:\s*"reopened"[^{}]*?"dispatchId"\s*:\s*"(ctx_[0-9a-f]+)"/g)].map((m) => m[1]))];
+}
+
+// `--worktree` of the old worktree, from Orca's `<repo id>::<path>` (the path itself may hold `::`).
+function worktreeArg(id) {
+  const i = String(id || '').indexOf('::');
+  return i < 0 ? '`--worktree` cũ (`worker.worktreeId` trong `worker-show --json --full`)' : `\`--worktree 'path:${String(id).slice(i + 2)}'\``;
+}
+
+const restart = (worktree) => 'rồi giao lại bằng `worker-start --spec-file` (spec cũ, nội dung tin, câu kiểm hộp thư) kèm ' +
+  `${worktreeArg(worktree)}, \`--agent\`, \`--model\`, \`--effort\` chọn theo ntv-orca § 2, vì launch của dispatch mở lại là null (ntv-orca § 3).`;
+
+// The reminders for a send: one per dispatch its output says Orca reopened; then one per addressed worker
+// (`show` reads its state): released while the output shows no delivery at all (filtered), or not finished.
+function sendLines(command, output = '', show = showState) {
+  if (!SEND.test(command)) return [];
+  const read = (d) => { try { return show(d); } catch (_) { return null; } };
+  const reopened = reopenedIn(output).map((id) => `${id}: \`send\` vừa in \`delivery=reopened\`: Orca mở lại worker đã release ` +
+    `thành dispatch này, chạy không kèm \`--model\`, \`--effort\`. Chạy \`orca orchestration worker-stop --dispatch ${id}\`, ` +
+    restart(read(id)?.worktree));
+  const delivered = /\bdelivery"?\s*[=:]/.test(String(output || ''));
+  // `--help` sends nothing, so it gets no reminder from state; a `-h` inside a message body only costs that part.
+  return [...reopened, ...(SEND_HELP.test(command) ? [] : sendTargets(command)).flatMap((d) => {
+    const st = read(d);
+    if (!st) return [];
     if (st.state === 'succeeded' && st.released) {
-      return [`${d} (state=succeeded, terminal released): Orca giao tin này cho một dispatch mới trên cùng worktree. Tìm nó ở ` +
-        `\`orca orchestration worker-list --json\` (mới nhất trước, \`workspace\` = \`${st.worktree}\`) và theo dõi dispatch đó; không giao thêm worker.`];
+      if (delivered) return [];
+      return [`${d} (state=succeeded, terminal released): Orca mở lại worker đã release khi nhận \`send\`, thành dispatch mới chạy ` +
+        'không kèm `--model`, `--effort`, mà output không cho thấy `delivery=`. Tìm dispatch đó ở `orca orchestration worker-list --json` ' +
+        `(mới nhất trước${st.worktree ? `, \`workspace\` = \`${st.worktree}\`` : ''}), kiểm \`dispatch.followUpOf\` = \`${d}\` bằng ` +
+        '`orca orchestration worker-show --dispatch <id> --json --full`; đúng thì `orca orchestration worker-stop --dispatch <id đó>`, ' +
+        restart(st.worktree)];
     }
     if (DONE.has(st.state)) return [];
     if (st.exited) {
@@ -195,7 +229,7 @@ function sendLines(command, show = showState) {
       `Gấp mà worker không làm theo tin trong vài phút (khung chat không có lượt mới, \`orca orchestration worker-read --dispatch ${d} --source transcript\` không thấy \`check --peek\`) → ` +
       `tự \`orca orchestration worker-stop --dispatch ${d}\`, rồi giao worker mới bằng \`--spec-file\` gồm spec cũ, nội dung ` +
       'tin và câu kiểm hộp thư, cùng `--worktree path:` cũ; không nhờ user bấm Steer.'];
-  });
+  })];
 }
 
 // The stall watch for each new dispatch, ready to run: wakes the coordinator when the worker ends, or
@@ -222,8 +256,11 @@ process.stdin.on('end', () => {
     const { hook_event_name: event, tool_name: tool, tool_input: input = {}, tool_response: resp = {}, error } = JSON.parse(raw);
     const command = input.command || '';
     if (tool !== 'Bash') process.exit(0);
+    const output = event === 'PostToolUseFailure'
+      ? String(error || '')
+      : typeof resp === 'string' ? resp : `${resp.stdout || ''}\n${resp.stderr || ''}`;
     if (event !== 'PostToolUseFailure' && !dispatches(command)) {
-      const sent = sendLines(command);
+      const sent = sendLines(command, output);
       if (sent.length) {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse',
           additionalContext: 'worker-start-receipt (send):\n' + sent.map((l) => `- ${l}`).join('\n') } }));
@@ -231,9 +268,6 @@ process.stdin.on('end', () => {
       process.exit(0);
     }
     if (!dispatches(command) || HELP.test(command)) process.exit(0);
-    const output = event === 'PostToolUseFailure'
-      ? String(error || '')
-      : typeof resp === 'string' ? resp : `${resp.stdout || ''}\n${resp.stderr || ''}`;
     const { ids, errors } = receipts(output);
     let lines = ids.map((d) => { try { return describe(d); } catch (_) { return null; } }).filter(Boolean);
     if (!ids.length) lines = [`Output không có dispatchId của receipt (bị lọc, hay lệnh lỗi trước khi giao): ${FALLBACK}`];
