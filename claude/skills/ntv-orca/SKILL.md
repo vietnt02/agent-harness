@@ -180,12 +180,16 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. **Release:** runtime có
   `orchestration.worker-auto-release.v1` (`orca status --json`, `runtime.capabilities`) tự release
   worker khoảng 2 phút sau khi nhận `worker_done` và hoãn khi một tin làm worker chạy lại, nên
-  coordinator không `worker-release` tay (release lúc thư còn trong hộp làm Orca báo HIGH giả). Có
-  việc kế tiếp cho đúng worker đó → `worker-keep-open` ngay khi nhận `worker_done`, xong việc đó thì
-  `worker-release`. Runtime không có capability đó → `worker-release` sau khi kiểm xong (chỉ worker
-  đã `worker_done`, chưa thì `worker-stop`). Gỡ worktree khi `worker-show` báo `terminalState:
-  released` và báo cáo đã lưu. Đừng để worker release rồi vài phút sau spawn lại; cũng đừng giữ
-  "phòng khi cần".
+  coordinator không `worker-release` tay (release lúc thư còn trong hộp làm Orca báo HIGH giả).
+  Worker được giữ mở (spawn kèm `--worktree new-child` hay `new-top-level`, `--keep-open`) không tự
+  release: `worker-release` khi không ai còn dùng chat của nó. Có việc kế tiếp cho đúng worker đó →
+  `worker-keep-open` ngay khi nhận `worker_done`, xong việc đó thì `worker-release`. `send` tới worker
+  đã release mở lại nó không kèm `--model`, `--effort` (`launch.effective` null): agent chạy model
+  mặc định của nó (agy: `~/.claude/knowledge/orca.md`); mặc định khác model § 2 chọn → giao bằng
+  `worker-start --spec-file` kèm `--worktree path:` cũ, `--model`, `--effort`. Runtime không có
+  capability đó → `worker-release` sau khi kiểm xong (chỉ worker đã `worker_done`, chưa thì
+  `worker-stop`). Gỡ worktree khi `worker-show` báo `terminalState: released` và báo cáo đã lưu.
+  Đừng để worker release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
   luận. Im lặng, timeout hay `unverifiable` không bao giờ đủ để tự dừng, bỏ hay chạy lại worker
   (guide). Worker còn sống thì nó vẫn là người sửa duy nhất của worktree.
