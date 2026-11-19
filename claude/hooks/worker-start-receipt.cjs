@@ -18,8 +18,9 @@
  * `worker-read --source transcript` does not show the new turn. A worker that does not act on an
  * urgent message is the coordinator's own `worker-stop` plus a new dispatch on the same worktree,
  * never an ask to the user. A send to a `succeeded` worker whose terminal is released does not fail:
- * Orca starts a new dispatch on the same worktree to take the message (knowledge/orca.md), so the
- * reminder names where to find it instead of a second worker. Other finished states: not seen, silent.
+ * Orca reopens it as a new dispatch on the same worktree (`delivery=reopened`, its id in `dispatchId=`)
+ * launched without `--model` or `--effort`, so the reminder says to stop that dispatch and start the
+ * task again with its model (ntv-orca § 3). Other finished states: not seen, silent.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -181,8 +182,12 @@ function sendLines(command, show = showState) {
     let st;
     try { st = show(d); } catch (_) { return []; }
     if (st.state === 'succeeded' && st.released) {
-      return [`${d} (state=succeeded, terminal released): Orca giao tin này cho một dispatch mới trên cùng worktree. Tìm nó ở ` +
-        `\`orca orchestration worker-list --json\` (mới nhất trước, \`workspace\` = \`${st.worktree}\`) và theo dõi dispatch đó; không giao thêm worker.`];
+      return [`${d} (state=succeeded, terminal released): Orca mở lại worker này thành một dispatch mới chạy không kèm \`--model\`, ` +
+        '`--effort` (id là `dispatchId=` cạnh `delivery=reopened` mà `send` vừa in; output bị lọc thì tìm ở ' +
+        `\`orca orchestration worker-list --json\`, mới nhất trước, \`workspace\` = \`${st.worktree}\`). Chạy ` +
+        '`orca orchestration worker-stop --dispatch <id đó>`, rồi giao lại bằng `worker-start --spec-file` (spec cũ, nội dung tin, ' +
+        `câu kiểm hộp thư) kèm \`--worktree path:${String(st.worktree).split('::').pop()}\`, \`--agent\`, \`--model\`, \`--effort\` ` +
+        '(ntv-orca § 3, model theo § 2).'];
     }
     if (DONE.has(st.state)) return [];
     if (st.exited) {
