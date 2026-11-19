@@ -113,9 +113,30 @@ test('watch-guard: only a loop of this shell around remote calls is one; scripts
     'ssh vps cat /srv/x.log > /tmp/L; for o in 101 102 103; do grep -c $o /tmp/L; done',
     "glab mr update 590 --ready | tail -1 && glab api -X POST projects/a/merge_requests/590/pipelines | jq -r .id; for d in ctx_1 ctx_2; do orca orchestration worker-release --dispatch $d | tail -1; done",
   ]) assert.equal(run({ command, timeout: 110000 }).status, 0, command);
-  const local = { command: 'for h in a b; do ssh $h uptime; done' };
-  assert.equal(run(local).status, 2, 'a local loop of remote calls is held once');
+  const local = { command: 'for h in $(cat hosts); do ssh $h uptime; done' };
+  assert.equal(run(local).status, 2, 'a local loop of remote calls over a list known only when it runs is held once');
   assert.equal(run(local).status, 0, 'and passes the second time');
+});
+
+test('watch-guard: a background `while read` over input and a foreground `for` over a few listed items pass; a wait or an open list is held (kaizen fixtures)', () => {
+  const s = sid('wg-listed');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wg-'));
+  const run = (input) => hook('watch-guard.cjs', { session_id: s, cwd: dir, tool_name: 'Bash', tool_input: input });
+  try {
+    // The loops of a worktree setup script: walk a file list, no `sleep`, no remote call.
+    fs.writeFileSync(path.join(dir, 'setup.sh'), "while IFS= read -r -d '' rel; do ln -sfn \"$rel\" x; done < <(git ls-files -z)\n" +
+      'while IFS= read -r lock; do npm ci; done < locks\n');
+    assert.equal(run({ command: 'bash setup.sh > setup.log 2>&1', run_in_background: true }).status, 0, 'a script reading its input waits on nothing');
+    assert.equal(run({ command: 'for n in 1 2 3; do glab api x/$n; done' }).status, 0, 'three listed reads');
+    assert.equal(run({ command: 'for p in 11 12; do glab api projects/a/pipelines/$p/jobs; done' }).status, 0, 'two listed reads');
+    for (const [command, why] of [
+      ['for id in $(glab api y); do glab api x/$id; done', 'a list known only when it runs'],
+      ['for n in 1 2 3; do glab api x/$n; sleep 5; done', 'listed, but it sleeps'],
+      ['for n in 1 2 3 4 5 6; do glab api x/$n; done', 'more than five items'],
+    ]) assert.equal(run({ command }).status, 2, why);
+    assert.equal(run({ command: 'while ! curl -s x; do sleep 5; done', run_in_background: true }).status, 2, 'a background poll still goes through watch.sh');
+    assert.equal(run({ command: 'while true; do gh api x; done', run_in_background: true }).status, 2, 'a background loop calling out each round');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('watch-guard: a background watcher whose checkpoint outlives the Bash timeout is told the timeout it needs', () => {

@@ -6,8 +6,8 @@
   answer; else answer first.
 - Lead with the outcome; a concern only if it changes the decision. A consequence is
   what I see or lose, checked against what consumes it.
-- My message is answered before anything else changes; a question I type in an ask: only its
-  answer that turn. Before the first tool call, one sentence on what's next; then only a discovery,
+- My message is answered before anything else changes; a question I type in an ask: answered
+  at once, no ask. Before the first tool call, one sentence on what's next; then only a discovery,
   blocker or new direction. The answer is the turn's last text, after all tool calls, or just before its
   ask, then only what changed. Questions to me (this topic, no approval covers it), yes/no
   too, go in one ask, each standing alone; `**Cần bạn:**` is only my step outside this chat.
