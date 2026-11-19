@@ -21,7 +21,8 @@
  * it as a new dispatch on the same worktree (`delivery=reopened`, its id in `dispatchId=`) launched
  * without `--model` or `--effort`, so the reminder, read from the send's own output, says to stop that
  * dispatch and start the task again with its model (ntv-orca § 3). Output with no delivery (filtered)
- * falls back to the addressed worker's state. Other finished states: not seen, silent.
+ * falls back to the addressed worker's state; a finished one whose terminal went to a follow-up shows no
+ * release, so a dispatch now active on its worktree in another terminal (`worker-list`) is the reopened one.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
  * error names, `--retry-of`, a chained worker-list) are not it. Fails open on any error.
  */
@@ -175,7 +176,14 @@ function sendTargets(command) {
 function showState(d) {
   const r = JSON.parse(run('orca', ['orchestration', 'worker-show', '--dispatch', d, '--json', '--full'])).result;
   const exited = r.projection?.liveness?.verdict === 'exited' || r.observation?.status === 'exited';
-  return { state: r.worker?.state, exited, released: r.terminalResource?.releaseState === 'released', worktree: r.worker?.worktreeId };
+  return { state: r.worker?.state, exited, released: r.terminalResource?.releaseState === 'released', worktree: r.worker?.worktreeId,
+    terminal: r.dispatch?.assigneeHandle || r.worker?.terminal };
+}
+
+// Workers whose terminal is still active, from `worker-list` (concise rows: dispatchId, state, terminal, workspace).
+function activeWorkers() {
+  const r = JSON.parse(run('orca', ['orchestration', 'worker-list', '--terminal-state', 'active', '--json'])).result;
+  return Array.isArray(r) ? r : (r?.workers || []);
 }
 
 // The dispatches the send's own output says Orca opened for a released worker: `delivery=reopened …
@@ -199,7 +207,9 @@ const restart = (worktree) => 'rồi giao lại bằng `worker-start --spec-file
 
 // The reminders for a send: one per dispatch its output says Orca reopened; then one per addressed worker
 // (`show` reads its state): released while the output shows no delivery at all (filtered), or not finished.
-function sendLines(command, output = '', show = showState) {
+// A finished worker whose terminal went to a follow-up shows no release itself: with the output filtered,
+// a dispatch now running on its worktree in another terminal (`list`) is the one Orca reopened.
+function sendLines(command, output = '', show = showState, list = activeWorkers) {
   if (!SEND.test(command)) return [];
   const read = (d) => { try { return show(d); } catch (_) { return null; } };
   const reopened = reopenedIn(output).map((id) => `${id}: \`send\` vừa in \`delivery=reopened\`: Orca mở lại worker đã release ` +
@@ -218,7 +228,18 @@ function sendLines(command, output = '', show = showState) {
         '`orca orchestration worker-show --dispatch <id> --json --full`; đúng thì `orca orchestration worker-stop --dispatch <id đó>`, ' +
         restart(st.worktree)];
     }
-    if (DONE.has(st.state)) return [];
+    if (DONE.has(st.state)) {
+      if (delivered || !st.worktree) return [];
+      let rows = [];
+      try { rows = list() || []; } catch (_) { /* unreadable: silent */ }
+      return rows.filter((w) => w.workspace === st.worktree && w.dispatchId !== d && !DONE.has(w.state) &&
+        w.terminal && w.terminal !== st.terminal).map((w) => `${w.dispatchId} (state=${w.state}, terminal ${w.terminal}): ` +
+        `output của \`send\` tới ${d} không có \`delivery=\` (bị lọc), và trên worktree của nó vừa có dispatch này chạy ở terminal ` +
+        `khác. Đó là dấu hiệu Orca mở lại worker đã release (terminal thuộc follow-up mới nhất nên ${d} không báo released), chạy ` +
+        'không kèm `--model`, `--effort`. Kiểm `dispatch.followUpOf` bằng ' +
+        `\`orca orchestration worker-show --dispatch ${w.dispatchId} --json --full\`; thuộc chuỗi của ${d} thì ` +
+        `\`orca orchestration worker-stop --dispatch ${w.dispatchId}\`, ` + restart(st.worktree));
+    }
     if (st.exited) {
       return [`${d} (state=${st.state}): session của worker đã thoát, tin sẽ không tới. Đừng báo user là worker đã nhận; ` +
         'chạy lại task (`--retry-of`) hoặc giao worker mới.'];
@@ -236,9 +257,19 @@ function sendLines(command, output = '', show = showState) {
 // its worktree (for an agy terminal worker, also its conversation DB) sits still for 10 minutes, or
 // its transcript shows an API error streak. It reads no
 // inbox (`check`), so it takes no message from Orca's wake-ups.
-function watchLines(ids) {
+// `--model`/`--effort` of an antigravity worker-start, for worker-stall to check against the banner
+// (Orca records no model for agy); '' for other agents, whose banner reads otherwise.
+function launchArgs(command) {
+  if (!ANTIGRAVITY.test(command)) return '';
+  const flag = (n) => (new RegExp(`--${n}[\\s=]+["']?([\\w.-]+)`).exec(command) || [])[1];
+  const model = flag('model');
+  const effort = flag('effort');
+  return model ? ` --model ${model}${effort ? ` --effort ${effort}` : ''}` : '';
+}
+
+function watchLines(ids, launch = '') {
   return ids.map((d) => {
-    const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}`;
+    const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}${launch}`;
     return `Theo dõi treo cho ${d}: \`~/.claude/scripts/watch.sh --once --check "${w}" --ok done --wait running\`, rồi ` +
       'cùng lệnh bỏ `--once`, thêm `--deadline <thời lượng tới giờ đã hẹn user + biên, vd 2h30m> --every 120 --checkpoint 3000 --why-wait ' +
       '"worker đang làm, coordinator không làm thay"`, chạy background với `timeout: 3300000` (mặc định 30 phút ngắn hơn checkpoint 50 phút). `stale` là tín hiệu để đọc `worker-read` ' +
@@ -246,7 +277,7 @@ function watchLines(ids) {
   });
 }
 
-module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, watchLines, acpHomes };
+module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, watchLines, launchArgs, acpHomes };
 if (require.main !== module) return;
 
 let raw = '';
@@ -273,7 +304,7 @@ process.stdin.on('end', () => {
     if (!ids.length) lines = [`Output không có dispatchId của receipt (bị lọc, hay lệnh lỗi trước khi giao): ${FALLBACK}`];
     else if (!lines.length) lines = [`Không đọc được ${ids.join(', ')} từ Orca: ${FALLBACK}`];
     if (ANTIGRAVITY.test(command)) lines.push(...agyConfigLines(), ...agyVersionLines());
-    lines.push(...watchLines(ids));
+    lines.push(...watchLines(ids, launchArgs(command)));
     for (const message of errors) {
       const refs = guideLines(message);
       lines.push(`ok:false "${message.slice(0, 200)}"` + (refs.length

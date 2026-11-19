@@ -127,6 +127,15 @@
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/agent-background-guard.cjs\""
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/ask-batch-guard.cjs\""
+          }
+        ]
       }
     ],
     "SessionStart": [

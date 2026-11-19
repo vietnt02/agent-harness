@@ -22,8 +22,13 @@
  * ($TMPDIR/claude-worker-stall/<dispatch>.json), so each run reads only the messages new since the
  * last one; user messages (the brief, the spec) never count. It never reads `orca orchestration
  * check`, so it takes no message from the coordinator's inbox.
+ * With --model (and --effort), an agy worker's model banner in its terminal (`Gemini 4 Neon (High)`; Orca
+ * records no model for agy) is compared once it shows: a different model prints
+ * `model-mismatch want=<slug> <effort> got=<banner>`, outside every --ok/--wait list, so the watch ends (`--once`
+ * at once, the loop after two such checks).
+ * A match is remembered beside the cursor and not read again; no banner yet, or no terminal, judges nothing.
  *
- *   node ~/.claude/scripts/worker-stall.cjs --dispatch <ctx_id> [--idle-min 10] [--api-errors 3] [--ask-max 60]
+ *   node ~/.claude/scripts/worker-stall.cjs --dispatch <ctx_id> [--idle-min 10] [--api-errors 3] [--ask-max 60] [--model <slug> [--effort <e>]]
  */
 'use strict';
 const fs = require('fs');
@@ -41,10 +46,10 @@ const NO_TRANSCRIPT = /transcript_required|provider_unsupported|session_not_repo
 const AGY_CONVERSATIONS = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'conversations');
 
 function args(argv) {
-  const out = { dispatch: '', idle: 10, errors: 3, askMax: 60 };
+  const out = { dispatch: '', idle: 10, errors: 3, askMax: 60, model: '', effort: '' };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i + 1];
-    if (argv[i] === '--dispatch') { out.dispatch = v || ''; i++; } else if (argv[i] === '--idle-min') { out.idle = Number(v); i++; } else if (argv[i] === '--api-errors') { out.errors = Number(v); i++; } else if (argv[i] === '--ask-max') { out.askMax = Number(v); i++; } else if (argv[i] === '-h' || argv[i] === '--help') { out.help = true; } else { out.bad = argv[i]; }
+    if (argv[i] === '--dispatch') { out.dispatch = v || ''; i++; } else if (argv[i] === '--idle-min') { out.idle = Number(v); i++; } else if (argv[i] === '--api-errors') { out.errors = Number(v); i++; } else if (argv[i] === '--ask-max') { out.askMax = Number(v); i++; } else if (argv[i] === '--model') { out.model = v || ''; i++; } else if (argv[i] === '--effort') { out.effort = v || ''; i++; } else if (argv[i] === '-h' || argv[i] === '--help') { out.help = true; } else { out.bad = argv[i]; }
   }
   return out;
 }
@@ -205,11 +210,47 @@ function waitingAsk(dispatch, stateDir = path.join(os.tmpdir(), 'claude-worker-s
   try { return Number(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).waiting) || false; } catch (_) { return false; }
 }
 
+// The agy model banner in a terminal's text, as { slug, effort } (`Gemini 4 Neon (High)` -> gemini-4-neon, high).
+const BANNER = /\bGemini\s+(\d+(?:\.\d+)?)\s+([A-Za-z]+)\s*\(([A-Za-z]+)\)/i;
+function bannerOf(text) {
+  const m = BANNER.exec(String(text || ''));
+  return m ? { slug: `gemini-${m[1]}-${m[2].toLowerCase()}`, effort: m[3].toLowerCase(), text: m[0] } : null;
+}
+
+// The mismatch line, or '' when the banner matches, has not shown, or cannot be read. A match is saved.
+function modelCheck(o, terminal, state, deps = {}, stateDir = path.join(os.tmpdir(), 'claude-worker-stall')) {
+  if (!o.model || !terminal) return '';
+  const file = path.join(stateDir, `${o.dispatch.replace(/[^\w-]/g, '_')}.model`);
+  if (fs.existsSync(file)) return '';
+  let text = '';
+  try {
+    text = (deps.readTerminal || ((h) => execFileSync('orca', ['terminal', 'read', '--terminal', h],
+      { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] })))(terminal);
+  } catch (_) { return ''; }
+  // The last banner: the agent's own output may quote a model name above it.
+  const all = String(text || '').match(new RegExp(BANNER.source, 'gi')) || [];
+  const b = bannerOf(all[all.length - 1]);
+  if (!b) return '';
+  const suffix = /-(low|medium|high|xhigh)$/i.exec(o.model);
+  const want = o.model.toLowerCase().replace(/-(low|medium|high|xhigh)$/, '');
+  const effort = (o.effort || (suffix ? suffix[1] : '')).toLowerCase();
+  if (b.slug !== want || (effort && b.effort !== effort)) {
+    return `model-mismatch want=${want}${effort ? ` ${effort}` : ''} got="${b.text}" state=${state}`;
+  }
+  try {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(file, b.text);
+  } catch (_) { /* not saved: read again next run */ }
+  return '';
+}
+
 function status(o, deps = {}) {
   const show = deps.show || ((d) => orca(['orchestration', 'worker-show', '--dispatch', d, '--json']).result || {});
   const r = show(o.dispatch);
   const state = r.state || 'unknown';
   if (DONE.has(state)) return `done ${state}`;
+  const mismatch = modelCheck(o, r.terminal, state, deps, deps.stateDir);
+  if (mismatch) return mismatch;
   let errors = 0;
   let terminal = false;
   try { errors = (deps.newErrors || newErrors)(o.dispatch); } catch (e) {
@@ -239,13 +280,13 @@ function status(o, deps = {}) {
   return `stale idle>${o.idle}m${step}${(deps.heldBy || heldBy)(workspace)} state=${state}`;
 }
 
-module.exports = { args, status, newErrors, waitingAsk, workerText, changedSince, agyLastStep, heldBy, minutesOf, API_ERROR, ASK_SENT };
+module.exports = { args, status, bannerOf, modelCheck, newErrors, waitingAsk, workerText, changedSince, agyLastStep, heldBy, minutesOf, API_ERROR, ASK_SENT };
 if (require.main !== module) return;
 
 const o = args(process.argv.slice(2));
 if (o.help) { process.stdout.write(fs.readFileSync(__filename, 'utf8').split('*/')[0]); process.exit(0); }
 if (o.bad || !o.dispatch || !(o.idle > 0) || !(o.errors > 0) || !(o.askMax > 0)) {
-  process.stderr.write('usage: worker-stall.cjs --dispatch <ctx_id> [--idle-min <minutes > 0>] [--api-errors <n > 0>] [--ask-max <minutes > 0>]\n');
+  process.stderr.write('usage: worker-stall.cjs --dispatch <ctx_id> [--idle-min <minutes > 0>] [--api-errors <n > 0>] [--ask-max <minutes > 0>] [--model <slug> [--effort <e>]]\n');
   process.exit(2);
 }
 try {
