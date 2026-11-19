@@ -6,8 +6,10 @@
  * - Always blocks what locks the session while the user cannot type: an explicit foreground
  *   `timeout` over 120000 ms, or the watch.sh loop in the foreground (only --once/--help run there).
  * - Blocks once with a reminder (lib/block-once.cjs; the same command run again passes): a
- *   foreground loop of this shell around remote calls (ssh, docker exec, gh/glab api, airflow), a
- *   foreground `while/until … sleep` poll, a background loop not through ~/.claude/scripts/watch.sh,
+ *   foreground loop of this shell around remote calls (ssh, docker exec, gh/glab api, airflow)
+ *   unless it is a `for` over up to 5 items written out with no `sleep`, a foreground
+ *   `while/until … sleep` poll, a background `sleep` or `while/until` loop that sleeps or calls out
+ *   (not `while read` over input) not through ~/.claude/scripts/watch.sh,
  *   and a background watch.sh whose first report (the sooner of `--deadline` and `--checkpoint`)
  *   outlives the Bash `timeout` (default 1800000 ms), which would kill the watcher before it reports.
  * An omitted foreground timeout is the harness default (120000 ms) and passes. Script files the
@@ -50,8 +52,10 @@ function remoteScripts(text) {
 
 // What the shell itself runs: { loop: a `for/while/until` of this shell, wait: a `while/until`
 // loop, poll: one with a `sleep`, sleeps: a `sleep` command, remote: a remote call, loopRemote: a
-// remote call inside a loop's own commands (one before or after the loop runs once) }. `deep` also
-// reads the scripts handed to another machine for waits (`ssh h 'while …; sleep 5; done'` polls too).
+// remote call inside a loop's own commands (one before or after the loop runs once), longRemote: one
+// inside a loop whose length is not written out (`while`, `$(…)`, a glob, over 5 items) or whose body
+// sleeps, waitRemote: one inside a `while/until` loop }. `deep` also reads the scripts handed to
+// another machine for waits (`ssh h 'while …; sleep 5; done'` polls too).
 function shape(text, deep = true) {
   const inner = deep ? remoteScripts(text).map((t) => shape(t, false)) : [];
   const all = commands(text);
@@ -67,13 +71,29 @@ function shape(text, deep = true) {
   // Commands come flat in order: a loop opens at its `for/while/until` and closes at `done`.
   // A nested loop's header follows a keyword (`do for …`, `then while …`).
   const head = (w) => w.find((x) => !/^(\{|\(|!|time|do|then|else|elif)$/.test(x));
-  let depth = 0;
+  // `for x in a b c`: at most 5 items, none expanded when it runs (`$`, backtick, glob, brace).
+  const listed = (rest) => rest[1] === 'in' && rest.length > 2 && rest.length <= 7 &&
+    rest.slice(2).every((x) => !/[$`*?[{(]/.test(x));
+  const open = [];
   let loopRemote = false;
+  let longRemote = false;
+  let waitRemote = false;
+  const close = (l) => { if (l.remote && (!l.listed || l.sleeps)) longRemote = true; };
   all.forEach((w, k) => {
-    if (/^(for|while|until)$/.test(head(w) || '')) depth += 1;
-    if (depth > 0 && isRemote(progs[k])) loopRemote = true;
-    if (w[0] === 'done' && depth > 0) depth -= 1;
+    const h = head(w) || '';
+    if (/^(for|while|until)$/.test(h)) {
+      open.push({ kind: h, listed: h === 'for' && listed(w.slice(w.indexOf(h) + 1)), remote: false, sleeps: false });
+    }
+    if (open.length && isRemote(progs[k])) {
+      loopRemote = true;
+      if (open.some((l) => l.kind !== 'for')) waitRemote = true;
+      open.forEach((l) => { l.remote = true; });
+    }
+    if (open.length && progs[k][0] === 'sleep') open.forEach((l) => { l.sleeps = true; });
+    // `done<file` or `done>out` stays one word; a loop left open (a form not seen here) is judged at the end.
+    if (/^done(?:$|[<>|&;)])/.test(w[0]) && open.length) close(open.pop());
   });
+  open.forEach(close);
   const wait = loops.some((w) => w !== 'for') || inner.some((x) => x.wait) || own.some((x) => x.wait);
   const poll = (loops.some((w) => w !== 'for') && sleeps) || inner.some((x) => x.poll) || own.some((x) => x.poll);
   return {
@@ -83,6 +103,8 @@ function shape(text, deep = true) {
     sleeps: sleeps || inner.some((x) => x.sleeps) || own.some((x) => x.sleeps),
     remote: remote || own.some((x) => x.remote),
     loopRemote: loopRemote || own.some((x) => x.loopRemote),
+    longRemote: longRemote || own.some((x) => x.longRemote),
+    waitRemote: waitRemote || inner.some((x) => x.waitRemote) || own.some((x) => x.waitRemote),
   };
 }
 
@@ -164,11 +186,13 @@ process.stdin.on('end', () => {
       process.exit(2);
     }
     const shapes = sources.map((x) => shape(x));
-    if (!bg && shapes.some((x) => x.loopRemote)) {
+    if (!bg && shapes.some((x) => x.longRemote)) {
       once('watch-guard: this foreground loop makes remote calls one after another and can hold the session. ' +
-        'Make the remote reads one call (one query, one API list, one ssh with the loop inside), or run it in the background.');
+        'Make the remote reads one call (one query, one API list, one ssh with the loop inside), or run it in the background. ' +
+        'A `for` over up to 5 items written out, with no `sleep`, passes.');
     }
-    if (!shapes.some((x) => (bg ? x.wait || x.sleeps : x.poll))) process.exit(0);
+    // In the background, a loop waits when it sleeps or calls out each round; `while read` over input does not.
+    if (!shapes.some((x) => (bg ? x.poll || x.waitRemote || x.sleeps : x.poll))) process.exit(0);
     once(
       (bg ? 'watch-guard: background loops go through ~/.claude/scripts/watch.sh (see --help): '
         : 'watch-guard: a foreground `while/until … sleep` poll has no deadline of its own. ' +
