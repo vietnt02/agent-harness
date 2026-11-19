@@ -228,6 +228,33 @@ test('worker-start-receipt: each new dispatch gets its stall watch, ready to run
   assert.match(line, /--why-wait/);
   assert.match(line, /--checkpoint 3000/, 'one wake-up per 50 minutes at most, not every 10');
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'claude', 'scripts', 'worker-stall.cjs')), 'the script it names ships');
+  const { launchArgs } = require('../claude/hooks/worker-start-receipt.cjs');
+  const agy = launchArgs('orca orchestration worker-start --agent antigravity --model gemini-4-neon --effort high --spec-file s.md');
+  assert.match(watchLines(['ctx_0123abcd'], agy)[0], /worker-stall\.cjs --dispatch ctx_0123abcd --model gemini-4-neon --effort high"/);
+  assert.equal(launchArgs('orca orchestration worker-start --agent codex --model gpt-sol'), '', 'only agy prints the Gemini banner');
+});
+
+test('worker-stall: an agy worker whose banner shows another model than the one given ends the watch; a match is read once', () => {
+  const w = require('../claude/scripts/worker-stall.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-model-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
+    const show = () => ({ state: 'ready', workspace: `id::${dir}`, terminal: 'term_b471' });
+    const base = { show, newErrors: () => 0, stateDir: path.join(dir, 'state') };
+    const o = { dispatch: 'ctx_fccb', idle: 10, errors: 3, model: 'gemini-4-neon', effort: 'high' };
+    // The banner a reopened fix worker showed (launched without --model).
+    const hydro = '... Gemini 4 Hydrogen (High) ... Conversation compacted';
+    assert.equal(w.status(o, { ...base, readTerminal: () => hydro }), 'model-mismatch want=gemini-4-neon high got="Gemini 4 Hydrogen (High)" state=ready');
+    assert.match(w.status(o, { ...base, readTerminal: () => 'starting...' }), /^running/, 'no banner yet: judged on files as before');
+    assert.match(w.status(o, { ...base, readTerminal: () => { throw new Error('gone'); } }), /^running/, 'unreadable terminal: no judgement');
+    let reads = 0;
+    const neon = () => { reads++; return 'Gemini 4 Neon (High)'; };
+    assert.match(w.status(o, { ...base, readTerminal: neon }), /^running/);
+    assert.match(w.status(o, { ...base, readTerminal: neon }), /^running/);
+    assert.equal(reads, 1, 'a confirmed model is not read again');
+    assert.match(w.status({ ...o, dispatch: 'ctx_x', model: '' }, { ...base, readTerminal: () => hydro }), /^running/, 'no --model: no check');
+    assert.equal(w.status({ ...o, dispatch: 'ctx_y', effort: 'xhigh' }, { ...base, readTerminal: () => 'Gemini 4 Neon (High)' }).split(' ')[0], 'model-mismatch', 'the effort counts too');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('worker-stall: a worker waiting on its ask is running, not stale; a reply ends the wait', () => {
@@ -431,6 +458,56 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('ask-batch-guard: an ask after an answered ask of the same block, tools between, is held once (kaizen fixtures)', () => {
+  const { spacedAsk } = require('../claude/hooks/ask-batch-guard.cjs');
+  const user = (content) => ({ type: 'user', message: { role: 'user', content } });
+  const ask = (id) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'AskUserQuestion', input: {} }] } });
+  const answer = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'Your questions have been answered: "x"="Đăng (Recommended)". You can now continue with these answers in mind.' }]);
+  const tool = (id) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'gh pr comment' } }] } });
+  const result = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'ok' }]);
+  const done = user('──── From: TERM_781B (term_781b) (worker_done) ──── Subject: Review PR #488 xong');
+  // The review block of three PRs: each reviewer's worker_done woke the coordinator, which asked again.
+  const block = [user('check & review giúp tôi'), ask('a1'), answer('a1'), tool('t1'), result('t1'), done, tool('t2'), result('t2')];
+  assert.equal(spacedAsk(block), true, 'the second ask: a worker message is no user message');
+  assert.equal(spacedAsk([...block, ask('a2'), answer('a2'), tool('t3'), result('t3'), done]), true, 'the third ask too');
+  assert.equal(spacedAsk([user('check & review giúp tôi'), tool('t1'), result('t1')]), false, 'the first ask of a block');
+  assert.equal(spacedAsk([...block, user('ok, tiếp đi')]), false, 'right after the user types');
+  assert.equal(spacedAsk([user('x'), ask('a1'), answer('a1')]), false, 'back to back: no tool between');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-batch-'));
+  try {
+    const t = path.join(dir, 't.jsonl');
+    fs.writeFileSync(t, block.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: `s-${process.pid}-${Date.now()}`, transcript_path: t, tool_input: { questions: [{ question: 'Đăng comment trả #489?' }] } };
+    const held = hook('ask-batch-guard.cjs', call);
+    assert.equal(held.status, 2);
+    assert.match(held.stderr, /one ask a block.*last ask/);
+    assert.equal(hook('ask-batch-guard.cjs', call).status, 0, 'said once: the same ask again passes');
+    assert.equal(hook('ask-batch-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
+    assert.equal(hook('ask-batch-guard.cjs', { ...call, transcript_path: path.join(dir, 'none.jsonl') }).status, 0, 'fails open');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('turn-guard: a Cần bạn step a tool reaches is sent back once; a step only the user can do is not (kaizen fixtures)', () => {
+  const { doableStep } = require('../claude/hooks/turn-guard.cjs');
+  // Lines of three real reports that handed the user steps Claude then did itself in a minute.
+  assert.equal(doableStep('# Xong\n\n**Cần bạn:** mở POS shop 1942354734 và huỷ đơn 088f8m-0i-#1452 nếu chưa huỷ. Sau đó đóng issue [#486](https://github.com/o/r/issues/486).'), 'đóng issue');
+  assert.equal(doableStep('**Cần bạn:** trả lời Tân về mục 4: !920 đã merge.'), 'trả lời Tân');
+  assert.match(doableStep('**Cần bạn:**\n- comment lên mine_chapter#466 kết quả kiểm.'), /^comment lên mine_chapter#4/);
+  assert.equal(doableStep('**Cần bạn:** kiểm đơn #1452 trên POS đã huỷ chưa.'), 'kiểm');
+  // Steps no tool of the session reaches, and lines that are not a handoff.
+  assert.equal(doableStep('**Cần bạn:** bấm huỷ đơn trên giao diện POS (không có API ghi).'), null);
+  assert.equal(doableStep('**Cần bạn:** đăng nhập lại Lark bằng tài khoản công ty.'), null);
+  assert.equal(doableStep('**Cần bạn:** báo lỗi cho bộ phận kho khi họ gửi lại file.'), null, 'no named person');
+  assert.equal(doableStep('**Cần bạn:** đồng ý merge !67 không?'), null, 'a question in text is left to the rule');
+  assert.equal(doableStep('**Claude đã làm:** đóng issue #486 và báo Tân.'), null);
+  assert.equal(doableStep('**Cần bạn:** chọn người nhận, rồi Claude đóng issue `#486`.'), null, 'inline code cites');
+  const stop = (active, msg) => hook('turn-guard.cjs', { hook_event_name: 'Stop', stop_hook_active: active, last_assistant_message: msg });
+  const sent = stop(false, '# Xong\n\nĐã review 3 PR.\n\n**Cần bạn:** đóng issue #486.');
+  assert.equal(sent.status, 2);
+  assert.match(sent.stderr, /step a tool of yours reaches \("đóng issue"\).*AskUserQuestion/);
+  assert.equal(stop(true, '# Xong\n\n**Cần bạn:** đóng issue #486.').status, 0, 'once: the second stop goes through');
 });
 
 test('turn-guard: a step Claude says it takes is no leftover; one put off still is (kaizen fixtures)', () => {

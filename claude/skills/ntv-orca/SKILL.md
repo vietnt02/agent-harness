@@ -34,7 +34,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Spawn reviewer khi cần (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; worker sửa theo finding đã quyết. |
 | 7. Cổng, chạy thật | Đọc toàn bộ diff tới đúng SHA sẽ merge, chạy check của repo trên SHA đó, merge. Tự chạy lệnh ghi production thật, đọc lại đích. Sau deploy đọc thứ đang chạy trên production. | — |
-| 8. Báo cáo | Báo user đã kiểm gì, chưa kiểm gì; worker đã release thì gỡ worktree (§ 3). | `worker_done`: đã kiểm gì, chưa kiểm gì. |
+| 8. Báo cáo | Báo user đã kiểm gì, chưa kiểm gì, một lần cho cả khối (§ 3); worker đã release thì gỡ worktree (§ 3). | `worker_done`: đã kiểm gì, chưa kiểm gì. |
 
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
 coordinator trả lời từ thứ đang có, hoặc chạy **một** lệnh xác nhận một đích đã biết (một file, một
@@ -139,12 +139,14 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   - `agy gemini-4-neon high` khi việc có một trong hai dấu hiệu: (1) code mới hay sửa có trạng thái
     lưu giữa các lần chạy (watermark, sổ ghi, bản ghi dở), thử lại, hay ghi ra ngoài repo (Lark,
     issue, DB hay KV nơi khác đọc, API ngoài), cả vòng sửa của việc đó; (2) dời, tách, gộp hay bỏ
-    phần đang chạy của giao diện hay luồng dữ liệu (vòng sửa theo finding của việc này xét theo
-    dòng hydrogen).
-  - `agy gemini-4-hydrogen high` khi việc không có dấu hiệu nào ở trên và mọi phần của nó là: sửa mà
-    spec chỉ rõ từng chỗ và kết quả ở mỗi chỗ (vòng sửa theo finding, thiết kế đã duyệt tới mức
-    file); thêm mới không đổi hành vi phần đang chạy; docs; research.
-  - Việc không khớp dòng nào → neon: spec chưa chốt hết kết quả, worker phải tự suy ra.
+    phần đang chạy của giao diện hay luồng dữ liệu.
+  - `agy gemini-4-hydrogen high` chỉ cho việc làm trọn trong một lượt, không phải nén context: không
+    có dấu hiệu nào ở trên, spec chỉ rõ từng chỗ và kết quả ở mỗi chỗ, và đủ cả ba: chạm tối đa 3
+    file trong một module; không viết test hay mutation ngoài một test spec nêu sẵn; không dò code
+    ngoài các `file:dòng` spec đưa (đổi một giá trị, sửa docs, sửa 1–2 finding nhỏ).
+  - Còn lại → neon, kể cả vòng sửa theo finding chạm từ 4 file hay 2 module, cần test đỏ cho nhiều
+    ca, hay mutation; spec chưa chốt hết kết quả cũng neon. Vòng sửa không bao giờ hạ model của
+    builder gốc: việc gốc neon thì vòng sửa neon.
   - Dòng manifest của worker ghi model và dấu hiệu đã khớp (`w5-tach-trang (agy gemini-4-neon high ·
     dấu hiệu 2)`); không khớp dòng nào thì ghi vì sao.
 - **Builder trượt review hai vòng** trên cùng một thiết kế đã duyệt: hydrogen → giao lại neon; neon →
@@ -156,13 +158,18 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   commit + push mỗi nhóm việc ≤ 30 phút.
 - Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter. Slug: agy `agy models`;
   codex `~/.codex/models_cache.json`. Lỗi trích lại đúng chuỗi vừa gõ (`'luna'`) nghĩa là sai slug,
-  không phải model thiếu năng lực. Sau spawn, so `launch.effective` với `launch.requested`.
+  không phải model thiếu năng lực. Orca không ghi model của worker agy (`launch.requested`,
+  `launch.effective` đều null): model thật là banner trong terminal (`Gemini 4 Neon (High)`), lệnh
+  watch mà receipt in so banner đó với `--model` đã giao ở lần kiểm đầu thấy banner, lệch thì báo.
 
 ## 3. Trong lúc chạy
 
 - **Giao xong thì kết thúc lượt; Orca đánh thức** khi worker `worker_done`, hỏi, hay dừng không báo
   (`escalation`). Không chạy vòng poll hay script nào đọc `check`: process khác đọc là lấy mất tin.
-  Mỗi lần được đánh thức: chạy đúng lệnh `check` của lời nhắc, xử lý mọi tin. Riêng việc theo dõi treo:
+  Mỗi lần được đánh thức: chạy đúng lệnh `check` của lời nhắc, xử lý mọi tin. Báo và hỏi user một
+  lần cho cả khối (một AskUserQuestion kèm mọi bản nháp), khi không còn worker hay bước nào của khối
+  chạy được mà thiếu câu trả lời; mục gấp hay quyết định nghiệp vụ giữa khối cũng chờ tới lúc đó,
+  vì ask đang mở làm cả phiên đứng. Riêng việc theo dõi treo:
   `watch.sh` với `~/.claude/scripts/worker-stall.cjs` (receipt của `worker-start` in sẵn lệnh; nó không
   đọc `check`), vì worker lặp lỗi API hay đứng im thì Orca không đánh thức.
 - **Trả lời `ask` ngay.** Worker hỏi vì thiếu quyền hay credential → trả lời bằng đường đã ghi trong
@@ -172,7 +179,8 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   (thành Task mới). Việc định gửi bằng `send` phải xét lại **Chọn model** (§ 2) như một lần giao
   mới: khác loại task, hoặc làm task vượt mức § 2 cho model context ngắn → worker mới (ngoài
   manifest đã duyệt thì hỏi lại, § 2). Trước khi `send` cho worker đã `worker_done`, đọc
-  `worker-show --json`: `terminalState: released` → không `send` (Orca mở lại nó, in
+  `worker-show --json` của dispatch mới nhất trong chuỗi (follow-up giữ terminal, nên dispatch gốc
+  không báo released; `worker-list --json` theo `workspace`): `terminalState: released` → không `send` (Orca mở lại nó, in
   `delivery=reopened`, không kèm `--model`, `--effort`), giao bằng `worker-start --spec-file` (spec cũ,
   nội dung tin, câu kiểm hộp thư) kèm `--worktree path:` cũ, `--agent`, `--model`, `--effort` theo
   § 2; `send` đã in `delivery=reopened` → `worker-stop` dispatch mới đó rồi giao như vậy. Tin `send` tới

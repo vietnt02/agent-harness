@@ -16,6 +16,9 @@
  * - Stop: a final reply that voices a guess ("rất có thể", "có lẽ", "nghi") and hands the user a
  *   check ("bạn kiểm", "đăng xuất rồi đăng nhập lại") is sent back to run the reads that settle the
  *   guess first (CLAUDE.md § Verification: proactive in thinking, never hand me a read-only check).
+ * - Stop: a `**Cần bạn:**` step a tool of the session reaches (close, merge or comment on an issue/PR/MR,
+ *   answer or tell a named person, a check to read) is sent back once: the step is Claude's, a message
+ *   to a person goes in the block's ask (communication-style.md § Who acts: only a step no tool reaches).
  *   The Stop checks report together: after one send-back `stop_hook_active` skips them.
  * Fails open on any error.
  */
@@ -114,6 +117,34 @@ function handsCheck(prose) {
   return false;
 }
 
+// A step of `**Cần bạn:**` (its line and the list under it) a tool of the session reaches, or null: an
+// issue/PR/MR to close, merge, reopen or comment on; a named person to answer or tell; a check to read.
+const ISSUE_ACT = /(đóng|merge|reopen|mở\s+lại|comment|bình\s+luận)\s+(lên\s+|vào\s+)?(issue|PR|MR|pull|\[?[#!]\d|[\w.-]+(\/[\w.-]+)?[#!]\d)/i;
+const PERSON_ACT = /(trả\s+lời|báo|nhắn|gửi\s+tin|reply)\s+(cho\s+|lại\s+)?(anh\s+|chị\s+|em\s+)?\p{Lu}\p{Ll}+/u;
+const READ_ACT = /(^|[.;,]\s*|\b(rồi|sau\s+đó|và)\s+)(tự\s+)?(kiểm\s+tra|kiểm|check|xem\s+lại|xem)\s/i;
+function doableStep(text) {
+  const prose = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ')
+    .replace(/"[^"\n]*"|“[^”\n]*”/g, ' ');
+  const lines = prose.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/\*\*Cần bạn:?\*\*:?/);
+    if (!m) continue;
+    const steps = [lines[i].slice(m.index + m[0].length)];
+    for (let k = i + 1; k < lines.length && (ITEM.test(lines[k]) || !lines[k].trim()); k++) {
+      if (lines[k].trim()) steps.push(lines[k].replace(ITEM, ''));
+    }
+    for (const s of steps) {
+      if (s.trim().endsWith('?')) continue; // a question asked in text: left to the rule
+      for (const re of [ISSUE_ACT, PERSON_ACT, READ_ACT]) {
+        const hit = s.trim().match(re);
+        // A step Claude names as its own ("rồi Claude đóng issue …") is no handoff.
+        if (hit && !/\bclaude\s+(sẽ\s+|tự\s+)?$/i.test(s.trim().slice(0, hit.index))) return hit[0].trim();
+      }
+    }
+  }
+  return null;
+}
+
 // The heading and first paragraph: where the reply states its answer (communication-style.md § Format).
 function leadOf(prose) {
   const lines = prose.split('\n');
@@ -172,6 +203,12 @@ const parkedNote = (phrase) =>
   'only a business call or a tier-C step goes to the user, as one AskUserQuestion ' +
   '(CLAUDE.md § Mutation gate). If you were wrong about it, drop the line.';
 
+const doableNote = (phrase) =>
+  `the reply hands the user a step a tool of yours reaches ("${phrase}") in **Cần bạn:**. Do it now: ` +
+  'a read or an issue/PR step of this work is yours; a message to a real person is tier C, so it goes, ' +
+  'with its draft, in the block\'s one AskUserQuestion. Only a step no tool reaches stays in **Cần bạn:**, ' +
+  'and it is a question in that ask too (communication-style.md § Who acts).';
+
 const guessNote = (phrase) =>
   `the reply voices a guess ("${phrase}") and hands the user a check. Run every read you can (lists, ` +
   'memberships, audit logs, config) that confirms or refutes it, then answer with the cause and its ' +
@@ -193,8 +230,10 @@ if (require.main === module) {
         const reply = input.last_assistant_message;
         const parked = parkedProblem(reply);
         const guess = handedGuess(reply);
+        const doable = doableStep(reply);
         const notes = [isEnglishReply(reply) && ENGLISH_NOTE,
-          parked && !askedThisTurn(input.transcript_path) && parkedNote(parked), guess && guessNote(guess)]
+          parked && !askedThisTurn(input.transcript_path) && parkedNote(parked), guess && guessNote(guess),
+          doable && doableNote(doable)]
           .filter(Boolean);
         if (notes.length) {
           process.stderr.write(`turn-guard: ${notes.join(' Also: ')}\n`);
@@ -206,4 +245,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { isEnglishReply, parkedProblem, handedGuess, askedThisTurn };
+module.exports = { isEnglishReply, parkedProblem, handedGuess, doableStep, askedThisTurn };

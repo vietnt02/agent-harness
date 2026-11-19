@@ -14,7 +14,8 @@ Làm **builder** khi spec khớp dòng hydrogen ở `SKILL.md` § 2 **Chọn mod
 
 ## Giao gì / Không giao gì
 
-- **Giao:** Việc khớp dòng hydrogen ở `SKILL.md` § 2 (sửa mà spec chỉ rõ từng chỗ và kết quả, cả vòng sửa theo finding; thêm mới không đổi hành vi phần đang chạy; docs; research), chạy kiểm cơ học làm checker (`SKILL.md` § 4).
+- **Giao:** Việc khớp dòng hydrogen ở `SKILL.md` § 2: làm trọn trong một lượt, không phải nén context (tối đa 3 file trong một module, không thêm test hay mutation ngoài một test spec nêu, không dò code ngoài `file:dòng` spec đưa; như đổi một giá trị, sửa docs, sửa 1–2 finding nhỏ); chạy kiểm cơ học làm checker (`SKILL.md` § 4).
+- **Không giao:** Vòng sửa chạm từ 4 file, nhiều ca test đỏ hay mutation: một vòng như vậy đã phải nén context giữa chừng; giao neon.
 - **Điểm yếu:** Bám spec, gửi thiết kế trước khi sửa, nhưng vòng 1 vẫn lọt lỗi logic biên (timeout, rớt tin, nhân đôi) — sửa gọn trong một vòng. Vòng đầu dời, tách giao diện sót hệ quả (mất bộ lọc, mất dòng con, lệch số), nên loại việc đó giao neon; vòng sửa theo finding thì sạch. Không tự chặn side effect trong test (gọi `osascript` thật) nếu spec không đòi.
 
 ## Phải nói rõ trong spec

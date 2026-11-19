@@ -930,7 +930,7 @@ test('dispatch-split-guard: a claude worker id outside the bare aliases is caugh
 test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a released one, stop the dispatch Orca reopened and start the task again with its model', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded', released: true, worktree: 'wt1::/w' }, ctx_b3: { state: 'succeeded', released: false }, ctx_b4: { state: 'stopped', released: true, exited: true }, ctx_b5: { state: 'succeeded', released: true }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true }, ctx_e5: { state: 'ready', worktree: 'wt1::/w/My Repo/a::b' }, ctx_e6: { state: 'ready' } };
-  const lines = (c, out = '') => receipt.sendLines(c, out, (d) => states[d]);
+  const lines = (c, out = '') => receipt.sendLines(c, out, (d) => states[d], () => []);
   const stopped = (l) => /worker-stop --dispatch (ctx_[0-9a-f]+)/.exec(l)?.[1];
   const worktree = (l) => /--worktree '([^']*)'/.exec(l)?.[1];
   assert.match(lines('orca orchestration send --to dispatch:ctx_d4 --subject x')[0], /không tới/);
@@ -964,6 +964,26 @@ test('worker-start-receipt: a send to a running worker says the receipt is only 
   assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);
   assert.deepEqual(lines('echo "orca orchestration send --to dispatch:ctx_a1"', concise), []);
   assert.deepEqual(receipt.sendLines('orca orchestration send --to dispatch:ctx_zz', '', () => { throw new Error('x'); }), []);
+  // The real case: the addressed original finished; its follow-up took the terminal and released it, so the
+  // original shows no release. `| tail -1` dropped `delivery=`; Orca's reopened dispatch runs on the worktree
+  // in a new terminal. Ids from the run, paths shortened.
+  const wt = 'repo1::/w/order';
+  const orig = { ctx_f60e15000dd0: { state: 'succeeded', worktree: wt, terminal: 'term_7b4d' } };
+  const rows = [
+    { dispatchId: 'ctx_fccb20549c59', state: 'ready', terminal: 'term_b471', workspace: wt },
+    { dispatchId: 'ctx_9999', state: 'ready', terminal: 'term_c0', workspace: 'repo1::/w/review' },
+  ];
+  const send = 'orca orchestration send --to dispatch:ctx_f60e15000dd0 --subject "Vòng sửa" --body "x" 2>&1 | tail -1';
+  const next = "Next: Orca wakes you when workers report; end your turn when you're done.";
+  const hit = receipt.sendLines(send, next, (d) => orig[d], () => rows);
+  assert.equal(hit.length, 1, 'only the dispatch on the same worktree');
+  assert.equal(stopped(hit[0]), 'ctx_fccb20549c59');
+  assert.match(hit[0], /không có `delivery=`.*followUpOf.*worker-start --spec-file.*`--model`/);
+  assert.equal(worktree(hit[0]), 'path:/w/order');
+  const sameTerm = [{ dispatchId: 'ctx_a18cda8668db', state: 'ready', terminal: 'term_7b4d', workspace: wt }];
+  assert.deepEqual(receipt.sendLines(send, next, (d) => orig[d], () => sameTerm), [], 'a follow-up on the same terminal: delivered, not reopened');
+  assert.deepEqual(receipt.sendLines(send, 'delivery=follow_up followUpOf=ctx_f60e15000dd0 dispatchId=ctx_a18cda8668db', (d) => orig[d], () => rows), [], 'output shows the delivery: trusted');
+  assert.deepEqual(receipt.sendLines(send, next, (d) => orig[d], () => { throw new Error('x'); }), [], 'worker-list unreadable: silent');
 });
 
 

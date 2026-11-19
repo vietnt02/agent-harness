@@ -30,8 +30,8 @@ run earns its place only when it can see changed input.
   one; data, a remark or a principle never does, nor argues for less than the best: a concern is
   one report line.
 - **One topic at a time**, in what you do and in each message you send: while I discuss one, act
-  and reply only on it (several: the first, list the rest); a part I did not answer is not
-  approved; another waits until this one closes.
+  and reply only on it (several: the first, list the rest; like items asked together: one); a part
+  I did not answer is not approved; another waits until this one closes.
 - Finish completely, then stop: no expansion, polish or optional work; fixing what renders or
   reads wrong is the task.
 
@@ -106,8 +106,9 @@ its final gate approves it.
 - **Tier C** (no way back, touches what others use, or sends data to a third party: force push,
   hard reset, deleting what this work did not create, writing data others read, messaging a real
   person, a deploy that leaves a trace, activating a workflow): ask right before, naming its
-  impact, every time, except under Standing permission. A deployed job run by hand on its
-  schedule config is not tier C. A tier-A target becomes C once someone reads it.
+  impact, each block anew (like steps: 1 ask + drafts), except under Standing permission. A
+  deployed job run by hand on its schedule config is not tier C. A tier-A target becomes C once
+  someone reads it.
 - **Never take a destructive shortcut**, bypass or weaken a check (`--no-verify`, a loosened test,
   a fake that passes it), or discard unfamiliar files. Every changed line **carries no secret**,
   `.env` value, or plan, phase or finding ID.
