@@ -508,6 +508,7 @@ test('turn-guard: a Cần bạn step a tool reaches is sent back once; a step on
   assert.equal(doableStep('**Cần bạn:** chọn người nhận, rồi Claude đóng issue `#486`.'), null, 'inline code cites');
   assert.equal(doableStep('**Cần bạn:** đăng nhập lại Lark bằng tài khoản công ty, rồi báo Claude.'), null, 'reporting back to Claude');
   assert.equal(doableStep('**Cần bạn:**\n- báo Claude khi xong'), null);
+  assert.equal(doableStep('**Cần bạn:** trả lời AskUserQuestion bên dưới.'), null, 'the ask box is no person');
   assert.equal(doableStep('**Cần bạn:** gửi tin Zalo cho anh Dũng (Claude không có Zalo).'), null, 'a channel the session lacks');
   assert.equal(doableStep('**Cần bạn:** mở app trên điện thoại, kiểm thông báo đã tới chưa.'), null, 'a check on a device');
   assert.equal(doableStep('**Cần bạn:** quét mã QR trên điện thoại; xem màn hình có báo thành công.'), null);

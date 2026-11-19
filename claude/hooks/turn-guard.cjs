@@ -121,7 +121,7 @@ function handsCheck(prose) {
 // issue/PR/MR to close, merge, reopen or comment on; a named person to answer or tell; a check to read.
 const ISSUE_ACT = /(đóng|merge|reopen|mở\s+lại|comment|bình\s+luận)\s+(lên\s+|vào\s+)?((issue|PR|MR|pull)\b|\[?[#!]\d|[\w.-]+(\/[\w.-]+)?[#!]\d)/i;
 // The person is a name: never Claude itself (a step the user reports back) nor a word of the house style.
-const PERSON_ACT = /(trả\s+lời|báo|nhắn|reply)\s+(cho\s+|lại\s+)?(anh\s+|chị\s+|em\s+)?(?!(Claude|Ask|Cần)\b)\p{Lu}\p{Ll}+/u;
+const PERSON_ACT = /(trả\s+lời|báo|nhắn|reply)\s+(cho\s+|lại\s+)?(anh\s+|chị\s+|em\s+)?(?!Claude\b|Ask|Cần\b)\p{Lu}\p{Ll}+/u;
 // A check as the step's opening verb; one on a phone, a screen or an app is the user's own.
 const READ_ACT = /^(tự\s+)?(kiểm\s+tra|kiểm|check|xem\s+lại)\s/i;
 const DEVICE = /(điện\s+thoại|màn\s+hình|giao\s+diện|\bapp\b|ứng\s+dụng|trình\s+duyệt|browser)/i;

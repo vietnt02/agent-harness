@@ -2,7 +2,7 @@
 
 Personal overlay: it beats every rule in `~/.claude/rules/`; my `rules/mine/*` and
 `rules/agent-harness/*` decide wherever it is silent. Knowledge a repo never recorded
-(routes too: deploy, logs, DNS) goes into that repo's own PR.
+(routes too: deploy, logs, DNS) goes into its own PR.
 
 ## Who decides what
 
@@ -105,8 +105,8 @@ its final gate approves it.
   job run into tables this work created. Do it and report the link.
 - **Tier C** (no way back, touches what others use, or sends data to a third party: force push,
   hard reset, deleting what this work did not create, writing data others read, messaging a real
-  person, a deploy that leaves a trace, activating a workflow): ask once a block, right before
-  its first, naming each impact, drafts in it, except under Standing permission. A
+  person, a deploy that leaves a trace, activating a workflow): ask once a block, just before
+  the first such step, naming each impact, with drafts, except under Standing permission. A
   deployed job run by hand on its schedule config is not tier C. A tier-A target becomes C once
   someone reads it.
 - **Never take a destructive shortcut**, bypass or weaken a check (`--no-verify`, a loosened test,
