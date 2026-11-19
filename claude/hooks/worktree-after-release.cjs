@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * worktree-after-release.cjs - PostToolUse(Bash): after `orca orchestration worker-release`,
+ * worktree-after-release.cjs - PostToolUse(Bash): after `orca orchestration worker-release`, or a
+ * `worker-show` reporting `terminalState` released (Orca's own release after `worker_done`),
  * remind to remove the linked worktree the released worker ran in. Only prints the facts and the
  * command; `orca worktree rm` is asynchronous, so removal is checked later, not here.
  * When a dispatch the command names cannot be read, prints that instead of the reminder (a silent
@@ -75,7 +76,19 @@ function refused(dispatch, output, alone = true) {
   return null;
 }
 
-module.exports = { linkedWorktree, worktreeOf, describe, openReviews, refused };
+// The dispatches a command released, or showed released: a `worker-release` run, and a `worker-show`
+// run whose output says `terminalState` released (Orca releases a worker by itself after
+// `worker_done`, so the coordinator sees it there). Text naming one (a heredoc, a spec, an echo) is no run.
+function releasedIds(command, output) {
+  const shown = /\bterminalState(?:"\s*:\s*"|=)released\b/.test(output);
+  const ids = commands(command).map(program)
+    .filter(([cmd, sub, verb]) => cmd === 'orca' && sub === 'orchestration' &&
+      (verb === 'worker-release' || (verb === 'worker-show' && shown)))
+    .flatMap((w) => w.join(' ').match(/ctx_[0-9a-f]+/g) || []);
+  return [...new Set(ids)];
+}
+
+module.exports = { linkedWorktree, worktreeOf, describe, openReviews, refused, releasedIds };
 if (require.main !== module) return;
 
 let raw = '';
@@ -86,12 +99,8 @@ process.stdin.on('end', () => {
     const output = typeof res === 'string' ? res : `${res.stdout || ''}\n${res.stderr || ''}`;
     const command = input.command || '';
     if (tool !== 'Bash') process.exit(0);
-    // Only a release that runs: text naming one (a heredoc, a spec, an echo) is no release.
-    const released = commands(command).map(program)
-      .filter(([cmd, sub, verb]) => cmd === 'orca' && sub === 'orchestration' && verb === 'worker-release')
-      .flatMap((w) => w.join(' ').match(/ctx_[0-9a-f]+/g) || []);
     const notes = [];
-    const ids = [...new Set(released)];
+    const ids = releasedIds(command, output);
     const lines = ids
       .map((d) => {
         const no = refused(d, output, ids.length === 1);

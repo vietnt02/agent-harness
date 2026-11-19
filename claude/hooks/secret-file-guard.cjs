@@ -29,12 +29,18 @@
  * into `export`/`env` without `source`/`.`, an unquoted dotenv line that fails shell parsing, a key
  * fed by `<<<` to a filter inside `$(…)` that an echo prints, or an escaped backtick (`\``) around
  * a key in an echo, is not caught; this hook is a guardrail naming the risk on ordinary commands, never a wall.
+ * Secrets outside files: a command that prints process command lines or a container's config, where a
+ * secret passed as a flag (`--requirepass <pw>`) or an env value sits (`docker inspect` without
+ * `--format` or with one naming `.Config.Cmd|Env|Entrypoint`, `.Args`, `json .Config`, `{{json .}}`;
+ * `ps -o args|command|cmd`; `/proc/<pid>/cmdline|environ`), in the command, a script it runs or one it
+ * hands to ssh (lib/shell-words.cjs `scriptsRun`), is held once (lib/block-once.cjs) with how to print
+ * names only: the same command run again passes.
  * Fails open on an unexpected internal error of the guard itself (checker failure fails closed).
  */
 
 const os = require('os');
 const path = require('path');
-const { commands, program, dropHeredocs, assignments, closeParen, closeTick } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, dropHeredocs, assignments, closeParen, closeTick, scriptsRun } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
@@ -372,7 +378,59 @@ function decide(data, opts = {}) {
   );
 }
 
-module.exports = { decide, judge, printedSecrets };
+// What a simple command prints that can hold a secret passed on a command line or in the environment
+// (`docker inspect` of the config, `ps -o args`, `/proc/<pid>/cmdline`), or null.
+const INSPECT_FIELDS = /\.Config\.(Cmd|Env|Entrypoint)\b|\.Args\b|\.Config\s*\}\}|json\s+\.Config\b|\{\{\s*json\s+\.\s*\}\}|\{\{\s*\.\s*\}\}/;
+const DOCKER_VALUE = /^(-H|--host|-c|--context|--config|-l|--log-level)$/;
+function printsCommandLine(words) {
+  const w = program(words);
+  if (w[0] === 'docker') {
+    let i = 1;
+    while (i < w.length && w[i].startsWith('-')) i += DOCKER_VALUE.test(w[i]) ? 2 : 1;
+    const at = w[i] === 'inspect' ? i : /^(container|image)$/.test(w[i] || '') && w[i + 1] === 'inspect' ? i + 1 : -1;
+    if (at < 0) return null;
+    const rest = w.slice(at + 1);
+    const k = rest.findIndex((a) => a === '--format' || a === '-f' || /^--format=/.test(a) || /^-f./.test(a));
+    if (k < 0) return 'docker inspect (no --format)';
+    const a = rest[k];
+    const fmt = a.startsWith('--format=') ? a.slice(9) : a === '--format' || a === '-f' ? rest[k + 1] || '' : a.slice(2);
+    return INSPECT_FIELDS.test(fmt) ? `docker inspect --format '${fmt.slice(0, 60)}'` : null;
+  }
+  if (w[0] === 'ps') {
+    for (let i = 1; i < w.length; i++) {
+      const m = /^-[a-zA-Z]*[oO]$/.test(w[i]) ? w[i + 1] : (/^-[a-zA-Z]*[oO](.+)$/.exec(w[i]) || [])[1];
+      if (m && /(^|,)(args|command|cmd)(=|,|$)/.test(m)) return `ps -o ${m}`;
+    }
+    return null;
+  }
+  return w.slice(1).find((a) => /^\/proc\/[^/\s]+\/(cmdline|environ)$/.test(a)) || null;
+}
+function inspectionLeak(command, cwd) {
+  const scan = (text, depth) => {
+    for (const words of commands(text)) {
+      const hit = printsCommandLine(words);
+      if (hit) return hit;
+      const inner = innerScript(program(words));
+      if (inner !== null && depth < 3) {
+        const deeper = scan(inner, depth + 1);
+        if (deeper) return deeper;
+      }
+    }
+    return null;
+  };
+  for (const text of [command, ...scriptsRun(command, cwd || process.cwd()).map((s) => s.text)]) {
+    const hit = scan(text, 0);
+    if (hit) return hit;
+  }
+  return null;
+}
+const inspectionNote = (hit) =>
+  `secret-file-guard: \`${hit}\` can print a secret passed on a command line or in the environment ` +
+  '(`--requirepass <value>`, a `Config.Env` entry), and a filter by length misses short ones. Print names only: ' +
+  'flag names (`docker inspect <c> --format \'{{json .Config.Cmd}}\' | jq -c \'map(if startswith("-") then . else "<val>" end)\'`), ' +
+  'env keys (`--format \'{{range .Config.Env}}{{println (index (split . "=") 0)}}{{end}}\'`), or a hash (`| sha256sum | cut -c1-12`).';
+
+module.exports = { decide, judge, printedSecrets, inspectionLeak, inspectionNote };
 if (require.main !== module) return;
 
 try {
@@ -381,6 +439,15 @@ try {
   if (why) {
     process.stderr.write(`${why}\n`);
     process.exit(2);
+  }
+  const command = data.tool_name === 'Bash' ? String((data.tool_input || {}).command || '') : '';
+  const hit = command && inspectionLeak(command, data.cwd);
+  if (hit) {
+    const { firstTime, again } = require('./lib/block-once.cjs');
+    if (firstTime(data.session_id, 'secret-file-guard', command)) {
+      process.stderr.write(`${inspectionNote(hit)}${again(data.session_id)}\n`);
+      process.exit(2);
+    }
   }
 } catch {
   // fail open

@@ -820,6 +820,19 @@ test('worktree-after-release: reads the worktree from either worker-show shape, 
   }
 });
 
+test('worktree-after-release: a worker Orca released by itself is reminded when worker-show reports it', () => {
+  const ids = worktreeAfterRelease.releasedIds;
+  const show = 'orca orchestration worker-show --dispatch ctx_ab12 --json';
+  // Both shapes as Orca printed them for a released worker (--json and plain).
+  const json = '{"ok":true,"result":{"dispatchId":"ctx_ab12","state":"succeeded","terminalState":"released","workspace":"w::/x"}}';
+  const plain = 'dispatchId=ctx_ab12 state=succeeded stage=settled terminalState=released workspace=w::/x';
+  assert.deepEqual(ids(show, json), ['ctx_ab12']);
+  assert.deepEqual(ids('orca orchestration worker-show --dispatch ctx_ab12', plain), ['ctx_ab12']);
+  assert.deepEqual(ids('orca orchestration worker-release --dispatch ctx_ab12', ''), ['ctx_ab12']);
+  assert.deepEqual(ids(show, json.replace('"released"', '"retained"')), [], 'still open: no reminder');
+  assert.deepEqual(ids(`echo "${show}"`, json), [], 'text naming worker-show runs nothing');
+});
+
 test('worktree-after-release: a refused release keeps its worktree; dirty file names stay whole', () => {
   // Both texts as Orca printed them (plain and --json).
   const plain = 'error: dispatch_inactive: Dispatch ctx_0b4e4e10585e is ready; only a settled worker can release. Use worker-stop to cancel an active worker.';
@@ -1488,4 +1501,90 @@ test('session-servers-guard: a listener newer than a running background Bash cal
   // The hook run from inside a Bash call: its own shell is not a background call.
   const inside = [...rows.slice(0, 2), { pid: '70', ppid: '10', start: 800, args: `${snap} 'node hook.cjs'` }, { pid: '71', ppid: '70', start: 800, args: 'node hook.cjs' }];
   assert.equal(oldestBashTask(inside, '71'), null, 'own chain ignored');
+});
+
+test('tier-c-guard: wrangler --local writes local state only, so it may follow another step (kaizen fixture)', () => {
+  assert.ok(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production'));
+  assert.ok(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production --remote'));
+  assert.equal(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production --local --persist-to=.wrangler/state'), null);
+  assert.equal(tierCGuard.chainedProdWrite('ls && npx wrangler d1 execute DB --persist-to .wrangler/state --command "select 1"'), null);
+});
+
+test('tier-c-guard: a docker write over ssh is a production write; a subagent and a worker never make one (kaizen fixtures)', () => {
+  const hit = (c) => tierCGuard.remoteDockerWrite(c, os.tmpdir());
+  for (const c of [
+    "ssh vps_n8n 'docker run --rm -v x:/d alpine cat /d/acme.json'",
+    'ssh vps_airflow docker pull alpine',
+    "ssh -o ConnectTimeout=10 vps 'cd /srv/n8n && docker compose restart n8n'",
+    "ssh vps 'sudo docker rmi alpine:latest'",
+    "ssh vps \"bash -c 'docker -H unix:///run/d.sock container stop n8n'\"",
+    "S=/tmp/k; cat > $S/r.sh <<'EOF'\ndocker compose -f /srv/x.yml up -d\nEOF\nssh vps 'bash -s' < $S/r.sh",
+    "ssh vps bash -s <<'EOF'\ndocker restart n8n\nEOF",
+  ]) assert.ok(hit(c), c);
+  for (const c of [
+    "ssh vps_n8n 'docker ps --format {{.Names}}'",
+    "ssh vps_n8n 'docker exec n8n_new_setup-postgres-1 psql -c \"select 1\"'",
+    "ssh vps 'docker inspect x --format {{.State.Status}}'",
+    'docker run --rm alpine true',
+    "cat > /tmp/notes.md <<'EOF'\nssh vps docker pull alpine\nEOF",
+  ]) assert.equal(hit(c), null, c);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tierc-remote-'));
+  const t = path.join(tmp, 't.jsonl');
+  const user = (content) => JSON.stringify({ type: 'user', message: { role: 'user', content } });
+  const command = "ssh vps_n8n 'docker run --rm -v traefik:/d alpine cat /d/acme.json'";
+  const run = (lines, extra = {}, home) => {
+    fs.writeFileSync(t, lines.join('\n') + '\n');
+    return spawnSync(process.execPath, [path.join(HOOKS_DIR, 'tier-c-guard.cjs')], {
+      encoding: 'utf8',
+      env: home ? { ...process.env, HOME: home, USERPROFILE: home } : process.env,
+      input: JSON.stringify({ tool_name: 'Bash', session_id: 'tierc-remote', cwd: tmp, transcript_path: t, tool_input: { command }, ...extra }),
+    });
+  };
+  try {
+    const sub = run([user('đọc cấu hình vps_n8n')], { agent_id: 'a1' });
+    assert.equal(sub.status, 2, 'a subagent only reads');
+    assert.match(sub.stderr, /subagent/);
+    assert.match(sub.stderr, /docker exec/);
+    const worker = run([user('You are working inside Orca, a multi-agent IDE. You are a dispatched worker.\nTask: đọc cấu hình')]);
+    assert.equal(worker.status, 2, 'a worker never writes production');
+    assert.match(worker.stderr, /worker/);
+    assert.equal(run([user('làm đi')]).status, 0, 'the main session after an instruction goes on');
+    assert.equal(run([user('xoá image chưa?')]).status, 2, 'after a question it is asked');
+    const home = path.join(tmp, 'home');
+    const plans = path.join(home, '.claude', 'plans', tmp.replace(/[^A-Za-z0-9]/g, '-'));
+    fs.mkdirSync(plans, { recursive: true });
+    fs.writeFileSync(path.join(plans, 'p.md'), '---\nstatus: approved\nsession: tierc-remote\n---\n');
+    assert.equal(run([user('xoá image chưa?')], {}, home).status, 0, 'an approved plan of this session covers it');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('secret-file-guard: a command printing a container config or process command lines is held once (kaizen fixtures)', () => {
+  const { inspectionLeak } = require('../claude/hooks/secret-file-guard.cjs');
+  for (const c of [
+    "docker inspect x --format '{{json .Config.Cmd}}'",
+    'docker inspect x',
+    "S=/tmp/k; cat > $S/n8.sh <<'EOF'\necho \"## redis\"; docker inspect n8n_new_setup-redis-1 --format '{{.Config.Image}} {{json .Config.Cmd}}' </dev/null | mask\nEOF\nssh -o ConnectTimeout=10 vps_n8n 'bash -s' < $S/n8.sh 2>&1 | head -120",
+    "ssh vps 'docker container inspect r'",
+    'ps -eo pid,args',
+    'cat /proc/1/cmdline',
+    "tr '\\0' ' ' < /proc/42/environ",
+  ]) assert.ok(inspectionLeak(c, os.tmpdir()), c);
+  for (const c of [
+    "docker inspect x --format '{{.State.Status}}'",
+    "docker ps --format '{{.Names}}'",
+    'ps -o pid= -p 1',
+    'ps aux',
+    "cat > /tmp/notes.md <<'EOF'\ndocker inspect x\nEOF",
+  ]) assert.equal(inspectionLeak(c, os.tmpdir()), null, c);
+  const session = `sfg-inspect-${process.pid}-${Date.now()}`;
+  const run = () => spawnSync(process.execPath, [path.join(HOOKS_DIR, 'secret-file-guard.cjs')], {
+    encoding: 'utf8', input: JSON.stringify({ tool_name: 'Bash', session_id: session, cwd: os.tmpdir(), tool_input: { command: 'docker inspect n8n-redis' } }),
+  });
+  const first = run();
+  assert.equal(first.status, 2);
+  assert.match(first.stderr, /names only/);
+  assert.equal(run().status, 0, 'said once: the same command run again passes');
 });

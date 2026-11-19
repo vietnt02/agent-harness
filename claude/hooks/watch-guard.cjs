@@ -8,8 +8,8 @@
  * - Blocks once with a reminder (lib/block-once.cjs; the same command run again passes): a
  *   foreground loop of this shell around remote calls (ssh, docker exec, gh/glab api, airflow), a
  *   foreground `while/until … sleep` poll, a background loop not through ~/.claude/scripts/watch.sh,
- *   and a background watch.sh whose `--checkpoint` outlives the Bash `timeout` (default 1800000 ms),
- *   which would kill the watcher before it reports.
+ *   and a background watch.sh whose first report (the sooner of `--deadline` and `--checkpoint`)
+ *   outlives the Bash `timeout` (default 1800000 ms), which would kill the watcher before it reports.
  * An omitted foreground timeout is the harness default (120000 ms) and passes. Script files the
  * command runs are read the same way. `# watch-exempt: <reason>` lets a legitimate loop through.
  * Fails open on unreadable input.
@@ -137,11 +137,22 @@ process.stdin.on('end', () => {
         process.exit(2);
       }
       const limit = Number(input.timeout) || BG_TIMEOUT_MS;
-      const checkpoint = Math.max(...runs.map((args) => Number((/--checkpoint[ =](\d+)/.exec(args) || [])[1] || 600)));
-      const want = Math.min(checkpoint * 1000 + 300000, MAX_TIMEOUT_MS);
-      if (bg && checkpoint * 1000 + 60000 > limit && want > limit) {
-        once(`watch-guard: --checkpoint ${checkpoint} s outlives this call's timeout (${limit} ms): the harness ` +
-          `would stop the watcher before it reports. Pass \`timeout: ${want}\` with run_in_background.`);
+      // A watcher reports at the sooner of its --deadline (TIMEOUT) and its --checkpoint (default 600 s).
+      const secs = (d) => {
+        const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(d || '');
+        return d && m ? Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0) : null;
+      };
+      const reportsAt = (args) => {
+        const checkpoint = Number((/--checkpoint[ =](\d+)/.exec(args) || [])[1] || 600);
+        const deadline = secs((/--deadline[ =](\S+)/.exec(args) || [])[1]);
+        return deadline ? Math.min(checkpoint, deadline) : checkpoint;
+      };
+      const wake = Math.max(...runs.map(reportsAt));
+      const want = Math.min(wake * 1000 + 300000, MAX_TIMEOUT_MS);
+      if (bg && wake * 1000 + 60000 > limit && want > limit) {
+        once(`watch-guard: the watcher first reports after ${wake} s (the sooner of --deadline and --checkpoint), ` +
+          `past this call's timeout (${limit} ms): the harness would stop it before it reports. ` +
+          `Pass \`timeout: ${want}\` with run_in_background.`);
       }
       process.exit(0);
     }

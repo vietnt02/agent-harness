@@ -409,3 +409,62 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('turn-guard: a step Claude says it takes is no leftover; one put off still is (kaizen fixtures)', () => {
+  const { parkedProblem } = require('../claude/hooks/turn-guard.cjs');
+  assert.equal(parkedProblem('Claude đã nhắn w11 và w12 dừng việc và gửi báo cáo phần đã làm được. Khi cả hai báo xong, ' +
+    'hoặc hết 6 phút, Claude sẽ dừng hẳn hai worker, tắt server còn sót, gỡ các worktree sạch rồi gửi báo cáo cuối.'), null);
+  assert.equal(parkedProblem('- Sẽ gỡ worktree còn sót sau khi worker release.'), null);
+  assert.ok(parkedProblem('Còn sót 2 file chưa sửa.'));
+  assert.ok(parkedProblem('Claude sẽ để phần còn sót cho phiên sau.'));
+  assert.ok(parkedProblem('Bạn sẽ thấy còn sót 2 file.'), 'only Claude\'s own step is skipped');
+});
+
+test('watch-guard: a watcher reports at the sooner of its deadline and checkpoint, so a short deadline needs no long timeout (kaizen fixture)', () => {
+  const s = sid('wg-dl');
+  const run = (input) => hook('watch-guard.cjs', { session_id: s, cwd: os.tmpdir(), tool_name: 'Bash', tool_input: input });
+  const w = '~/.claude/scripts/watch.sh --check "x" --ok done --wait running --deadline 6m --why-wait "w" --every 30 --checkpoint 3000';
+  assert.equal(run({ command: w, run_in_background: true, timeout: 420000 }).status, 0);
+  const short = run({ command: w, run_in_background: true, timeout: 300000 });
+  assert.equal(short.status, 2);
+  assert.match(short.stderr, /timeout: 660000/);
+});
+
+test('worker-stall: an idle worker names the process holding its worktree, never the agent or its shell (kaizen fixture)', () => {
+  const w = require('../claude/scripts/worker-stall.cjs');
+  const rows = [
+    { pid: '10', etime: '40:00', args: '/opt/agy/bin/agy --model gemini-4-hydrogen' },
+    { pid: '11', etime: '39:58', args: '-zsh' },
+    { pid: '12', etime: '18:05', args: 'npm exec tsx scripts/sign.ts' },
+    { pid: '13', etime: '02:00', args: 'node /x/node_modules/vite/bin/vite.js' },
+  ];
+  assert.equal(w.heldBy('/wt', () => rows), ' holding=npm 18m pid=12');
+  assert.equal(w.heldBy('/wt', () => { throw new Error('no lsof'); }), '');
+  assert.equal(w.minutesOf('1-02:03:04'), 1440 + 120 + 3);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stall-held-'));
+  try {
+    const line = w.status({ dispatch: 'ctx_held', idle: 10, errors: 3, askMax: 60 }, {
+      show: () => ({ state: 'running', workspace: `wt1::${dir}` }),
+      newErrors: () => 0,
+      waitingAsk: () => false,
+      heldBy: () => ' holding=npm 18m pid=12',
+      now: Date.now() + 3600000,
+    });
+    assert.equal(line, 'stale idle>10m holding=npm 18m pid=12 state=running');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('worker-stall: heldBy finds a real process by its working directory', { skip: spawnSync('lsof', ['-v']).error && 'no lsof' }, async () => {
+  const w = require('../claude/scripts/worker-stall.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stall-real-'));
+  const child = require('child_process').spawn('sleep', ['30'], { cwd: dir, stdio: 'ignore' });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    assert.match(w.heldBy(dir), /^ holding=sleep \d+m pid=\d+$/);
+  } finally {
+    child.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

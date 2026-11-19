@@ -14,13 +14,20 @@
  * 2. A production write (`cf … update|create|delete…`, `wrangler deploy`, `gh pr merge`, `glab mr
  *    merge`) after another step in the same call is always blocked: `a | tail && cf …` runs the
  *    write even when `a` failed (a pipe returns its last command's status), so it runs alone.
+ *    `wrangler … --local` (or `--persist-to`) writes local state only, so it is no production write.
+ * 3. A docker write on another host (`ssh <host> … docker run|pull|rm|rmi|stop|restart|kill|start|create`,
+ *    `docker compose up|down|restart|stop|rm|pull|…`), in the ssh command, a heredoc or a script fed
+ *    to it (lib/shell-words.cjs `scriptsRun`), changes that host: a subagent (it only reads) and an Orca
+ *    worker (its manifest forbids production writes) are always blocked; the main session is gated
+ *    like check 1. `docker run --rm` still pulls an image and mounts volumes; a file in a volume is
+ *    read with `docker exec` or from the volume's path on the host.
  * Fails open when the transcript cannot be read.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DECISION_RE, isQuestion, promptText } = require('./lib/user-intent.cjs');
-const { commands, program, innerScript, assignments } = require('./lib/shell-words.cjs');
+const { DECISION_RE, isQuestion, promptText, dispatchedWorker } = require('./lib/user-intent.cjs');
+const { commands, program, innerScript, assignments, scriptsRun } = require('./lib/shell-words.cjs');
 
 const TAIL_BYTES = 1024 * 1024;
 const POST_INTERRUPT_PROMPTS = 3;
@@ -53,6 +60,7 @@ function prodWrite(words) {
     cmd = String(cmd || '').replace(/(.)@.*$/, '$1');
   }
   const verbs = verbsOf(args);
+  if (cmd === 'wrangler' && args.some((a) => a === '--local' || /^--persist-to(=|$)/.test(a))) return false;
   if (PROD_VERBS[cmd]) return verbs.some((w) => PROD_VERBS[cmd].test(w));
   return (cmd === 'gh' && verbs[0] === 'pr' && verbs[1] === 'merge') || (cmd === 'glab' && verbs[0] === 'mr' && verbs[1] === 'merge');
 }
@@ -100,6 +108,57 @@ function scanScope(all, scope) {
   }
   return null;
 }
+
+// The docker write a simple command makes (`docker pull`, `docker compose up`), or null. Global
+// flags with a value (`-H host`, `--context x`, `-f file`) are skipped before the verb.
+const DOCKER_WRITE = /^(run|pull|rm|rmi|stop|restart|kill|start|create)$/;
+const COMPOSE_WRITE = /^(up|down|restart|stop|rm|pull|start|kill|create|run)$/;
+const DOCKER_VALUE = /^(-H|--host|-c|--context|--config|-l|--log-level)$/;
+const COMPOSE_VALUE = /^(-f|--file|-p|--project-name|--project-directory|--env-file|--profile|--ansi|--parallel|--progress)$/;
+function verbAt(words, from, valueFlag) {
+  let i = from;
+  while (i < words.length && words[i].startsWith('-')) i += valueFlag.test(words[i]) ? 2 : 1;
+  return i;
+}
+function dockerWrite(words) {
+  const w = program(words);
+  if (w[0] === 'docker-compose') {
+    const v = w[verbAt(w, 1, COMPOSE_VALUE)] || '';
+    return COMPOSE_WRITE.test(v) ? `docker-compose ${v}` : null;
+  }
+  if (w[0] !== 'docker') return null;
+  const i = verbAt(w, 1, DOCKER_VALUE);
+  const v = w[i] || '';
+  if (v === 'compose') {
+    const c = w[verbAt(w, i + 1, COMPOSE_VALUE)] || '';
+    return COMPOSE_WRITE.test(c) ? `docker compose ${c}` : null;
+  }
+  if (v === 'container' || v === 'image') return DOCKER_WRITE.test(w[i + 1] || '') ? `docker ${v} ${w[i + 1]}` : null;
+  return DOCKER_WRITE.test(v) ? `docker ${v}` : null;
+}
+function dockerWriteIn(text, depth = 0) {
+  for (const words of commands(text)) {
+    const hit = dockerWrite(words);
+    if (hit) return hit;
+    const inner = innerScript(program(words));
+    if (inner !== null && depth < 3) {
+      const deeper = dockerWriteIn(inner, depth + 1);
+      if (deeper) return deeper;
+    }
+  }
+  return null;
+}
+// `{ host, hit }` for the first docker write the command runs on another host over ssh, or null.
+function remoteDockerWrite(command, cwd) {
+  for (const s of scriptsRun(command, cwd || process.cwd())) {
+    if (!s.remote) continue;
+    const hit = dockerWriteIn(s.text);
+    if (hit) return { host: s.remote, hit };
+  }
+  return null;
+}
+const READ_INSTEAD = 'To read a file in a volume: `docker exec <running container> cat <path>`, or the volume\'s ' +
+  'path on the host (`docker volume inspect -f \'{{.Mountpoint}}\' <volume>`); never pull an image to read one.';
 
 function tailRecords(file) {
   const fd = fs.openSync(file, 'r');
@@ -164,7 +223,7 @@ function approvedPlan(sessionId, cwd) {
   return false;
 }
 
-module.exports = { chainedProdWrite, latestHuman };
+module.exports = { chainedProdWrite, latestHuman, remoteDockerWrite, READ_INSTEAD };
 if (require.main !== module) return;
 
 let input = '';
@@ -173,7 +232,18 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(input);
     const raw = String((data.tool_input || {}).command || '');
-    if (data.tool_name !== 'Bash' || data.agent_id) process.exit(0);
+    if (data.tool_name !== 'Bash') process.exit(0);
+    const remote = remoteDockerWrite(raw, data.cwd);
+    const remoteText = remote && `ssh ${remote.host} … ${remote.hit}`;
+    const refuse = (who) => {
+      process.stderr.write(`tier-c-guard: \`${remoteText}\` changes ${remote.host}: a production write, which ${who}. ${READ_INSTEAD}\n`);
+      process.exit(2);
+    };
+    if (remote && data.agent_id) refuse('a subagent never makes (it only reads, CLAUDE.md § Delegation); report what you need read');
+    if (data.agent_id) process.exit(0);
+    if (remote && data.transcript_path && dispatchedWorker(data.transcript_path)) {
+      refuse('a worker never makes (its manifest); ask the coordinator');
+    }
     const chained = chainedProdWrite(raw);
     if (chained) {
       process.stderr.write(
@@ -184,7 +254,8 @@ process.stdin.on('end', () => {
       process.exit(2);
     }
     const command = dropHeredocs(raw);
-    if (!TIER_C.test(command)) process.exit(0);
+    const tierC = TIER_C.exec(command);
+    if (!tierC && !remote) process.exit(0);
     if (data.permission_mode === 'bypassPermissions' || !data.transcript_path) process.exit(0);
     const { prompt, askAnswered, sinceInterrupt } = latestHuman(tailRecords(data.transcript_path));
     if (prompt === null || askAnswered || /<command-name>/.test(prompt)) process.exit(0);
@@ -195,9 +266,10 @@ process.stdin.on('end', () => {
     if (!asking && !afterInterrupt) process.exit(0);
     const quote = prompt.replace(/\s+/g, ' ').slice(0, 160);
     process.stderr.write(
-      `tier-c-guard: "${TIER_C.exec(command)[0]}" is tier C, but the user's latest words ("${quote}") ` +
+      `tier-c-guard: "${tierC ? tierC[0] : remoteText}" is tier C, but the user's latest words ("${quote}") ` +
         (asking ? 'are a question, not a go-ahead. ' : 'come right after an interrupt. ') +
-        'Answer the question first, say in one line what you would run, and ask (CLAUDE.md § Mutation gate).\n'
+        'Answer the question first, say in one line what you would run, and ask (CLAUDE.md § Mutation gate).' +
+        (tierC ? '' : ` ${READ_INSTEAD}`) + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open */ }

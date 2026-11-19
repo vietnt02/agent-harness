@@ -86,4 +86,13 @@ function userTexts(transcript, maxBytes = Infinity) {
   return out;
 }
 
-module.exports = { DECISION_RE, isQuestion, promptText, userTexts, ORCA_MESSAGE };
+// True when the session is an Orca dispatched worker: Orca opens a worker's conversation with this
+// preamble (`You are working inside Orca, a multi-agent IDE. You are a dispatched worker.`), so its
+// first user prompt says so. Reads only the head of the transcript.
+const WORKER_PREAMBLE = /^You are working inside Orca, a multi-agent IDE\.\s+You are a dispatched worker\./;
+function dispatchedWorker(transcript) {
+  const first = userTexts(transcript, 256 * 1024)[0];
+  return Boolean(first && WORKER_PREAMBLE.test(first));
+}
+
+module.exports = { DECISION_RE, isQuestion, promptText, userTexts, ORCA_MESSAGE, dispatchedWorker };

@@ -27,7 +27,9 @@ the loop this stops.
    - a serious break no hook stops yet: a secret printed, a write to production or to data others
      read, a tier-C action done wrong; its `## Hướng kaizen` is that hook, never a sentence;
    - a rule sentence two fair readings of which lead to two different actions; the fix rewords
-     that sentence, never adds one.
+     that sentence, never adds one;
+   - a decision of Viet's that changes the harness: a rule, skill or default now gives a step he
+     overruled (its file takes the decision sections, step 3).
    Anything else is no file: a command shape a hook missed (a hook catches the common path,
    never every route; only the permission mode is a wall), a clear rule broken without such
    harm, Viet's intent misread (both
@@ -35,15 +37,22 @@ the loop this stops.
    prompt, tool descriptions) that no rule file repeats, whatever its consequence: Viet cannot
    change them.
 3. Per failure pattern, `ls ~/Desktop/kaizen-*`: a file already has it → add a `## Lần lặp`
-   entry there. Otherwise write `~/Desktop/kaizen-<yymmdd>-<slug>.md` (Vietnamese):
+   entry there. Otherwise write `~/Desktop/kaizen-<yymmdd>-<slug>.md` (Vietnamese), whole in
+   itself: it never points to a plan, a session note or a session's temp file, which the kaizen
+   session never opens:
    - `# <one-line title>`, then `Phiên: <task> (session <id>)`.
    - `## Chuyện đã xảy ra`: timed steps, Viet's words quoted, and what it cost him (time, rework,
      a decision made on a wrong answer). A secret the transcript shows is written `[redacted]`.
    - `## Rule đã phạm`: the exact sentence and its file, or "lỗi của harness".
    - `## Mẫu lỗi chung`: the mechanism, and why no check caught it.
-   - `## Hướng kaizen`: each fix and the file it belongs in. A fix works unremembered (hook,
-     script, safe default, a `knowledge/` fact) or rewords the ambiguous sentence; "be more
-     careful" fixes nothing.
+   - `## Hướng kaizen`: each fix and every `file:dòng` a `grep` of its concept finds in the target
+     repo. A fix works unremembered (hook, script, safe default, a `knowledge/` fact) or rewords
+     the ambiguous sentence; "be more careful" fixes nothing.
+   A decision of Viet's (step 2) takes these sections after `Phiên:` instead: `## Quyết định` (his
+   words verbatim, the time, the question asked with its options), `## Căn cứ` (the data and
+   reasons, copied in), `## Mọi chỗ phải sửa` (the `grep` of the changed concept in the target
+   repo and every line it prints, each with its fix or why it stays), `## Câu chưa chốt` (what the
+   decision leaves open).
    The final report says how many files were written, or that the transcript held none.
 4. Never offer to apply a kaizen; Viet opens a session for that. A harness defect met during other
    work gets no fix, PR or ask to open one in that session.

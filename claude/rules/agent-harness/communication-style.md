@@ -8,9 +8,9 @@
   what I see or lose, checked against what consumes it.
 - My message is answered before anything else changes; a question I type in an ask: only its
   answer that turn. Before the first tool call, one sentence on what's next; then only a discovery,
-  blocker or new direction. The answer is the turn's last text, after all tool calls, and in its
-  AskUserQuestion if any. Questions to me (this topic, no approval covers it), yes/no too, go in
-  one AskUserQuestion, each standing alone; `**Cần bạn:**` is only my step outside this chat.
+  blocker or new direction. The answer is the turn's last text, after all tool calls, or just before its
+  ask, then only what changed. Questions to me (this topic, no approval covers it), yes/no
+  too, go in one ask, each standing alone; `**Cần bạn:**` is only my step outside this chat.
 - One bullet per point, in an ask's question too, a complete clause each; a table when items
   share attributes (≤4 cols). Detailing one item of a sent list: send it, offer the full version in a
   line. A list holds every item it announced.

@@ -226,4 +226,91 @@ function expandVars(word, vars) {
   return /[$`]/.test(out) ? null : out;
 }
 
-module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick };
+// Scripts a command hands to a shell beyond its own words, each `{ remote, text }`: `remote` is the
+// ssh host the text runs on, null for a local shell. Read: the remote command of `ssh [opts] host
+// <cmd…>`; for an ssh whose remote side reads its stdin (no command, or a shell), a heredoc on the
+// ssh line and a file fed with `<`; a file run as `bash <file>` or fed to a local shell with `<`. A
+// file's text comes from a heredoc this command writes to it (`cat > f <<'EOF'`, `tee f <<EOF`), else
+// from disk (under 200 kB). `bash -c '<s>'` and a heredoc fed to a local shell are this command's own
+// words already (innerScript, commands).
+const SSH_VALUE = /^-[BbcDEeFIiJLlmOoPpQRSWw]$/;
+const SHELL = /^(ba|z|da|k)?sh$/;
+function readSmall(file) {
+  const fs = require('fs');
+  try { return fs.statSync(file).size < 200000 ? fs.readFileSync(file, 'utf8') : null; } catch (_) { return null; }
+}
+function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
+  const path = require('path');
+  const home = require('os').homedir();
+  const raw = String(command || '').replace(/\\\r?\n/g, ' ');
+  const all = commands(raw);
+  const vars = {};
+  for (const words of all) {
+    for (const [k, v] of assignments(words) || []) { const e = expandVars(v, vars); if (e !== null) vars[k] = e; }
+  }
+  const resolve = (w) => {
+    const e = expandVars(String(w || '').replace(/^~(?=\/|$)/, home), vars);
+    return e ? path.resolve(cwd, e) : null;
+  };
+  const docs = [...raw.matchAll(HEREDOC)].map((m) => ({
+    before: raw.slice(raw.lastIndexOf('\n', m.index - 1) + 1, m.index),
+    after: m[3],
+    body: m[0].slice(m[0].indexOf('\n') + 1, m[0].lastIndexOf('\n')),
+  }));
+  const written = {};
+  for (const d of docs) {
+    const t = /(?:^|[\s;&|(])(?:cat\b[^\n<>]*>>?\s*|tee\s+(?:-a\s+)?)([^\s<>;&|()]+)\s*$/.exec(d.before) ||
+      (/(?:^|[\s;&|(])cat\s*$/.test(d.before) && /^\s*>>?\s*([^\s<>;&|()]+)/.exec(d.after));
+    const f = t && resolve(t[1]);
+    if (f) written[f] = d.body;
+  }
+  const fileText = (w) => {
+    const f = resolve(w);
+    if (!f) return null;
+    return Object.hasOwn(written, f) ? written[f] : read(f);
+  };
+  // A command's words split into operands and the file its stdin reads (`<f`, `< f`); output
+  // redirections and a heredoc marker are dropped.
+  const operands = (words) => {
+    const out = [];
+    let stdin = null;
+    for (let k = 0; k < words.length; k++) {
+      const x = words[k];
+      if (/^\d*<</.test(x)) continue;
+      else if (/^\d*<$/.test(x)) stdin = words[++k] || null;
+      else if (/^\d*<[^<>&]/.test(x)) stdin = x.replace(/^\d*</, '');
+      else if (/^(\d*>>?|&>>?)$/.test(x)) k++;
+      else if (!/^(\d*>>?|&>>?|\d*>&)/.test(x)) out.push(x);
+    }
+    return { out, stdin };
+  };
+  const scripts = [];
+  const add = (remote, text) => { if (text && !scripts.some((s) => s.remote === remote && s.text === text)) scripts.push({ remote, text }); };
+  for (const words of all) {
+    const w = program(words);
+    if (w[0] === 'ssh') {
+      let i = 1;
+      for (; i < w.length && w[i].startsWith('-') && w[i] !== '--'; i++) if (SSH_VALUE.test(w[i])) i++;
+      if (w[i] === '--') i++;
+      const host = w[i];
+      if (!host || /^\d*[<>]/.test(host)) continue;
+      const { out, stdin } = operands(w.slice(i + 1));
+      const text = out.join(' ');
+      add(host, text);
+      const first = text ? program(commands(text)[0] || []) : [];
+      if (text && !(SHELL.test(first[0] || '') && innerScript(first) === null)) continue;
+      if (stdin) add(host, fileText(stdin));
+      // A heredoc on this ssh line (`ssh h bash -s <<EOF` has its body inlined by dropHeredocs, so the
+      // line is matched in the raw text).
+      const onLine = new RegExp(`(^|[\\s;&|(])ssh\\b[^\\n]*\\s${host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+      for (const d of docs) if (onLine.test(d.before)) add(host, d.body);
+    } else if (SHELL.test(w[0] || '') && innerScript(w) === null) {
+      const { out, stdin } = operands(w.slice(1));
+      const file = out.find((a) => !a.startsWith('-'));
+      add(null, file ? fileText(file) : stdin ? fileText(stdin) : null);
+    }
+  }
+  return scripts;
+}
+
+module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick, scriptsRun };

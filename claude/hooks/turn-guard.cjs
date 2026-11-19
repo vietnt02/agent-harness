@@ -52,8 +52,8 @@ const ASK = /\*\*Cần bạn:?\*\*:?/;
 // The phrase naming a problem the reply leaves behind, or null. Judged per line, sentence by
 // sentence: a sentence that names a problem needs a PR/MR/Issue ref in itself or the next sentence
 // of that line, unless the reply hands it to the user in a **Cần bạn:** line (or the turn asked: main). Code blocks never count;
-// inline code and quotes cite, so they name nothing; a question, a negation ("không … còn sót")
-// or a condition ("… lệch thì …") is not a report.
+// inline code and quotes cite, so they name nothing; a question, a negation ("không … còn sót"),
+// a condition ("… lệch thì …") or a step Claude says it takes ("Claude sẽ tắt server còn sót") is not a report.
 function parkedProblem(text) {
   const lines = String(text || '').replace(/```[\s\S]*?```/g, ' ').split('\n');
   const prose = (l) => l.replace(/`[^`]*`/g, ' ').replace(/"[^"\n]*"|“[^”\n]*”/g, ' ');
@@ -69,6 +69,10 @@ function parkedProblem(text) {
       const after = p.slice(m.index + m[0].length);
       // A negation or a condition ("nếu doc lệch", "doc lệch thì sửa") states a rule, not a leftover.
       if (/(không|nếu|khi|gặp)\s+(\S+\s+){0,3}$/i.test(before) || /^\s*thì(\s|[,.]|$)/i.test(after)) continue;
+      // A step Claude says it takes itself ("Claude sẽ … tắt server còn sót", a sentence opening
+      // "Sẽ gỡ …") is its own next step, not a leftover; one put off ("cho phiên sau") still is.
+      if (/(^\s*(?:[-*]\s+|\d+[.)]\s+)?(?:\*\*)?|\bclaude\s+)sẽ\s/i.test(before) &&
+        !/(để\s+lại|phiên\s+sau|lần\s+sau|hôm\s+sau|tuần\s+sau|sau\s+này)/i.test(p)) continue;
       // A label naming a kind of problem ("Tài liệu lệch thực tế: …" opening a line or a table cell)
       // defines it, it reports none.
       const cell = before.slice(before.lastIndexOf('|') + 1);

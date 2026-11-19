@@ -100,9 +100,9 @@ its final gate approves it.
   production once green, wrong or loading → revert first. Something (a send; quota or
   pay-per-query spent; data others read written; a schedule switched on; data exposed) or unsure:
   it **leaves a trace**, tier C.
-- **Tier A**, part of every block whose change lives in a repo: push a feature branch, open a
-  PR, a revertible deploy, merging this work's PR that deploys nothing, a job run into tables this
-  work created. Do it and report the link.
+- **Tier A**, part of every block whose change lives in a repo: open or link its issue, push a
+  feature branch, open a PR, a revertible deploy, merging this work's PR that deploys nothing, a
+  job run into tables this work created. Do it and report the link.
 - **Tier C** (no way back, touches what others use, or sends data to a third party: force push,
   hard reset, deleting what this work did not create, writing data others read, messaging a real
   person, a deploy that leaves a trace, activating a workflow): ask right before, naming its
