@@ -1351,7 +1351,9 @@ test('watch-guard: a remote call holds the foreground only in a loop whose lengt
     'for n; do ssh h x; done', 'for ((i=0;i<3;i++)); do ssh h x; done', 'for n in 1 2 3 4 5 6; do ssh h x; done',
     'for n in 1 2 3; do glab api x/$n; sleep 5; done', 'for n in 1 2 3; do sleep 5; glab api x/$n; done',
     'while read d; do glab api x/$d; done < ids', 'for a in $(ls); do for b in 1 2; do ssh h x; done; done',
-    'for a in 1 2; do for b in $(ls); do ssh h x; done; done']) assert.equal(shape(t).longRemote, true, t);
+    'for a in 1 2; do for b in $(ls); do ssh h x; done; done', 'while read h; do ssh $h uptime; done<hosts',
+    'for h in $(cat hosts); do ssh $h uptime; done>out.txt']) assert.equal(shape(t).longRemote, true, t);
+  assert.equal(shape('for a in $(ls); do echo $a; done>out; for n in 1 2; do ssh h x; done').longRemote, false, 'a glued `done>file` still closes its loop');
   assert.equal(shape('for n in 1 2 3; do echo $n; done; sleep 1; glab api y').longRemote, false, 'a sleep and a call outside the loop');
   const walk = shape('while IFS= read -r f; do ln -s "$f" x; done < list');
   assert.deepEqual([walk.waitRemote, walk.poll, walk.sleeps], [false, false, false]);
