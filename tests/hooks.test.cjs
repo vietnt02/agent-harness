@@ -958,6 +958,7 @@ test('worker-start-receipt: a send to a running worker says the receipt is only 
   assert.doesNotMatch(lines('orca orchestration send --to dispatch:ctx_b5 --subject x')[0], /undefined/);
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --subject x', 'delivery=follow_up followUpOf=ctx_b2 dispatchId=ctx_f7'), [], 'the output shows another delivery: nothing reopened');
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b2 --help'), [], 'help sends nothing');
+  assert.equal(stopped(lines('orca orchestration send --to dispatch:ctx_b3 --subject x --body "đọc worker-start --help"', concise)[0]), 'ctx_e5', 'a `--help` inside the message never hides what Orca printed');
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b3 --subject x'), [], 'terminal still retained: not seen, silent');
   assert.deepEqual(lines('orca orchestration send --to dispatch:ctx_b4 --subject x'), [], 'other finished states: silent');
   assert.deepEqual(lines('orca orchestration send --to run:run_1 --subject x'), []);

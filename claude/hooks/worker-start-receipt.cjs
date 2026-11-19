@@ -200,13 +200,14 @@ const restart = (worktree) => 'rồi giao lại bằng `worker-start --spec-file
 // The reminders for a send: one per dispatch its output says Orca reopened; then one per addressed worker
 // (`show` reads its state): released while the output shows no delivery at all (filtered), or not finished.
 function sendLines(command, output = '', show = showState) {
-  if (!SEND.test(command) || SEND_HELP.test(command)) return [];
+  if (!SEND.test(command)) return [];
   const read = (d) => { try { return show(d); } catch (_) { return null; } };
   const reopened = reopenedIn(output).map((id) => `${id}: \`send\` vừa in \`delivery=reopened\`: Orca mở lại worker đã release ` +
     `thành dispatch này, chạy không kèm \`--model\`, \`--effort\`. Chạy \`orca orchestration worker-stop --dispatch ${id}\`, ` +
     restart(read(id)?.worktree));
   const delivered = /\bdelivery"?\s*[=:]/.test(String(output || ''));
-  return [...reopened, ...sendTargets(command).flatMap((d) => {
+  // `--help` sends nothing, so it gets no reminder from state; a `-h` inside a message body only costs that part.
+  return [...reopened, ...(SEND_HELP.test(command) ? [] : sendTargets(command)).flatMap((d) => {
     const st = read(d);
     if (!st) return [];
     if (st.state === 'succeeded' && st.released) {

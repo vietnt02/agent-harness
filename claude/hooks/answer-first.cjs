@@ -7,8 +7,8 @@
  * - A question with no reply text yet (CLAUDE.md § Mutation gate: a message with a question is
  *   answered first): answer it now in one line, and again where communication-style.md § Format
  *   puts the answer: the turn's last text, after the last tool call, or just before the
- *   AskUserQuestion when the turn asks. A chat client may fold text written before a tool call out
- *   of sight, so the first line alone reads as ignored.
+ *   AskUserQuestion when the turn asks. A chat client may fold the line written now, before more
+ *   tool calls, out of sight, so that line alone reads as ignored.
  * - Anything else (an instruction, a notice): the first tool call after it gets the message back so
  *   it is acted on and acknowledged.
  * Fails open whenever the transcript cannot be read.
