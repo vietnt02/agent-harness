@@ -92,7 +92,6 @@ function shape(text, deep = true) {
     if (open.length && progs[k][0] === 'sleep') open.forEach((l) => { l.sleeps = true; });
     if (w[0] === 'done' && open.length) close(open.pop());
   });
-  open.forEach(close);
   const wait = loops.some((w) => w !== 'for') || inner.some((x) => x.wait) || own.some((x) => x.wait);
   const poll = (loops.some((w) => w !== 'for') && sleeps) || inner.some((x) => x.poll) || own.some((x) => x.poll);
   return {

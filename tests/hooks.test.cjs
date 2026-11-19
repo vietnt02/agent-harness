@@ -1346,7 +1346,8 @@ test('watch-guard: a remote call holds the foreground only in a loop whose lengt
   const { shape } = require('../claude/hooks/watch-guard.cjs');
   assert.equal(shape('for n in 1 2 3; do glab api x/$n; done').longRemote, false);
   assert.equal(shape('for n in "a b" c; do ssh h x; done').longRemote, false, 'quoted items are written out too');
-  for (const t of ['for id in $(glab api y); do glab api x/$id; done', 'for f in *.json; do gh api x; done', 'for n in {1..9}; do gh api x; done',
+  for (const t of ['for id in $(glab api y); do glab api x/$id; done', 'for h in $HOSTS; do ssh $h x; done', 'for a in "$@"; do gh api x/$a; done',
+    'for f in *.json; do gh api x; done', 'for n in {1..9}; do gh api x; done',
     'for n; do ssh h x; done', 'for ((i=0;i<3;i++)); do ssh h x; done', 'for n in 1 2 3 4 5 6; do ssh h x; done',
     'for n in 1 2 3; do glab api x/$n; sleep 5; done', 'for n in 1 2 3; do sleep 5; glab api x/$n; done',
     'while read d; do glab api x/$d; done < ids', 'for a in $(ls); do for b in 1 2; do ssh h x; done; done',
