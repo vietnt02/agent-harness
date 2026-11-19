@@ -171,7 +171,11 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   đó và tới trong TTL cache (codex 30 phút, Claude 1 giờ) → giao bằng `send --to dispatch:<id>`
   (thành Task mới). Việc định gửi bằng `send` phải xét lại **Chọn model** (§ 2) như một lần giao
   mới: khác loại task, hoặc làm task vượt mức § 2 cho model context ngắn → worker mới (ngoài
-  manifest đã duyệt thì hỏi lại, § 2). Tin `send` tới
+  manifest đã duyệt thì hỏi lại, § 2). Trước khi `send` cho worker đã `worker_done`, đọc
+  `worker-show --json`: `terminalState: released` → không `send` (Orca mở lại nó, in
+  `delivery=reopened`, không kèm `--model`, `--effort`), giao bằng `worker-start --spec-file` (spec cũ,
+  nội dung tin, câu kiểm hộp thư) kèm `--worktree path:` cũ, `--agent`, `--model`, `--effort` theo
+  § 2; `send` đã in `delivery=reopened` → `worker-stop` dispatch mới đó rồi giao như vậy. Tin `send` tới
   worker Chat đang trong lượt: ngắt lượt đó hay nằm Queued tới lần `check --peek` kế tiếp mà spec
   đòi (§ 2) là tuỳ bản Orca (`~/.claude/knowledge/orca.md`); khung chat của worker cho thấy lượt
   mới, `worker-read --source transcript` thì không. Tin gấp mà worker không làm theo trong vài phút
@@ -181,15 +185,13 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   `orchestration.worker-auto-release.v1` (`orca status --json`, `runtime.capabilities`) tự release
   worker khoảng 2 phút sau khi nhận `worker_done` và hoãn khi một tin làm worker chạy lại, nên
   coordinator không `worker-release` tay (release lúc thư còn trong hộp làm Orca báo HIGH giả).
-  Worker được giữ mở (spawn kèm `--worktree new-child` hay `new-top-level`, `--keep-open`) không tự
-  release: `worker-release` khi không ai còn dùng chat của nó. Có việc kế tiếp cho đúng worker đó →
-  `worker-keep-open` ngay khi nhận `worker_done`, xong việc đó thì `worker-release`. `send` tới worker
-  đã release mở lại nó không kèm `--model`, `--effort` (`launch.effective` null): agent chạy model
-  mặc định của nó (agy: `~/.claude/knowledge/orca.md`); mặc định khác model § 2 chọn → giao bằng
-  `worker-start --spec-file` kèm `--worktree path:` cũ, `--model`, `--effort`. Runtime không có
-  capability đó → `worker-release` sau khi kiểm xong (chỉ worker đã `worker_done`, chưa thì
-  `worker-stop`). Gỡ worktree khi `worker-show` báo `terminalState: released` và báo cáo đã lưu.
-  Đừng để worker release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi cần".
+  Worker được giữ mở (spawn kèm `--worktree new-child`, `--worktree new-top-level` hay `--keep-open`)
+  không tự release: `worker-release` sau khi kiểm xong và không còn việc kế tiếp cho nó. Có việc kế
+  tiếp cho đúng worker đó → `worker-keep-open` ngay khi nhận `worker_done`, xong việc đó thì
+  `worker-release`. Runtime không có capability đó → `worker-release` sau khi kiểm xong (chỉ worker
+  đã `worker_done`, chưa thì `worker-stop`). Gỡ worktree khi `worker-show` báo `terminalState:
+  released` và báo cáo đã lưu. Đừng để worker release rồi vài phút sau spawn lại; cũng đừng giữ
+  "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
   luận. Im lặng, timeout hay `unverifiable` không bao giờ đủ để tự dừng, bỏ hay chạy lại worker
   (guide). Worker còn sống thì nó vẫn là người sửa duy nhất của worktree.
