@@ -488,6 +488,14 @@ test('ask-batch-guard: an ask after an answered ask of the same block, tools bet
     assert.equal(hook('ask-batch-guard.cjs', { ...call, tool_input: { questions: [{ question: 'Đăng comment trả #489?' }, { question: 'Đăng #488?' }] } }).status, 0,
       'said once per answered ask: the merged ask the note asks for passes');
     assert.equal(hook('ask-batch-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
+    // A long block: the answered ask sits more than the first read's 512 KB behind the end.
+    const { spacedAskIn } = require('../claude/hooks/ask-batch-guard.cjs');
+    const long = path.join(dir, 'long.jsonl');
+    const big = result('t9'); big.message.content[0].content = 'x'.repeat(700 * 1024);
+    fs.writeFileSync(long, [...block, tool('t9'), big].map((r) => JSON.stringify(r)).join('\n') + '\n');
+    assert.equal(spacedAskIn(long), 'a1', 'read back past the tail');
+    fs.writeFileSync(long, [user('x'), tool('t9'), big].map((r) => JSON.stringify(r)).join('\n') + '\n');
+    assert.equal(spacedAskIn(long), null, 'no answered ask in the whole file');
     assert.equal(hook('ask-batch-guard.cjs', { ...call, transcript_path: path.join(dir, 'none.jsonl') }).status, 0, 'fails open');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

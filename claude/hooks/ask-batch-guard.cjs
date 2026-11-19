@@ -9,6 +9,8 @@
  * does the first ask after the user types. Said once per answered ask (lib/block-once.cjs, keyed on its
  * tool_use_id): the next ask passes whatever it holds, so the merged ask the note asks for, or a question
  * only the answers raised (a final gate after its open questions), is never held twice.
+ * The transcript is read from its end in growing pieces until the user's last message or the answered ask
+ * shows: a long block (workers running for many minutes) puts both far behind the tail.
  * Fails open whenever the transcript cannot be read.
  */
 const fs = require('fs');
@@ -17,16 +19,18 @@ const { promptText } = require('./lib/user-intent.cjs');
 const TAIL_BYTES = 512 * 1024;
 const ASK_ANSWER = /^(Your questions have been answered|The user answered|User has answered)/;
 
-function tailRecords(file) {
+function tailRecords(file, bytes = TAIL_BYTES) {
   const fd = fs.openSync(file, 'r');
   try {
     const size = fs.fstatSync(fd).size;
-    const start = Math.max(0, size - TAIL_BYTES);
+    const start = Math.max(0, size - bytes);
     const buf = Buffer.alloc(size - start);
     fs.readSync(fd, buf, 0, buf.length, start);
     const lines = buf.toString('utf8').split('\n');
     if (start > 0) lines.shift(); // first line may be cut
-    return lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const records = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    records.whole = start === 0;
+    return records;
   } finally {
     fs.closeSync(fd);
   }
@@ -35,7 +39,7 @@ function tailRecords(file) {
 const resultText = (b) => (typeof b.content === 'string' ? b.content : (b.content || []).map((x) => x?.text || '').join('')).trim();
 
 // The tool_use_id of the ask answered since the user's last typed message when some other tool ran after
-// it, else null.
+// it, else null; undefined when `records` hold neither (read further back).
 function spacedAsk(records) {
   let toolSince = false;
   for (let i = records.length - 1; i >= 0; i--) {
@@ -47,7 +51,16 @@ function spacedAsk(records) {
     if (answered) return toolSince ? String(answered.tool_use_id || i) : null;
     if (rec.type === 'assistant' && c.some((b) => b?.type === 'tool_use' && b.name !== 'AskUserQuestion')) toolSince = true;
   }
-  return null;
+  return records.whole === false ? undefined : null;
+}
+
+// spacedAsk over the transcript, read back from its end until it decides (the whole file at most).
+function spacedAskIn(file) {
+  for (let bytes = TAIL_BYTES; ; bytes *= 4) {
+    const records = tailRecords(file, bytes);
+    const found = spacedAsk(records);
+    if (found !== undefined || records.whole) return found || null;
+  }
 }
 
 const NOTE =
@@ -57,7 +70,7 @@ const NOTE =
   'can still run without this answer, run it first and put this question in the block\'s last ask, with ' +
   'every other question and draft; if nothing can run without it, ask it.';
 
-module.exports = { spacedAsk };
+module.exports = { spacedAsk, spacedAskIn };
 if (require.main !== module) return;
 
 let raw = '';
@@ -66,7 +79,7 @@ process.stdin.on('end', () => {
   try {
     const input = JSON.parse(raw);
     if (input.tool_name !== 'AskUserQuestion' || !input.transcript_path) process.exit(0);
-    const answered = spacedAsk(tailRecords(input.transcript_path));
+    const answered = spacedAskIn(input.transcript_path);
     if (!answered) process.exit(0);
     const { firstTime } = require('./lib/block-once.cjs');
     if (!firstTime(input.session_id, 'ask-batch-guard', answered)) process.exit(0);
