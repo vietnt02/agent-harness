@@ -119,9 +119,12 @@ function handsCheck(prose) {
 
 // A step of `**Cần bạn:**` (its line and the list under it) a tool of the session reaches, or null: an
 // issue/PR/MR to close, merge, reopen or comment on; a named person to answer or tell; a check to read.
-const ISSUE_ACT = /(đóng|merge|reopen|mở\s+lại|comment|bình\s+luận)\s+(lên\s+|vào\s+)?(issue|PR|MR|pull|\[?[#!]\d|[\w.-]+(\/[\w.-]+)?[#!]\d)/i;
-const PERSON_ACT = /(trả\s+lời|báo|nhắn|gửi\s+tin|reply)\s+(cho\s+|lại\s+)?(anh\s+|chị\s+|em\s+)?\p{Lu}\p{Ll}+/u;
-const READ_ACT = /(^|[.;,]\s*|\b(rồi|sau\s+đó|và)\s+)(tự\s+)?(kiểm\s+tra|kiểm|check|xem\s+lại|xem)\s/i;
+const ISSUE_ACT = /(đóng|merge|reopen|mở\s+lại|comment|bình\s+luận)\s+(lên\s+|vào\s+)?((issue|PR|MR|pull)\b|\[?[#!]\d|[\w.-]+(\/[\w.-]+)?[#!]\d)/i;
+// The person is a name: never Claude itself (a step the user reports back) nor a word of the house style.
+const PERSON_ACT = /(trả\s+lời|báo|nhắn|reply)\s+(cho\s+|lại\s+)?(anh\s+|chị\s+|em\s+)?(?!(Claude|Ask|Cần)\b)\p{Lu}\p{Ll}+/u;
+// A check as the step's opening verb; one on a phone, a screen or an app is the user's own.
+const READ_ACT = /^(tự\s+)?(kiểm\s+tra|kiểm|check|xem\s+lại)\s/i;
+const DEVICE = /(điện\s+thoại|màn\s+hình|giao\s+diện|\bapp\b|ứng\s+dụng|trình\s+duyệt|browser)/i;
 function doableStep(text) {
   const prose = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ')
     .replace(/"[^"\n]*"|“[^”\n]*”/g, ' ');
@@ -136,6 +139,7 @@ function doableStep(text) {
     for (const s of steps) {
       if (s.trim().endsWith('?')) continue; // a question asked in text: left to the rule
       for (const re of [ISSUE_ACT, PERSON_ACT, READ_ACT]) {
+        if (re === READ_ACT && DEVICE.test(s)) continue;
         const hit = s.trim().match(re);
         // A step Claude names as its own ("rồi Claude đóng issue …") is no handoff.
         if (hit && !/\bclaude\s+(sẽ\s+|tự\s+)?$/i.test(s.trim().slice(0, hit.index))) return hit[0].trim();

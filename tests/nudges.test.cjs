@@ -254,6 +254,8 @@ test('worker-stall: an agy worker whose banner shows another model than the one 
     assert.equal(reads, 1, 'a confirmed model is not read again');
     assert.match(w.status({ ...o, dispatch: 'ctx_x', model: '' }, { ...base, readTerminal: () => hydro }), /^running/, 'no --model: no check');
     assert.equal(w.status({ ...o, dispatch: 'ctx_y', effort: 'xhigh' }, { ...base, readTerminal: () => 'Gemini 4 Neon (High)' }).split(' ')[0], 'model-mismatch', 'the effort counts too');
+    assert.equal(w.status({ ...o, dispatch: 'ctx_z', model: 'gemini-4-neon-xhigh', effort: '' }, { ...base, readTerminal: () => 'Gemini 4 Neon (High)' }).split(' ')[0], 'model-mismatch', 'the effort a slug carries counts');
+    assert.match(w.status({ ...o, dispatch: 'ctx_q' }, { ...base, readTerminal: () => 'reading SKILL.md: banner `Gemini 4 Hydrogen (High)`\n...\nGemini 4 Neon (High)' }), /^running/, 'the last banner, not a quoted one');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -470,11 +472,11 @@ test('ask-batch-guard: an ask after an answered ask of the same block, tools bet
   const done = user('──── From: TERM_781B (term_781b) (worker_done) ──── Subject: Review PR #488 xong');
   // The review block of three PRs: each reviewer's worker_done woke the coordinator, which asked again.
   const block = [user('check & review giúp tôi'), ask('a1'), answer('a1'), tool('t1'), result('t1'), done, tool('t2'), result('t2')];
-  assert.equal(spacedAsk(block), true, 'the second ask: a worker message is no user message');
-  assert.equal(spacedAsk([...block, ask('a2'), answer('a2'), tool('t3'), result('t3'), done]), true, 'the third ask too');
-  assert.equal(spacedAsk([user('check & review giúp tôi'), tool('t1'), result('t1')]), false, 'the first ask of a block');
-  assert.equal(spacedAsk([...block, user('ok, tiếp đi')]), false, 'right after the user types');
-  assert.equal(spacedAsk([user('x'), ask('a1'), answer('a1')]), false, 'back to back: no tool between');
+  assert.equal(spacedAsk(block), 'a1', 'the second ask: a worker message is no user message');
+  assert.equal(spacedAsk([...block, ask('a2'), answer('a2'), tool('t3'), result('t3'), done]), 'a2', 'the third ask too');
+  assert.equal(spacedAsk([user('check & review giúp tôi'), tool('t1'), result('t1')]), null, 'the first ask of a block');
+  assert.equal(spacedAsk([...block, user('ok, tiếp đi')]), null, 'right after the user types');
+  assert.equal(spacedAsk([user('x'), ask('a1'), answer('a1')]), null, 'back to back: no tool between');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-batch-'));
   try {
     const t = path.join(dir, 't.jsonl');
@@ -483,7 +485,8 @@ test('ask-batch-guard: an ask after an answered ask of the same block, tools bet
     const held = hook('ask-batch-guard.cjs', call);
     assert.equal(held.status, 2);
     assert.match(held.stderr, /one ask a block.*last ask/);
-    assert.equal(hook('ask-batch-guard.cjs', call).status, 0, 'said once: the same ask again passes');
+    assert.equal(hook('ask-batch-guard.cjs', { ...call, tool_input: { questions: [{ question: 'Đăng comment trả #489?' }, { question: 'Đăng #488?' }] } }).status, 0,
+      'said once per answered ask: the merged ask the note asks for passes');
     assert.equal(hook('ask-batch-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
     assert.equal(hook('ask-batch-guard.cjs', { ...call, transcript_path: path.join(dir, 'none.jsonl') }).status, 0, 'fails open');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -503,6 +506,14 @@ test('turn-guard: a Cần bạn step a tool reaches is sent back once; a step on
   assert.equal(doableStep('**Cần bạn:** đồng ý merge !67 không?'), null, 'a question in text is left to the rule');
   assert.equal(doableStep('**Claude đã làm:** đóng issue #486 và báo Tân.'), null);
   assert.equal(doableStep('**Cần bạn:** chọn người nhận, rồi Claude đóng issue `#486`.'), null, 'inline code cites');
+  assert.equal(doableStep('**Cần bạn:** đăng nhập lại Lark bằng tài khoản công ty, rồi báo Claude.'), null, 'reporting back to Claude');
+  assert.equal(doableStep('**Cần bạn:**\n- báo Claude khi xong'), null);
+  assert.equal(doableStep('**Cần bạn:** gửi tin Zalo cho anh Dũng (Claude không có Zalo).'), null, 'a channel the session lacks');
+  assert.equal(doableStep('**Cần bạn:** mở app trên điện thoại, kiểm thông báo đã tới chưa.'), null, 'a check on a device');
+  assert.equal(doableStep('**Cần bạn:** quét mã QR trên điện thoại; xem màn hình có báo thành công.'), null);
+  assert.equal(doableStep('**Cần bạn:** xem xét đề xuất và chọn A hoặc B.'), null, 'a decision, not a read');
+  assert.equal(doableStep('**Cần bạn:** merge production branch trên giao diện Vercel (Claude không có quyền).'), null, '"pr" inside a word');
+  assert.equal(doableStep('**Cần bạn:** báo anh Dũng rằng !920 đã merge.'), 'báo anh Dũng');
   const stop = (active, msg) => hook('turn-guard.cjs', { hook_event_name: 'Stop', stop_hook_active: active, last_assistant_message: msg });
   const sent = stop(false, '# Xong\n\nĐã review 3 PR.\n\n**Cần bạn:** đóng issue #486.');
   assert.equal(sent.status, 2);

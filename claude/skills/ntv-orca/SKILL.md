@@ -143,7 +143,8 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   - `agy gemini-4-hydrogen high` chỉ cho việc làm trọn trong một lượt, không phải nén context: không
     có dấu hiệu nào ở trên, spec chỉ rõ từng chỗ và kết quả ở mỗi chỗ, và đủ cả ba: chạm tối đa 3
     file trong một module; không viết test hay mutation ngoài một test spec nêu sẵn; không dò code
-    ngoài các `file:dòng` spec đưa (đổi một giá trị, sửa docs, sửa 1–2 finding nhỏ).
+    ngoài các `file:dòng` spec đưa (đổi một giá trị, sửa docs, sửa 1–2 finding nhỏ). Việc đổi logic
+    phải chạy mutation (§ 2, checklist spec) nên luôn là neon.
   - Còn lại → neon, kể cả vòng sửa theo finding chạm từ 4 file hay 2 module, cần test đỏ cho nhiều
     ca, hay mutation; spec chưa chốt hết kết quả cũng neon. Vòng sửa không bao giờ hạ model của
     builder gốc: việc gốc neon thì vòng sửa neon.

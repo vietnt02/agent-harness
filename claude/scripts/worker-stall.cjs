@@ -24,7 +24,8 @@
  * check`, so it takes no message from the coordinator's inbox.
  * With --model (and --effort), an agy worker's model banner in its terminal (`Gemini 4 Neon (High)`; Orca
  * records no model for agy) is compared once it shows: a different model prints
- * `model-mismatch want=<slug> <effort> got=<banner>`, outside every --ok/--wait list, so the watch ends at once.
+ * `model-mismatch want=<slug> <effort> got=<banner>`, outside every --ok/--wait list, so the watch ends (`--once`
+ * at once, the loop after two such checks).
  * A match is remembered beside the cursor and not read again; no banner yet, or no terminal, judges nothing.
  *
  *   node ~/.claude/scripts/worker-stall.cjs --dispatch <ctx_id> [--idle-min 10] [--api-errors 3] [--ask-max 60] [--model <slug> [--effort <e>]]
@@ -226,14 +227,20 @@ function modelCheck(o, terminal, state, deps = {}, stateDir = path.join(os.tmpdi
     text = (deps.readTerminal || ((h) => execFileSync('orca', ['terminal', 'read', '--terminal', h],
       { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] })))(terminal);
   } catch (_) { return ''; }
-  const b = bannerOf(text);
+  // The last banner: the agent's own output may quote a model name above it.
+  const all = String(text || '').match(new RegExp(BANNER.source, 'gi')) || [];
+  const b = bannerOf(all[all.length - 1]);
   if (!b) return '';
+  const suffix = /-(low|medium|high|xhigh)$/i.exec(o.model);
   const want = o.model.toLowerCase().replace(/-(low|medium|high|xhigh)$/, '');
-  if (b.slug !== want || (o.effort && b.effort !== o.effort.toLowerCase())) {
-    return `model-mismatch want=${want}${o.effort ? ` ${o.effort}` : ''} got="${b.text}" state=${state}`;
+  const effort = (o.effort || (suffix ? suffix[1] : '')).toLowerCase();
+  if (b.slug !== want || (effort && b.effort !== effort)) {
+    return `model-mismatch want=${want}${effort ? ` ${effort}` : ''} got="${b.text}" state=${state}`;
   }
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(file, b.text);
+  try {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(file, b.text);
+  } catch (_) { /* not saved: read again next run */ }
   return '';
 }
 

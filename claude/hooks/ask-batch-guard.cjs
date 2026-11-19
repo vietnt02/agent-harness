@@ -3,11 +3,12 @@
  * ask-batch-guard.cjs - PreToolUse(AskUserQuestion): an ask after another ask of the same block, with
  * tools run in between, is held once. The user answers an ask and goes back to another app; a second
  * ask a few minutes later waits unseen, and the session stands still (communication-style.md § Format:
- * one ask a block, once nothing else runs). "Same block": an ask was answered since the user's last
+ * one ask a block, once nothing else can run). "Same block": an ask was answered since the user's last
  * typed message; Orca's worker messages and other harness records are not typed messages
  * (lib/user-intent.cjs `promptText`). Asks sent back to back (more than four questions) pass, and so
- * does the first ask after the user types. Said once (lib/block-once.cjs): the same ask again passes,
- * for a question that only the answers raised (a final gate after its open questions).
+ * does the first ask after the user types. Said once per answered ask (lib/block-once.cjs, keyed on its
+ * tool_use_id): the next ask passes whatever it holds, so the merged ask the note asks for, or a question
+ * only the answers raised (a final gate after its open questions), is never held twice.
  * Fails open whenever the transcript cannot be read.
  */
 const fs = require('fs');
@@ -33,24 +34,26 @@ function tailRecords(file) {
 
 const resultText = (b) => (typeof b.content === 'string' ? b.content : (b.content || []).map((x) => x?.text || '').join('')).trim();
 
-// True when, since the user's last typed message, an ask was answered and some other tool ran after it.
+// The tool_use_id of the ask answered since the user's last typed message when some other tool ran after
+// it, else null.
 function spacedAsk(records) {
   let toolSince = false;
   for (let i = records.length - 1; i >= 0; i--) {
     const rec = records[i];
-    if (promptText(rec) !== null) return false;
+    if (promptText(rec) !== null) return null;
     const c = rec.message?.content;
     if (!Array.isArray(c)) continue;
-    if (rec.type === 'user' && c.some((b) => b?.type === 'tool_result' && ASK_ANSWER.test(resultText(b)))) return toolSince;
+    const answered = rec.type === 'user' && c.find((b) => b?.type === 'tool_result' && ASK_ANSWER.test(resultText(b)));
+    if (answered) return toolSince ? String(answered.tool_use_id || i) : null;
     if (rec.type === 'assistant' && c.some((b) => b?.type === 'tool_use' && b.name !== 'AskUserQuestion')) toolSince = true;
   }
-  return false;
+  return null;
 }
 
 const NOTE =
   'ask-batch-guard: an AskUserQuestion was already answered since the user last typed, and tools ran ' +
   'since. The user answers and goes back to other work, so a later ask waits unseen and the session stands ' +
-  'still (communication-style.md § Format: one ask a block, once nothing else runs). If work of this block ' +
+  'still (communication-style.md § Format: one ask a block, once nothing else can run). If work of this block ' +
   'can still run without this answer, run it first and put this question in the block\'s last ask, with ' +
   'every other question and draft; if nothing can run without it, ask it.';
 
@@ -63,10 +66,11 @@ process.stdin.on('end', () => {
   try {
     const input = JSON.parse(raw);
     if (input.tool_name !== 'AskUserQuestion' || !input.transcript_path) process.exit(0);
-    if (!spacedAsk(tailRecords(input.transcript_path))) process.exit(0);
-    const { firstTime, again } = require('./lib/block-once.cjs');
-    if (!firstTime(input.session_id, 'ask-batch-guard', JSON.stringify(input.tool_input?.questions || []))) process.exit(0);
-    process.stderr.write(`${NOTE}${again(input.session_id)}\n`);
+    const answered = spacedAsk(tailRecords(input.transcript_path));
+    if (!answered) process.exit(0);
+    const { firstTime } = require('./lib/block-once.cjs');
+    if (!firstTime(input.session_id, 'ask-batch-guard', answered)) process.exit(0);
+    process.stderr.write(`${NOTE}${input.session_id ? ' Said once: the next ask passes, as it is or merged.' : ''}\n`);
     process.exit(2);
   } catch (_) { /* fail-open */ }
   process.exit(0);
