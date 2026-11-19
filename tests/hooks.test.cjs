@@ -1561,8 +1561,9 @@ test('tier-c-guard: a docker write over ssh is a production write; a subagent an
   const piped = fs.mkdtempSync(path.join(os.tmpdir(), 'tierc-pipe-'));
   try {
     fs.writeFileSync(path.join(piped, 'x.sh'), 'docker restart n8n\n');
-    assert.ok(hit(`cat ${path.join(piped, 'x.sh')} | ssh vps bash -s`), 'a script piped into ssh');
-    assert.equal(hit(`cat ${path.join(piped, 'x.sh')} | wc -l; ssh vps uptime`), null, 'a cat piped elsewhere');
+    // Quoted as typed in bash: an unquoted Windows path loses its backslashes to the shell.
+    assert.ok(hit(`cat '${path.join(piped, 'x.sh')}' | ssh vps bash -s`), 'a script piped into ssh');
+    assert.equal(hit(`cat '${path.join(piped, 'x.sh')}' | wc -l; ssh vps uptime`), null, 'a cat piped elsewhere');
   } finally { fs.rmSync(piped, { recursive: true, force: true }); }
   assert.match(tierCGuard.readHint('docker run'), /docker exec/);
   assert.equal(tierCGuard.readHint('docker restart'), '', 'the read hint only where a container was started to read');
