@@ -15,7 +15,7 @@ Không còn là mặc định: chỉ làm **worker** khi user chỉ định (`SK
 ## Giao gì / Không giao gì
 
 - **Giao:** Task user chỉ định.
-- **Không giao / Điểm yếu:** Cùng spec với hydrogen: chậm hơn mà PR còn lỗi làm sập mọi lượt chạy thật, ba lỗi chặn merge, phải đóng PR. Không giao chặng rà chỉ-đọc (việc của subagent rà, `SKILL.md` § 1): không có kế hoạch duyệt trước thì dò rộng ra ngoài đích spec nêu, mỗi lượt nghĩ lâu, viết lại nhiều lần lệnh `python3 -c` hỏng dấu nháy. Không làm reviewer.
+- **Không giao / Điểm yếu:** Cùng spec với hydrogen: chậm hơn mà PR còn lỗi làm sập mọi lượt chạy thật, ba lỗi chặn merge, phải đóng PR. Không giao chặng rà chỉ-đọc (việc của subagent rà, `SKILL.md` § 1): không có kế hoạch duyệt trước thì dò rộng ra ngoài đích spec nêu, mỗi lượt nghĩ lâu, viết lại nhiều lần lệnh `python3 -c` hỏng dấu nháy. Không làm reviewer, trừ khi user chỉ định (`SKILL.md` § 2).
 
 ## Phải nói rõ trong spec — câu chèn sẵn vào `--spec`
 

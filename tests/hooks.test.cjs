@@ -831,6 +831,9 @@ test('worktree-after-release: a worker Orca released by itself is reminded when 
   assert.deepEqual(ids('orca orchestration worker-release --dispatch ctx_ab12', ''), ['ctx_ab12']);
   assert.deepEqual(ids(show, json.replace('"released"', '"retained"')), [], 'still open: no reminder');
   assert.deepEqual(ids(`echo "${show}"`, json), [], 'text naming worker-show runs nothing');
+  const other = '{"ok":true,"result":{"dispatchId":"ctx_cd34","state":"abandoned","terminalState":"retained","workspace":"w::/y"}}';
+  assert.deepEqual(ids(`${show}; orca orchestration worker-show --dispatch ctx_cd34 --json`, `${json}\n${other}`), ['ctx_ab12'],
+    'each dispatch by its own record');
 });
 
 test('worktree-after-release: a refused release keeps its worktree; dirty file names stay whole', () => {
@@ -869,8 +872,18 @@ test('worktree-after-release: a refused release keeps its worktree; dirty file n
     const wt = path.join(tmp, 'wt');
     execFileSync('git', ['-C', main, 'worktree', 'add', '-q', wt]);
     fs.writeFileSync(path.join(wt, 'automations.md'), 'b');
-    const line = worktreeAfterRelease.describe('ctx_1', () => JSON.stringify({ ok: true, result: { workspace: `id::${wt}` } }));
+    const show = () => JSON.stringify({ ok: true, result: { workspace: `id::${wt}` } });
+    const list = (workers) => () => JSON.stringify({ ok: true, result: { workers } });
+    const line = worktreeAfterRelease.describe('ctx_1', show, list([]));
     assert.match(line, /1 file chưa commit \(automations\.md\)/);
+    // A later dispatch on the same worktree (a fix round) keeps it: running, or kept open for a next task.
+    for (const other of [{ state: 'running', terminalState: 'live' }, { state: 'succeeded', terminalState: 'retained' }]) {
+      const shared = worktreeAfterRelease.describe('ctx_1', show, list([{ dispatchId: 'ctx_2', workspace: `id::${wt}`, ...other }]));
+      assert.match(shared, /ctx_2/);
+      assert.doesNotMatch(shared, /worktree rm/);
+    }
+    const stale = worktreeAfterRelease.describe('ctx_1', show, list([{ dispatchId: 'ctx_0', state: 'stopped', terminalState: 'retained', workspace: `id::${wt}` }]));
+    assert.match(stale, /1 file chưa commit/, 'an old stopped dispatch does not hold the worktree');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1520,8 +1533,26 @@ test('tier-c-guard: a docker write over ssh is a production write; a subagent an
     "ssh vps \"bash -c 'docker -H unix:///run/d.sock container stop n8n'\"",
     "S=/tmp/k; cat > $S/r.sh <<'EOF'\ndocker compose -f /srv/x.yml up -d\nEOF\nssh vps 'bash -s' < $S/r.sh",
     "ssh vps bash -s <<'EOF'\ndocker restart n8n\nEOF",
+    // Review round: a quoted path, tee, a mktemp file, a local script that ssh-es, removals and prunes.
+    "cat > \"/tmp/k/q.sh\" <<'EOF'\ndocker restart x\nEOF\nssh vps 'bash -s' < \"/tmp/k/q.sh\"",
+    "tee /tmp/k/y.sh >/dev/null <<'EOF'\ndocker restart x\nEOF\nssh vps bash -s < /tmp/k/y.sh",
+    "T=$(mktemp); cat > $T <<'EOF'\ndocker restart x\nEOF\nssh vps bash -s < $T",
+    "cat > /tmp/k/l.sh <<'EOF'\nssh vps docker restart x\nEOF\nbash /tmp/k/l.sh",
+    'ssh vps docker volume rm n8n_data',
+    'ssh vps docker system prune -af',
+    'ssh vps docker image prune -a -f',
   ]) assert.ok(hit(c), c);
+  const piped = fs.mkdtempSync(path.join(os.tmpdir(), 'tierc-pipe-'));
+  try {
+    fs.writeFileSync(path.join(piped, 'x.sh'), 'docker restart n8n\n');
+    assert.ok(hit(`cat ${path.join(piped, 'x.sh')} | ssh vps bash -s`), 'a script piped into ssh');
+    assert.equal(hit(`cat ${path.join(piped, 'x.sh')} | wc -l; ssh vps uptime`), null, 'a cat piped elsewhere');
+  } finally { fs.rmSync(piped, { recursive: true, force: true }); }
+  assert.match(tierCGuard.readHint('docker run'), /docker exec/);
+  assert.equal(tierCGuard.readHint('docker restart'), '', 'the read hint only where a container was started to read');
   for (const c of [
+    'ssh vps docker volume ls',
+    'ssh vps docker system df',
     "ssh vps_n8n 'docker ps --format {{.Names}}'",
     "ssh vps_n8n 'docker exec n8n_new_setup-postgres-1 psql -c \"select 1\"'",
     "ssh vps 'docker inspect x --format {{.State.Status}}'",
@@ -1549,6 +1580,9 @@ test('tier-c-guard: a docker write over ssh is a production write; a subagent an
     const worker = run([user('You are working inside Orca, a multi-agent IDE. You are a dispatched worker.\nTask: đọc cấu hình')]);
     assert.equal(worker.status, 2, 'a worker never writes production');
     assert.match(worker.stderr, /worker/);
+    const wrapped = run([user('Please carry out this task from my Orca coordinator.\n\n<pasted_content id="d4a5">\n' +
+      'You are working inside Orca, a multi-agent IDE. You are a dispatched worker.\nTask: đọc cấu hình\n</pasted_content>')]);
+    assert.equal(wrapped.status, 2, 'the preamble inside a pasted block (Claude workers) is still a worker');
     assert.equal(run([user('làm đi')]).status, 0, 'the main session after an instruction goes on');
     assert.equal(run([user('xoá image chưa?')]).status, 2, 'after a question it is asked');
     const home = path.join(tmp, 'home');
@@ -1571,8 +1605,16 @@ test('secret-file-guard: a command printing a container config or process comman
     'ps -eo pid,args',
     'cat /proc/1/cmdline',
     "tr '\\0' ' ' < /proc/42/environ",
+    "docker inspect x --format '{{json .Config}}'",
+    "docker inspect x | jq '.[0].Config.Cmd'",
   ]) assert.ok(inspectionLeak(c, os.tmpdir()), c);
   for (const c of [
+    "docker inspect -f '{{json .Config.Labels}}' traefik",
+    // The three forms the note itself names: flag names, env keys, a hash.
+    "docker inspect r --format '{{json .Config.Cmd}}' | jq -c 'map(if startswith(\"-\") then . else \"<val>\" end)'",
+    "docker inspect r --format '{{range .Config.Env}}{{println (index (split . \"=\") 0)}}{{end}}'",
+    'docker inspect r | sha256sum | cut -c1-12',
+    'ps -eo pid,args | wc -l',
     "docker inspect x --format '{{.State.Status}}'",
     "docker ps --format '{{.Names}}'",
     'ps -o pid= -p 1',

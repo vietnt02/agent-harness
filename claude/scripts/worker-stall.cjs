@@ -152,9 +152,10 @@ function agyLastStep(workspace, dir = AGY_CONVERSATIONS) {
   return null;
 }
 
-// The process that has run longest with its working directory in `workspace`, other than the agent
-// and its shell, as ` holding=<name> <minutes>m pid=<pid>`, or '' (none, or lsof/ps unavailable). A
-// command waiting on input that never comes (`npm exec` asking to install) shows here.
+// The process that has run longest with its working directory in `workspace`, other than the agent,
+// its shell and what the agent starts itself (its MCP servers: children of the agent, not of a shell),
+// as ` holding=<name> <minutes>m pid=<pid>`, or '' (none, or lsof/ps unavailable). A command waiting
+// on input that never comes (`npm exec` asking to install) shows here.
 const NOT_HOLDING = /^-?(zsh|bash|sh|dash|fish|login|claude|agy|antigravity|codex|gemini|orca-provider-exec)$/;
 function processes(dir) {
   const own = typeof process.getuid === 'function' ? ['-u', String(process.getuid())] : [];
@@ -170,8 +171,8 @@ function processes(dir) {
     else if (line[0] === 'n' && pid && inside(line.slice(1))) pids.push(pid);
   }
   if (!pids.length) return [];
-  const ps = execFileSync('ps', ['-o', 'pid=,etime=,args=', '-p', pids.join(',')], { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'] });
-  return ps.split('\n').map((l) => /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l)).filter(Boolean).map((m) => ({ pid: m[1], etime: m[2], args: m[3] }));
+  const ps = execFileSync('ps', ['-o', 'pid=,ppid=,etime=,args=', '-p', pids.join(',')], { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'] });
+  return ps.split('\n').map((l) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(l)).filter(Boolean).map((m) => ({ pid: m[1], ppid: m[2], etime: m[3], args: m[4] }));
 }
 // `[[dd-]hh:]mm:ss` → minutes.
 function minutesOf(etime) {
@@ -182,8 +183,11 @@ function heldBy(workspace, list = processes) {
   let rows = [];
   try { rows = list(workspace); } catch (_) { return ''; }
   const name = (w) => path.basename(String(w || ''));
+  const own = (r) => { const [a, b] = r.args.split(/\s+/); return NOT_HOLDING.test(name(a)) || (name(a) === 'node' && NOT_HOLDING.test(name(b))); };
+  const shell = (r) => /^-?(zsh|bash|sh|dash|fish|login)$/.test(name(r.args.split(/\s+/)[0]));
+  const agents = new Set(rows.filter((r) => own(r) && !shell(r)).map((r) => r.pid));
   const held = rows
-    .filter((r) => { const [a, b] = r.args.split(/\s+/); return !NOT_HOLDING.test(name(a)) && !(name(a) === 'node' && NOT_HOLDING.test(name(b))); })
+    .filter((r) => !own(r) && !(r.ppid && agents.has(r.ppid)))
     .sort((x, y) => minutesOf(y.etime) - minutesOf(x.etime))[0];
   return held ? ` holding=${name(held.args.split(/\s+/)[0])} ${minutesOf(held.etime)}m pid=${held.pid}` : '';
 }

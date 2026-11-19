@@ -140,6 +140,8 @@ function parse(cmd, scope, out, id) {
       sub(cmd.slice(i + 1, k));
       i = k;
     } else if (/[;&|()\n]/.test(c)) {
+      // A lone `|` (or `|&`) pipes this command's output into the next one of its scope (`pipedInto`).
+      if (c === '|' && cmd[i + 1] !== '|' && cmd[i - 1] !== '|') { endWord(); words.pipe = true; }
       endCmd();
     } else if (/\s/.test(c)) {
       endWord();
@@ -245,8 +247,9 @@ function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
   const raw = String(command || '').replace(/\\\r?\n/g, ' ');
   const all = commands(raw);
   const vars = {};
+  // A variable whose value is unknown here (`T=$(mktemp)`) still names one file within the command.
   for (const words of all) {
-    for (const [k, v] of assignments(words) || []) { const e = expandVars(v, vars); if (e !== null) vars[k] = e; }
+    for (const [k, v] of assignments(words) || []) { const e = expandVars(v, vars); vars[k] = e !== null ? e : `\u0000${k}`; }
   }
   const resolve = (w) => {
     const e = expandVars(String(w || '').replace(/^~(?=\/|$)/, home), vars);
@@ -259,9 +262,10 @@ function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
   }));
   const written = {};
   for (const d of docs) {
-    const t = /(?:^|[\s;&|(])(?:cat\b[^\n<>]*>>?\s*|tee\s+(?:-a\s+)?)([^\s<>;&|()]+)\s*$/.exec(d.before) ||
+    // `cat > f <<EOF`, `cat > "f" 2>/dev/null <<EOF`, `tee [-a] f >/dev/null <<EOF`, `cat <<EOF > f`.
+    const t = /(?:^|[\s;&|(])(?:cat\b[^\n<>]*>>?\s*|tee\s+(?:-a\s+)?)([^\s<>;&|()]+)(?:\s+\d*>>?\s*\S+)*\s*$/.exec(d.before) ||
       (/(?:^|[\s;&|(])cat\s*$/.test(d.before) && /^\s*>>?\s*([^\s<>;&|()]+)/.exec(d.after));
-    const f = t && resolve(t[1]);
+    const f = t && resolve(t[1].replace(/^(['"])(.*)\1$/, '$2'));
     if (f) written[f] = d.body;
   }
   const fileText = (w) => {
@@ -286,7 +290,15 @@ function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
   };
   const scripts = [];
   const add = (remote, text) => { if (text && !scripts.some((s) => s.remote === remote && s.text === text)) scripts.push({ remote, text }); };
-  for (const words of all) {
+  // The files a `cat` piped into command k reads (`cat x.sh | ssh h bash -s`).
+  const catInto = (k) => {
+    let j = k - 1;
+    while (j >= 0 && all[j].scope !== all[k].scope) j--;
+    const up = j >= 0 && all[j].pipe ? program(all[j]) : [];
+    return up[0] === 'cat' ? operands(up.slice(1)).out.filter((a) => !a.startsWith('-')) : [];
+  };
+  for (let k = 0; k < all.length; k++) {
+    const words = all[k];
     const w = program(words);
     if (w[0] === 'ssh') {
       let i = 1;
@@ -300,6 +312,7 @@ function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
       const first = text ? program(commands(text)[0] || []) : [];
       if (text && !(SHELL.test(first[0] || '') && innerScript(first) === null)) continue;
       if (stdin) add(host, fileText(stdin));
+      for (const f of catInto(k)) add(host, fileText(f));
       // A heredoc on this ssh line (`ssh h bash -s <<EOF` has its body inlined by dropHeredocs, so the
       // line is matched in the raw text).
       const onLine = new RegExp(`(^|[\\s;&|(])ssh\\b[^\\n]*\\s${host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
@@ -307,10 +320,24 @@ function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
     } else if (SHELL.test(w[0] || '') && innerScript(w) === null) {
       const { out, stdin } = operands(w.slice(1));
       const file = out.find((a) => !a.startsWith('-'));
-      add(null, file ? fileText(file) : stdin ? fileText(stdin) : null);
+      if (file || stdin) add(null, fileText(file || stdin));
+      else for (const f of catInto(k)) add(null, fileText(f));
     }
   }
   return scripts;
 }
 
-module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick, scriptsRun };
+// The commands a command's output is piped into, in order: for `a | b | c`, a's are [b, c].
+function pipedInto(all, k) {
+  const out = [];
+  for (let i = k; all[i] && all[i].pipe;) {
+    let j = i + 1;
+    while (j < all.length && all[j].scope !== all[i].scope) j++;
+    if (j >= all.length) break;
+    out.push(all[j]);
+    i = j;
+  }
+  return out;
+}
+
+module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick, scriptsRun, pipedInto };

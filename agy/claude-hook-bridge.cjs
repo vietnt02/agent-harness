@@ -94,26 +94,37 @@ const localHook = (rel) => {
 };
 
 // The command as scout-block should read it: the values of free-text flags of a command that sends
-// text (an Orca message, a commit, a PR or issue body) are dropped, since a build log quoted there
-// reads no directory; heredoc bodies are dropped by shell-words. A command sending no text stays as typed.
-const TEXT_FLAG = /^(--body|--subject|--message|-m|--question|--title|-t|--text|--comment)$/;
-const TEXT_FLAG_JOINED = /^(--(body|subject|message|question|title|text|comment)=|-m.)/;
+// text (an Orca message, a commit, a PR, MR or issue body) are dropped, since a build log quoted there
+// reads no directory; so are heredoc bodies nothing runs (a report written with `cat > f <<EOF`), which
+// shell-words drops. A command with neither stays as typed.
+const TEXT_FLAGS = {
+  orca: /^(--body|--subject|--message|--question|--text)$/,
+  git: /^(-m|--message)$/,
+  gh: /^(-b|--body|-t|--title|-c|--comment)$/,
+  glab: /^(-d|--description|-m|--message|-t|--title)$/,
+};
 const sendsText = (w) =>
   (w[0] === 'orca' && w[1] === 'orchestration' && /^(send|reply|ask)$/.test(w[2] || '')) ||
   (w[0] === 'git' && w.includes('commit')) ||
-  (w[0] === 'gh' && /^(pr|issue)$/.test(w[1] || '') && /^(create|comment|edit|review|close)$/.test(w[2] || ''));
+  (w[0] === 'gh' && /^(pr|issue)$/.test(w[1] || '') && /^(create|comment|edit|review|close)$/.test(w[2] || '')) ||
+  (w[0] === 'glab' && /^(mr|issue)$/.test(w[1] || '') && /^(create|note|update|close|reopen)$/.test(w[2] || ''));
+// `--body x` (the value is the next word), `--body=x` or `-mx` (joined).
+const textFlag = (flags, w) => flags.test(w);
+const textJoined = (flags, w) => { const m = /^(--[\w-]+)=|^(-\w)./.exec(w); return Boolean(m && flags.test(m[1] || m[2])); };
 function scoutCommand(command) {
   try {
     const { commands, program } = require(localHook(path.join('lib', 'shell-words.cjs')));
     const all = commands(command);
-    if (!all.some((words) => sendsText(program(words)))) return command;
+    if (!/<</.test(command) && !all.some((words) => sendsText(program(words)))) return command;
     const quote = (w) => (/^[\w@%+=:,./-]+$/.test(w) ? w : `'${String(w).replace(/'/g, "'\\''")}'`);
     return all.map((words) => {
-      if (!sendsText(program(words))) return words.map(quote).join(' ');
+      const w = program(words);
+      const flags = sendsText(w) ? TEXT_FLAGS[w[0]] : null;
+      if (!flags) return words.map(quote).join(' ');
       const kept = [];
       for (let i = 0; i < words.length; i++) {
-        if (TEXT_FLAG.test(words[i])) i++;
-        else if (!TEXT_FLAG_JOINED.test(words[i])) kept.push(words[i]);
+        if (textFlag(flags, words[i])) i++;
+        else if (!textJoined(flags, words[i])) kept.push(words[i]);
       }
       return kept.map(quote).join(' ');
     }).join('; ');
@@ -567,7 +578,7 @@ function handlePreToolUse(payload) {
   }
   if (remote && worker) {
     let readInstead = '';
-    try { readInstead = ` ${require(localHook('tier-c-guard.cjs')).READ_INSTEAD}`; } catch (_) {}
+    try { readInstead = require(localHook('tier-c-guard.cjs')).readHint(remote.hit); } catch (_) {}
     process.stdout.write(JSON.stringify({
       decision: 'deny',
       reason: `tier-c-guard: \`ssh ${remote.host} … ${remote.hit}\` changes ${remote.host}: a production write, which a worker ` +

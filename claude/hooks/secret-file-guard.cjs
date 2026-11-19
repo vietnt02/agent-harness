@@ -40,7 +40,7 @@
 
 const os = require('os');
 const path = require('path');
-const { commands, program, innerScript, dropHeredocs, assignments, closeParen, closeTick, scriptsRun } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, dropHeredocs, assignments, closeParen, closeTick, scriptsRun, pipedInto } = require('./lib/shell-words.cjs');
 
 const KIT_CHECKER = path.join(os.homedir(), '.claude', 'hooks', 'lib', 'privacy-checker.cjs');
 const DOTENV = /^(\.env(\.[\w.-]+)?|[\w.-]+\.env)$/i;
@@ -380,7 +380,12 @@ function decide(data, opts = {}) {
 
 // What a simple command prints that can hold a secret passed on a command line or in the environment
 // (`docker inspect` of the config, `ps -o args`, `/proc/<pid>/cmdline`), or null.
-const INSPECT_FIELDS = /\.Config\.(Cmd|Env|Entrypoint)\b|\.Args\b|\.Config\s*\}\}|json\s+\.Config\b|\{\{\s*json\s+\.\s*\}\}|\{\{\s*\.\s*\}\}/;
+const INSPECT_FIELDS = /\.Config\.(Cmd|Env|Entrypoint)\b|\.Args\b|\.Config\s*\}\}|\{\{\s*json\s+\.\s*\}\}|\{\{\s*\.\s*\}\}/;
+// `{{range .Config.Env}}{{println (index (split . "=") 0)}}{{end}}` prints the keys only.
+const ENV_KEYS = /\{\{\s*range\s+\.Config\.Env\s*\}\}[\s\S]*?\{\{\s*end\s*\}\}/g;
+const KEY_ONLY = /index\s*\(\s*split\s+\.\s+"="\s*\)\s*0/;
+// A stage that prints no value of what it reads: a hash, a count, or jq masking values as `<val>`.
+const MASKS = (w) => /^(sha256sum|shasum|sha1sum|md5sum|md5|b2sum|wc)$/.test(w[0] || '') || (w[0] === 'jq' && w.some((a) => a.includes('<val>')));
 const DOCKER_VALUE = /^(-H|--host|-c|--context|--config|-l|--log-level)$/;
 function printsCommandLine(words) {
   const w = program(words);
@@ -394,7 +399,8 @@ function printsCommandLine(words) {
     if (k < 0) return 'docker inspect (no --format)';
     const a = rest[k];
     const fmt = a.startsWith('--format=') ? a.slice(9) : a === '--format' || a === '-f' ? rest[k + 1] || '' : a.slice(2);
-    return INSPECT_FIELDS.test(fmt) ? `docker inspect --format '${fmt.slice(0, 60)}'` : null;
+    const shown = fmt.replace(ENV_KEYS, (m) => (KEY_ONLY.test(m) ? '' : m));
+    return INSPECT_FIELDS.test(shown) ? `docker inspect --format '${fmt.slice(0, 60)}'` : null;
   }
   if (w[0] === 'ps') {
     for (let i = 1; i < w.length; i++) {
@@ -407,9 +413,12 @@ function printsCommandLine(words) {
 }
 function inspectionLeak(command, cwd) {
   const scan = (text, depth) => {
-    for (const words of commands(text)) {
+    const all = commands(text);
+    for (let k = 0; k < all.length; k++) {
+      const words = all[k];
+      // Piped into a hash, a count or a masking jq, nothing it prints reaches the transcript.
       const hit = printsCommandLine(words);
-      if (hit) return hit;
+      if (hit && !pipedInto(all, k).map(program).some(MASKS)) return hit;
       const inner = innerScript(program(words));
       if (inner !== null && depth < 3) {
         const deeper = scan(inner, depth + 1);

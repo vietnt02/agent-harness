@@ -418,6 +418,9 @@ test('turn-guard: a step Claude says it takes is no leftover; one put off still 
   assert.ok(parkedProblem('Còn sót 2 file chưa sửa.'));
   assert.ok(parkedProblem('Claude sẽ để phần còn sót cho phiên sau.'));
   assert.ok(parkedProblem('Bạn sẽ thấy còn sót 2 file.'), 'only Claude\'s own step is skipped');
+  assert.ok(parkedProblem('Claude sẽ merge PR, còn sót 2 test lỗi chưa sửa.'), 'a leftover in its own clause');
+  assert.ok(parkedProblem('Claude sẽ sửa phần còn sót ở PR sau.'), 'put off to a later PR');
+  assert.ok(parkedProblem('Claude sẽ sửa phần còn sót vào ngày mai.'), 'put off to tomorrow');
 });
 
 test('watch-guard: a watcher reports at the sooner of its deadline and checkpoint, so a short deadline needs no long timeout (kaizen fixture)', () => {
@@ -439,6 +442,14 @@ test('worker-stall: an idle worker names the process holding its worktree, never
     { pid: '13', etime: '02:00', args: 'node /x/node_modules/vite/bin/vite.js' },
   ];
   assert.equal(w.heldBy('/wt', () => rows), ' holding=npm 18m pid=12');
+  // A Claude worker's MCP servers are its own children and run all session; a command goes through a shell.
+  const claude = [
+    { pid: '20', ppid: '1', etime: '40:00', args: '/opt/claude/bin/claude --output-format stream-json' },
+    { pid: '21', ppid: '20', etime: '39:58', args: 'node /opt/mcp/image-analysis-server.cjs' },
+    { pid: '22', ppid: '20', etime: '39:50', args: '/bin/zsh -c npm exec tsx scripts/sign.ts' },
+    { pid: '23', ppid: '22', etime: '18:05', args: 'npm exec tsx scripts/sign.ts' },
+  ];
+  assert.equal(w.heldBy('/wt', () => claude), ' holding=npm 18m pid=23');
   assert.equal(w.heldBy('/wt', () => { throw new Error('no lsof'); }), '');
   assert.equal(w.minutesOf('1-02:03:04'), 1440 + 120 + 3);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stall-held-'));

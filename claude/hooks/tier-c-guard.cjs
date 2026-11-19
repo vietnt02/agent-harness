@@ -111,7 +111,7 @@ function scanScope(all, scope) {
 
 // The docker write a simple command makes (`docker pull`, `docker compose up`), or null. Global
 // flags with a value (`-H host`, `--context x`, `-f file`) are skipped before the verb.
-const DOCKER_WRITE = /^(run|pull|rm|rmi|stop|restart|kill|start|create)$/;
+const DOCKER_WRITE = /^(run|pull|rm|rmi|stop|restart|kill|start|create|prune)$/;
 const COMPOSE_WRITE = /^(up|down|restart|stop|rm|pull|start|kill|create|run)$/;
 const DOCKER_VALUE = /^(-H|--host|-c|--context|--config|-l|--log-level)$/;
 const COMPOSE_VALUE = /^(-f|--file|-p|--project-name|--project-directory|--env-file|--profile|--ansi|--parallel|--progress)$/;
@@ -133,7 +133,8 @@ function dockerWrite(words) {
     const c = w[verbAt(w, i + 1, COMPOSE_VALUE)] || '';
     return COMPOSE_WRITE.test(c) ? `docker compose ${c}` : null;
   }
-  if (v === 'container' || v === 'image') return DOCKER_WRITE.test(w[i + 1] || '') ? `docker ${v} ${w[i + 1]}` : null;
+  // `docker volume rm`, `docker system prune`, `docker image prune` cannot be undone.
+  if (/^(container|image|volume|network|system|builder)$/.test(v)) return DOCKER_WRITE.test(w[i + 1] || '') ? `docker ${v} ${w[i + 1]}` : null;
   return DOCKER_WRITE.test(v) ? `docker ${v}` : null;
 }
 function dockerWriteIn(text, depth = 0) {
@@ -148,17 +149,21 @@ function dockerWriteIn(text, depth = 0) {
   }
   return null;
 }
-// `{ host, hit }` for the first docker write the command runs on another host over ssh, or null.
-function remoteDockerWrite(command, cwd) {
+// `{ host, hit }` for the first docker write the command runs on another host over ssh, also from a
+// local script it runs (`bash deploy.sh` holding `ssh h docker restart x`), or null.
+function remoteDockerWrite(command, cwd, depth = 0) {
   for (const s of scriptsRun(command, cwd || process.cwd())) {
-    if (!s.remote) continue;
-    const hit = dockerWriteIn(s.text);
+    const hit = s.remote ? dockerWriteIn(s.text) : null;
     if (hit) return { host: s.remote, hit };
+    const inner = !s.remote && depth < 2 ? remoteDockerWrite(s.text, cwd, depth + 1) : null;
+    if (inner) return inner;
   }
   return null;
 }
 const READ_INSTEAD = 'To read a file in a volume: `docker exec <running container> cat <path>`, or the volume\'s ' +
   'path on the host (`docker volume inspect -f \'{{.Mountpoint}}\' <volume>`); never pull an image to read one.';
+// The read hint fits a container started (or an image pulled) to read something, not a restart or a removal.
+const readHint = (hit) => (/ (run|pull|create)$/.test(hit) ? ` ${READ_INSTEAD}` : '');
 
 function tailRecords(file) {
   const fd = fs.openSync(file, 'r');
@@ -223,7 +228,7 @@ function approvedPlan(sessionId, cwd) {
   return false;
 }
 
-module.exports = { chainedProdWrite, latestHuman, remoteDockerWrite, READ_INSTEAD };
+module.exports = { chainedProdWrite, latestHuman, remoteDockerWrite, READ_INSTEAD, readHint };
 if (require.main !== module) return;
 
 let input = '';
@@ -236,7 +241,7 @@ process.stdin.on('end', () => {
     const remote = remoteDockerWrite(raw, data.cwd);
     const remoteText = remote && `ssh ${remote.host} … ${remote.hit}`;
     const refuse = (who) => {
-      process.stderr.write(`tier-c-guard: \`${remoteText}\` changes ${remote.host}: a production write, which ${who}. ${READ_INSTEAD}\n`);
+      process.stderr.write(`tier-c-guard: \`${remoteText}\` changes ${remote.host}: a production write, which ${who}.${readHint(remote.hit)}\n`);
       process.exit(2);
     };
     if (remote && data.agent_id) refuse('a subagent never makes (it only reads, CLAUDE.md § Delegation); report what you need read');
@@ -269,7 +274,7 @@ process.stdin.on('end', () => {
       `tier-c-guard: "${tierC ? tierC[0] : remoteText}" is tier C, but the user's latest words ("${quote}") ` +
         (asking ? 'are a question, not a go-ahead. ' : 'come right after an interrupt. ') +
         'Answer the question first, say in one line what you would run, and ask (CLAUDE.md § Mutation gate).' +
-        (tierC ? '' : ` ${READ_INSTEAD}`) + '\n'
+        (tierC ? '' : readHint(remote.hit)) + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open */ }

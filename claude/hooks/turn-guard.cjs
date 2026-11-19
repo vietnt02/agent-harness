@@ -70,9 +70,12 @@ function parkedProblem(text) {
       // A negation or a condition ("nếu doc lệch", "doc lệch thì sửa") states a rule, not a leftover.
       if (/(không|nếu|khi|gặp)\s+(\S+\s+){0,3}$/i.test(before) || /^\s*thì(\s|[,.]|$)/i.test(after)) continue;
       // A step Claude says it takes itself ("Claude sẽ … tắt server còn sót", a sentence opening
-      // "Sẽ gỡ …") is its own next step, not a leftover; one put off ("cho phiên sau") still is.
-      if (/(^\s*(?:[-*]\s+|\d+[.)]\s+)?(?:\*\*)?|\bclaude\s+)sẽ\s/i.test(before) &&
-        !/(để\s+lại|phiên\s+sau|lần\s+sau|hôm\s+sau|tuần\s+sau|sau\s+này)/i.test(p)) continue;
+      // "Sẽ gỡ …") is its own next step, not a leftover. Still a leftover: one put off ("cho phiên
+      // sau", "ở PR sau", "ngày mai"), one not done ("chưa sửa"), or a clause of its own after the
+      // step ("Claude sẽ merge PR, còn sót 2 test").
+      const clause = before.slice(Math.max(before.lastIndexOf(','), before.lastIndexOf(';'), before.lastIndexOf(':')) + 1);
+      if (/(^\s*(?:[-*]\s+|\d+[.)]\s+)?(?:\*\*)?|\bclaude\s+)sẽ\s/i.test(before) && /\S/.test(clause) &&
+        !/(để\s+lại|\b(phiên|lần|lượt|hôm|tuần|PR|MR|vòng)\s+sau\b|ngày\s+mai|sau\s+này|chưa\s+(sửa|fix|làm|xong|kiểm|xử\s+lý|cập\s+nhật))/i.test(p)) continue;
       // A label naming a kind of problem ("Tài liệu lệch thực tế: …" opening a line or a table cell)
       // defines it, it reports none.
       const cell = before.slice(before.lastIndexOf('|') + 1);
