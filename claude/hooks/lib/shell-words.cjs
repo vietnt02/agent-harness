@@ -140,6 +140,8 @@ function parse(cmd, scope, out, id) {
       sub(cmd.slice(i + 1, k));
       i = k;
     } else if (/[;&|()\n]/.test(c)) {
+      // A lone `|` (or `|&`) pipes this command's output into the next one of its scope (`pipedInto`).
+      if (c === '|' && cmd[i + 1] !== '|' && cmd[i - 1] !== '|') { endWord(); words.pipe = true; }
       endCmd();
     } else if (/\s/.test(c)) {
       endWord();
@@ -226,4 +228,116 @@ function expandVars(word, vars) {
   return /[$`]/.test(out) ? null : out;
 }
 
-module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick };
+// Scripts a command hands to a shell beyond its own words, each `{ remote, text }`: `remote` is the
+// ssh host the text runs on, null for a local shell. Read: the remote command of `ssh [opts] host
+// <cmd…>`; for an ssh whose remote side reads its stdin (no command, or a shell), a heredoc on the
+// ssh line and a file fed with `<`; a file run as `bash <file>` or fed to a local shell with `<`. A
+// file's text comes from a heredoc this command writes to it (`cat > f <<'EOF'`, `tee f <<EOF`), else
+// from disk (under 200 kB). `bash -c '<s>'` and a heredoc fed to a local shell are this command's own
+// words already (innerScript, commands).
+const SSH_VALUE = /^-[BbcDEeFIiJLlmOoPpQRSWw]$/;
+const SHELL = /^(ba|z|da|k)?sh$/;
+function readSmall(file) {
+  const fs = require('fs');
+  try { return fs.statSync(file).size < 200000 ? fs.readFileSync(file, 'utf8') : null; } catch (_) { return null; }
+}
+function scriptsRun(command, cwd = process.cwd(), read = readSmall) {
+  const path = require('path');
+  const home = require('os').homedir();
+  const raw = String(command || '').replace(/\\\r?\n/g, ' ');
+  const all = commands(raw);
+  const vars = {};
+  // A variable whose value is unknown here (`T=$(mktemp)`) still names one file within the command.
+  for (const words of all) {
+    for (const [k, v] of assignments(words) || []) { const e = expandVars(v, vars); vars[k] = e !== null ? e : `\u0000${k}`; }
+  }
+  const resolve = (w) => {
+    const e = expandVars(String(w || '').replace(/^~(?=\/|$)/, home), vars);
+    return e ? path.resolve(cwd, e) : null;
+  };
+  const docs = [...raw.matchAll(HEREDOC)].map((m) => ({
+    before: raw.slice(raw.lastIndexOf('\n', m.index - 1) + 1, m.index),
+    after: m[3],
+    body: m[0].slice(m[0].indexOf('\n') + 1, m[0].lastIndexOf('\n')),
+  }));
+  const written = {};
+  for (const d of docs) {
+    // `cat > f <<EOF`, `cat > "f" 2>/dev/null <<EOF`, `tee [-a] f >/dev/null <<EOF`, `cat <<EOF > f`.
+    const t = /(?:^|[\s;&|(])(?:cat\b[^\n<>]*>>?\s*|tee\s+(?:-a\s+)?)([^\s<>;&|()]+)(?:\s+\d*>>?\s*\S+)*\s*$/.exec(d.before) ||
+      (/(?:^|[\s;&|(])cat\s*$/.test(d.before) && /^\s*>>?\s*([^\s<>;&|()]+)/.exec(d.after));
+    const f = t && resolve(t[1].replace(/^(['"])(.*)\1$/, '$2'));
+    if (f) written[f] = d.body;
+  }
+  const fileText = (w) => {
+    const f = resolve(w);
+    if (!f) return null;
+    return Object.hasOwn(written, f) ? written[f] : read(f);
+  };
+  // A command's words split into operands and the file its stdin reads (`<f`, `< f`); output
+  // redirections and a heredoc marker are dropped.
+  const operands = (words) => {
+    const out = [];
+    let stdin = null;
+    for (let k = 0; k < words.length; k++) {
+      const x = words[k];
+      if (/^\d*<</.test(x)) continue;
+      else if (/^\d*<$/.test(x)) stdin = words[++k] || null;
+      else if (/^\d*<[^<>&]/.test(x)) stdin = x.replace(/^\d*</, '');
+      else if (/^(\d*>>?|&>>?)$/.test(x)) k++;
+      else if (!/^(\d*>>?|&>>?|\d*>&)/.test(x)) out.push(x);
+    }
+    return { out, stdin };
+  };
+  const scripts = [];
+  const add = (remote, text) => { if (text && !scripts.some((s) => s.remote === remote && s.text === text)) scripts.push({ remote, text }); };
+  // The files a `cat` piped into command k reads (`cat x.sh | ssh h bash -s`).
+  const catInto = (k) => {
+    let j = k - 1;
+    while (j >= 0 && all[j].scope !== all[k].scope) j--;
+    const up = j >= 0 && all[j].pipe ? program(all[j]) : [];
+    return up[0] === 'cat' ? operands(up.slice(1)).out.filter((a) => !a.startsWith('-')) : [];
+  };
+  for (let k = 0; k < all.length; k++) {
+    const words = all[k];
+    const w = program(words);
+    if (w[0] === 'ssh') {
+      let i = 1;
+      for (; i < w.length && w[i].startsWith('-') && w[i] !== '--'; i++) if (SSH_VALUE.test(w[i])) i++;
+      if (w[i] === '--') i++;
+      const host = w[i];
+      if (!host || /^\d*[<>]/.test(host)) continue;
+      const { out, stdin } = operands(w.slice(i + 1));
+      const text = out.join(' ');
+      add(host, text);
+      const first = text ? program(commands(text)[0] || []) : [];
+      if (text && !(SHELL.test(first[0] || '') && innerScript(first) === null)) continue;
+      if (stdin) add(host, fileText(stdin));
+      for (const f of catInto(k)) add(host, fileText(f));
+      // A heredoc on this ssh line (`ssh h bash -s <<EOF` has its body inlined by dropHeredocs, so the
+      // line is matched in the raw text).
+      const onLine = new RegExp(`(^|[\\s;&|(])ssh\\b[^\\n]*\\s${host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+      for (const d of docs) if (onLine.test(d.before)) add(host, d.body);
+    } else if (SHELL.test(w[0] || '') && innerScript(w) === null) {
+      const { out, stdin } = operands(w.slice(1));
+      const file = out.find((a) => !a.startsWith('-'));
+      if (file || stdin) add(null, fileText(file || stdin));
+      else for (const f of catInto(k)) add(null, fileText(f));
+    }
+  }
+  return scripts;
+}
+
+// The commands a command's output is piped into, in order: for `a | b | c`, a's are [b, c].
+function pipedInto(all, k) {
+  const out = [];
+  for (let i = k; all[i] && all[i].pipe;) {
+    let j = i + 1;
+    while (j < all.length && all[j].scope !== all[i].scope) j++;
+    if (j >= all.length) break;
+    out.push(all[j]);
+    i = j;
+  }
+  return out;
+}
+
+module.exports = { commands, program, innerScript, dropHeredocs, assignments, expandVars, closeParen, closeTick, scriptsRun, pipedInto };

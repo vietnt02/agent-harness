@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * worktree-after-release.cjs - PostToolUse(Bash): after `orca orchestration worker-release`,
+ * worktree-after-release.cjs - PostToolUse(Bash): after `orca orchestration worker-release`, or a
+ * `worker-show` reporting `terminalState` released (Orca's own release after `worker_done`),
  * remind to remove the linked worktree the released worker ran in. Only prints the facts and the
  * command; `orca worktree rm` is asynchronous, so removal is checked later, not here.
  * When a dispatch the command names cannot be read, prints that instead of the reminder (a silent
@@ -45,9 +46,29 @@ function openReviews(dir) {
   return prs.map((p) => `#${p.number}`);
 }
 
-function describe(dispatch, show) {
+// Another dispatch still using the worktree: not settled yet, or settled with its agent still alive in
+// a terminal Orca has not released (kept open for a next task, `worker-keep-open`). An `exited` or
+// `unverifiable` one uses nothing: a context-only dispatch (`orchestration dispatch`) stays `retained`
+// and `unverifiable` for good. A worktree is reused by later dispatches (a fix round, a re-dispatch on
+// the same `--worktree path:`), so a released one says nothing about the others.
+const SETTLED = /^(succeeded|failed|stopped|abandoned)$/;
+const GONE = /^(exited|unverifiable)$/;
+function sharedWith(dispatch, dir, list = () => run('orca', ['orchestration', 'worker-list', '--json'])) {
+  const result = JSON.parse(list()).result || {};
+  const workers = Array.isArray(result) ? result : result.workers || [];
+  return workers.find((w) => w.dispatchId !== dispatch && samePath(String(w.workspace || '').split('::').pop(), dir) &&
+    (!SETTLED.test(String(w.state)) || (w.terminalState !== 'released' && !GONE.test(String(w.liveness))))) || null;
+}
+
+function describe(dispatch, show, list) {
   const dir = linkedWorktree(dispatch, show);
   if (!dir) return null;
+  let other;
+  try { other = sharedWith(dispatch, dir, list); } catch (e) {
+    return `${dispatch}: không đọc được \`orca orchestration worker-list --json\` (${String(e.message || e).slice(0, 80)}); ` +
+      `chỉ gỡ worktree ${dir} khi không worker nào khác còn dùng nó.`;
+  }
+  if (other) return `${dispatch}: worktree ${dir} vẫn đang được ${other.dispatchId} dùng (${other.state}, terminal ${other.terminalState || '?'}); không gỡ.`;
   const keep = [];
   const dirty = run('git', ['status', '--porcelain'], dir).split('\n').filter(Boolean);
   if (dirty.length) keep.push(`${dirty.length} file chưa commit (${dirty.slice(0, 5).map((l) => l.slice(3)).join(', ')})`);
@@ -75,7 +96,30 @@ function refused(dispatch, output, alone = true) {
   return null;
 }
 
-module.exports = { linkedWorktree, worktreeOf, describe, openReviews, refused };
+// The dispatches a command released, or showed released: a `worker-release` run, and a `worker-show`
+// run whose output says `terminalState` released (Orca releases a worker by itself after
+// `worker_done`, so the coordinator sees it there). Text naming one (a heredoc, a spec, an echo) is no run.
+// Each dispatch's own record decides: worker-show prints one record, on one line in the concise
+// `--json` and plain views, over many in `--full` (where `projection.resource` holds `terminalState`).
+function releasedIds(command, output) {
+  const text = String(output || '');
+  let record = null;
+  try { record = JSON.parse(text).result || null; } catch (_) { /* plain text, or several records */ }
+  const whole = (id) => !!record && [record.dispatchId, record.dispatch?.id, record.worker?.dispatchId].includes(id) &&
+    [record.terminalState, record.projection?.resource?.terminalState].includes('released');
+  const lines = text.split('\n');
+  const shown = (id) => whole(id) || lines.some((l) => l.includes(id) && /\bterminalState(?:"\s*:\s*"|=)released\b/.test(l));
+  const ids = [];
+  for (const [cmd, sub, verb, ...rest] of commands(command).map(program)) {
+    if (cmd !== 'orca' || sub !== 'orchestration') continue;
+    const named = rest.join(' ').match(/ctx_[0-9a-f]+/g) || [];
+    if (verb === 'worker-release') ids.push(...named);
+    else if (verb === 'worker-show') ids.push(...named.filter(shown));
+  }
+  return [...new Set(ids)];
+}
+
+module.exports = { linkedWorktree, worktreeOf, describe, openReviews, refused, releasedIds, sharedWith };
 if (require.main !== module) return;
 
 let raw = '';
@@ -86,19 +130,16 @@ process.stdin.on('end', () => {
     const output = typeof res === 'string' ? res : `${res.stdout || ''}\n${res.stderr || ''}`;
     const command = input.command || '';
     if (tool !== 'Bash') process.exit(0);
-    // Only a release that runs: text naming one (a heredoc, a spec, an echo) is no release.
-    const released = commands(command).map(program)
-      .filter(([cmd, sub, verb]) => cmd === 'orca' && sub === 'orchestration' && verb === 'worker-release')
-      .flatMap((w) => w.join(' ').match(/ctx_[0-9a-f]+/g) || []);
     const notes = [];
-    const ids = [...new Set(released)];
+    const ids = releasedIds(command, output);
     const lines = ids
       .map((d) => {
         const no = refused(d, output, ids.length === 1);
         if (no) { notes.push(no); return null; }
         try { return describe(d); } catch (e) {
           return `${d}: không đọc được worktree (${String(e.message || e).slice(0, 120)}); tự tìm bằng ` +
-            `\`orca orchestration worker-show --dispatch ${d} --json --full\` rồi gỡ nó.`;
+            `\`orca orchestration worker-show --dispatch ${d} --json --full\`, rồi chỉ gỡ khi nó không còn file chưa ` +
+            'commit, commit chưa push, PR/MR mở hay worker khác dùng chung.';
         }
       })
       .filter(Boolean);

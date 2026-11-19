@@ -15,13 +15,17 @@
  * - PreToolUse:
  *   - Both Direct & Worker:
  *     1. `privacy-checker` (.env, credentials, private keys across read_file/write_file/edit_file/run_command)
- *     2. `scout-checker` (.ckignore heavy directories across Read/Bash/Grep/Glob)
+ *     1b. `secret-file-guard` `inspectionLeak` (`docker inspect` of the config, `ps -o args`, `/proc/<pid>/cmdline`:
+ *        a secret passed as a flag or env value; held once per conversation)
+ *     2. `scout-checker` (.ckignore heavy directories across Read/Bash/Grep/Glob; the free-text values of a
+ *        command that sends text, `orca orchestration send --body`, `git commit -m`, `gh pr create --body`, are not read)
+ *     5b. `tier-c-guard` `remoteDockerWrite` (`ssh <host> … docker run|pull|compose up…`): a worker is always denied
  *     3. `push-after-pr-guard` (blocks git push onto a branch with a MERGED/CLOSED PR/MR)
  *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_airflow)
  *   - Direct interactive session (non-Orca worker):
  *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, reminds once per sub-repo/worktree per session, on the first non-Read tool in `repos/*`, to read `AGENTS.md`; the reminder reaches agy before its next step)
  *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
- *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill` and `trigger --conf` when the latest user prompt is a question)
+ *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill`, `trigger --conf` and a docker write over ssh when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
  *     9. `main-checkout-guard` (git writes into a main checkout: blocked once; `git -c core.hooksPath=...`: always)
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
@@ -82,6 +86,53 @@ const WORKER_START_HELP = /\bworker-start\b[^;&|\n]*\s(?:--help|-h)\b/;
 
 const stripHeredocs = (s) =>
   String(s || '').replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, '<<HEREDOC');
+// A Claude hook from this checkout (the bridge is linked from it), so bridge and hook always change
+// together; the installed copy when this checkout lacks it.
+const localHook = (rel) => {
+  const local = path.join(__dirname, '..', 'claude', 'hooks', rel);
+  return fs.existsSync(local) ? local : path.join(HOOKS_DIR, rel);
+};
+
+// The command as scout-block should read it: the values of free-text flags of a command that sends
+// text (an Orca message, a commit, a PR, MR or issue body) are dropped, since a build log quoted there
+// reads no directory; so are heredoc bodies nothing runs (a report written with `cat > f <<EOF`), which
+// shell-words drops. A command with neither stays as typed.
+const TEXT_FLAGS = {
+  orca: /^(--body|--subject|--message|--question|--text)$/,
+  git: /^(-m|--message)$/,
+  gh: /^(-b|--body|-t|--title|-c|--comment)$/,
+  glab: /^(-d|--description|-m|--message|-t|--title)$/,
+};
+const sendsText = (w) =>
+  (w[0] === 'orca' && w[1] === 'orchestration' && /^(send|reply|ask)$/.test(w[2] || '')) ||
+  (w[0] === 'git' && w.includes('commit')) ||
+  (w[0] === 'gh' && /^(pr|issue)$/.test(w[1] || '') && /^(create|comment|edit|review|close)$/.test(w[2] || '')) ||
+  (w[0] === 'glab' && /^(mr|issue)$/.test(w[1] || '') && /^(create|note|update|close|reopen)$/.test(w[2] || ''));
+// `--body x` (the value is the next word), `--body=x` or `-mx` (joined).
+const textFlag = (flags, w) => flags.test(w);
+const textJoined = (flags, w) => { const m = /^(--[\w-]+)=|^(-\w)./.exec(w); return Boolean(m && flags.test(m[1] || m[2])); };
+function scoutCommand(command) {
+  try {
+    const { commands, program } = require(localHook(path.join('lib', 'shell-words.cjs')));
+    const all = commands(command);
+    if (!/<</.test(command) && !all.some((words) => sendsText(program(words)))) return command;
+    const quote = (w) => (/^[\w@%+=:,./-]+$/.test(w) ? w : `'${String(w).replace(/'/g, "'\\''")}'`);
+    return all.map((words) => {
+      const w = program(words);
+      const flags = sendsText(w) ? TEXT_FLAGS[w[0]] : null;
+      if (!flags) return words.map(quote).join(' ');
+      const kept = [];
+      for (let i = 0; i < words.length; i++) {
+        if (textFlag(flags, words[i])) i++;
+        else if (!textJoined(flags, words[i])) kept.push(words[i]);
+      }
+      return kept.map(quote).join(' ');
+    }).join('; ');
+  } catch (_) {
+    return command;
+  }
+}
+
 function findUmbrellaNapHook(cwd) {
   let dir = path.resolve(cwd || process.cwd());
   while (true) {
@@ -415,6 +466,22 @@ function handlePreToolUse(payload) {
     }
   } catch (_) {}
 
+  // 1b. A command printing process command lines or a container's config, where a secret passed as
+  // a flag or env value sits (secret-file-guard `inspectionLeak`): held once per conversation.
+  if (claudeTool === 'Bash' && command && payload.conversationId) {
+    try {
+      const { inspectionLeak, inspectionNote } = require(localHook('secret-file-guard.cjs'));
+      const hit = inspectionLeak(command, cwd);
+      if (hit && require(localHook(path.join('lib', 'block-once.cjs'))).firstTime(payload.conversationId, 'secret-file-guard', command)) {
+        process.stdout.write(JSON.stringify({
+          decision: 'deny',
+          reason: `${inspectionNote(hit)} Said once: if the command is right as it is, run it again unchanged and it passes.`,
+        }));
+        return;
+      }
+    } catch (_) {}
+  }
+
   // 2. Scout block (.ckignore ignored heavy directories)
   if (claudeTool === 'Read' || claudeTool === 'Bash' || claudeTool === 'Grep' || claudeTool === 'Glob') {
     try {
@@ -425,7 +492,7 @@ function handlePreToolUse(payload) {
           file_path: filePath,
           path: filePath,
           pattern: args.Query || args.Pattern || '',
-          command,
+          command: claudeTool === 'Bash' ? scoutCommand(command) : command,
         },
         options: {
           claudeDir: CLAUDE_DIR,
@@ -503,6 +570,23 @@ function handlePreToolUse(payload) {
     } catch (_) {}
   }
 
+  // 5b. A docker write on another host over ssh (tier-c-guard `remoteDockerWrite`): a worker never
+  // writes production; a direct session is gated in step 7.
+  let remote = null;
+  if (claudeTool === 'Bash' && command) {
+    try { remote = require(localHook('tier-c-guard.cjs')).remoteDockerWrite(command, cwd); } catch (_) {}
+  }
+  if (remote && worker) {
+    let readInstead = '';
+    try { readInstead = require(localHook('tier-c-guard.cjs')).readHint(remote.hit); } catch (_) {}
+    process.stdout.write(JSON.stringify({
+      decision: 'deny',
+      reason: `tier-c-guard: \`ssh ${remote.host} … ${remote.hit}\` changes ${remote.host}: a production write, which a worker ` +
+        `never makes (its manifest); ask the coordinator.${readInstead}`,
+    }));
+    return;
+  }
+
   if (worker) return;
 
   // 6. Umbrella sub-repo context guard (`nap-context-repo-con.cjs`)
@@ -548,8 +632,9 @@ function handlePreToolUse(payload) {
     }
   }
 
-  // 7. Tier-C guard: a tier-C Airflow step when the latest user message is a question.
-  if (claudeTool === 'Bash' && TIER_C.test(stripHeredocs(command))) {
+  // 7. Tier-C guard: a tier-C Airflow step, or a docker write on another host, when the latest user
+  // message is a question.
+  if (claudeTool === 'Bash' && (TIER_C.test(stripHeredocs(command)) || remote)) {
     try {
       const { isQuestion } = require(path.join(HOOKS_DIR, 'lib', 'user-intent.cjs'));
       const tail = readJsonLines(transcriptFile(payload), 128 * 1024, false);
@@ -562,7 +647,8 @@ function handlePreToolUse(payload) {
       }
       if (lastUser && isQuestion(lastUser.content)) {
         const quote = lastUser.content.replace(/\s+/g, ' ').slice(0, 160);
-        const matched = TIER_C.exec(stripHeredocs(command))[0];
+        const airflow = TIER_C.exec(stripHeredocs(command));
+        const matched = airflow ? airflow[0] : `ssh ${remote.host} … ${remote.hit}`;
         process.stdout.write(
           JSON.stringify({
             decision: 'deny',
@@ -685,12 +771,14 @@ function handlePostToolUse(payload) {
   const toolOutput = String(payload.toolOutput || payload.output || '');
 
   if (toolCall.name === 'run_command') {
-    if (/\borca\s+orchestration\s+worker-release\b/.test(command)) {
+    // A release, or a worker-show of a worker Orca released by itself: the hook reads the output.
+    if (/\borca\s+orchestration\s+worker-(release|show)\b/.test(command)) {
       const res = runClaudeHook(
         'worktree-after-release.cjs',
         {
           tool_name: 'Bash',
           tool_input: { command },
+          tool_response: { stdout: toolOutput, stderr: '' },
         },
         10000
       );

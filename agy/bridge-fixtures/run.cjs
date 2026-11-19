@@ -153,6 +153,76 @@ for (const [name, mode, toolCall, want, extra, requiredLib] of cases) {
   report(got === want, name, got === want ? '' : `got ${got}, want ${want}`);
 }
 
+// A docker write on another host over ssh (a worker: always denied; a direct session: gated when the
+// user's latest words are a question), a command printing a container's config (held once per
+// conversation), and a message body quoting build output (scout reads no free text).
+{
+  const run = (cmd) => ({ name: 'run_command', args: { CommandLine: cmd, Cwd: ws } });
+  const start = (mode, worker, said) => {
+    const convo = conversation(mode, worker);
+    if (said) fs.appendFileSync(convo.transcript, JSON.stringify({ type: 'USER_INPUT', content: said, step_index: 3 }) + '\n');
+    return convo;
+  };
+  // A report quoting vite build output, cut down from the reports AgentKit's scout checker denied: it
+  // reads `dist` or `node_modules` as a whole path segment of the text (a line opening with `dist/`, a
+  // `…/dist/…` inside one), here after two lines with parentheses, which the variable shape needs to be
+  // denied. Sent in the three shapes workers used: a heredoc in --body, a heredoc in a variable, $'…'.
+  const log = '- Lượt gọi xấu nhất (1000 dòng): 33,91 ms.\n- So với trần (500 dòng): thấp hơn ~235 lần.\n' +
+    'vite v8.2.1 building client environment for production...\n' +
+    'transforming (353) node_modules/@supabase/realtime-js/dist/module/phoenix/channe\n' +
+    '✓ 693 modules transformed.\n' +
+    'dist/registerSW.js                            0.13 kB\n' +
+    'dist/assets/index-abc.js                      1.20 kB';
+  const send = '--from term_x --type worker_done --subject "PASS: review xong" --task-id task_x --dispatch-id ctx_x --outcome succeeded';
+  // [name, mode, worker, the user's latest words, command, want, reason pattern, AgentKit lib needed]
+  const remoteCases = [
+    ['worker: ssh docker run', 'chat', true, null, "ssh vps_n8n 'docker run --rm -v n8n_data:/data alpine cat /data/config'",
+      'deny', /a worker never makes[\s\S]*docker exec/],
+    ['worker: ssh docker ps', 'chat', true, null, "ssh vps_n8n 'docker ps --format {{.Names}}'", 'allow'],
+    ['direct: ssh docker pull after a go-ahead', 'cli', false, 'làm đi', 'ssh vps_airflow docker pull alpine', 'allow'],
+    ['direct: ssh docker pull after a question', 'cli', false, 'xoá image chưa?', 'ssh vps_airflow docker pull alpine',
+      'deny', /is tier C, but the user's latest words/],
+    ['worker_done --body "$(cat <<EOF …)" quoting build output', 'chat', true, null,
+      `orca orchestration send ${send} --body "$(cat <<'EOF'\n${log}\nEOF\n)"`, 'allow', null, 'scout-checker.cjs'],
+    ['BODY=$(cat <<EOF …) quoting build output, then --body "$BODY"', 'chat', true, null,
+      `BODY=$(cat <<'EOF'\n${log}\nEOF\n)\norca orchestration send ${send} --body "$BODY"`, 'allow', null, 'scout-checker.cjs'],
+    ["ask --question $'…' naming a build path", 'chat', true, null,
+      "orca orchestration ask --from term_x --question $'Kế hoạch:\\n- bỏ ../dist/tasks khỏi build\\n- giữ \\\"Tổng quan\\\"'", 'allow', null, 'scout-checker.cjs'],
+    ['git commit -m "$(cat <<EOF …)" quoting build output', 'cli', false, null,
+      `git commit -m "$(cat <<'EOF'\nbuild: move the PWA files\n\n${log}\nEOF\n)"`, 'allow', null, 'scout-checker.cjs'],
+    ['glab mr create --description "$(cat <<EOF …)" quoting build output', 'chat', true, null,
+      `glab mr create --title "fix: x" --description "$(cat <<'EOF'\n${log}\nEOF\n)"`, 'allow', null, 'scout-checker.cjs'],
+    ['glab mr note --message quoting build output', 'chat', true, null,
+      `glab mr note 12 --message "$(cat <<'EOF'\n${log}\nEOF\n)"`, 'allow', null, 'scout-checker.cjs'],
+    ['a report written with cat > file <<EOF quoting build output', 'chat', true, null,
+      `cat > /tmp/report.md <<'EOF'\n${log}\nEOF`, 'allow', null, 'scout-checker.cjs'],
+    ['a script fed to bash still has its reads checked', 'chat', true, null,
+      "bash <<'EOF'\nls dist/\nEOF", 'deny', /SCOUT BLOCK/, 'scout-checker.cjs'],
+    ['a message sent beside a real read: the read is still blocked', 'chat', true, null,
+      `orca orchestration send ${send} --body "xong" && ls dist/`, 'deny', /SCOUT BLOCK/, 'scout-checker.cjs'],
+    ['ls dist/ still blocked', 'chat', true, null, 'ls dist/', 'deny', /SCOUT BLOCK/, 'scout-checker.cjs'],
+  ];
+  for (const [name, mode, worker, said, cmd, want, why, requiredLib] of remoteCases) {
+    if (requiredLib && !hasAgentKitLib(requiredLib)) {
+      console.log(`SKIP  ${name} (thiếu ${requiredLib})`);
+      continue;
+    }
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const got = bridgeFull(payload(mode, start(mode, worker, said), run(cmd)), tmp);
+    const ok = got.decision === want && (!why || why.test(got.reason));
+    report(ok, name, ok ? '' : `got ${got.decision}: ${got.reason.slice(0, 160)}`);
+  }
+  {
+    const name = 'docker inspect of the config: denied once per conversation, then passes';
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = start('chat', true, null);
+    const first = bridgeFull(payload('chat', convo, run('ssh vps_n8n docker inspect n8n-redis')), tmp);
+    const second = bridgeFull(payload('chat', convo, run('ssh vps_n8n docker inspect n8n-redis')), tmp);
+    const ok = first.decision === 'deny' && /Print names only/.test(first.reason) && second.decision === 'allow';
+    report(ok, name, ok ? '' : `first=${first.decision}, second=${second.decision}`);
+  }
+}
+
 // Umbrella sub-repo guard: a copy of the umbrella's real nap-context-repo-con.cjs in a fake umbrella
 // above the temp dir. The hook only reminds: the first non-Read touch in a sub-repo is allowed and queues one
 // reminder naming AGENTS.md and read_file, which agy gets at its next step (PreInvocation); later commands in

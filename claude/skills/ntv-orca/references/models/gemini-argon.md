@@ -10,11 +10,11 @@ source: 2 phiên (3 PR repo Python, worker và reviewer cùng model; 4 lượt r
 
 # gemini-argon
 
-Mặc định làm **Reviewer** (`SKILL.md` § 2, § 4) và cho **Coordinator** khi user mở `agy` trực tiếp (`../antigravity.md`). Worker mặc định là `gemini-4-hydrogen` (`gemini-hydrogen.md`); Argon làm worker chỉ khi user chỉ định.
+Làm **Coordinator** khi user mở `agy` trực tiếp (`../antigravity.md`); làm worker hay reviewer chỉ khi user chỉ định. Builder chọn theo `SKILL.md` § 2, reviewer mặc định là `gemini-neon` (`gemini-neon.md`).
 
 ## Giao gì / Không giao gì
 
-- **Giao:** Review diff theo Scope và Nghiệm thu (`SKILL.md` § 4); research cần context lớn (tài liệu ngoài, nhiều nguồn); task backend cần đọc kỹ plan, bắt lỗi plan qua `ask` và sửa gọn trong một vòng.
+- **Giao (khi user chỉ định):** Review diff theo Scope và Nghiệm thu (`SKILL.md` § 4); research cần context lớn (tài liệu ngoài, nhiều nguồn); task backend cần đọc kỹ plan, bắt lỗi plan qua `ask` và sửa gọn trong một vòng.
 - **Không giao / Điểm yếu:** Làm worker hay viết thừa (bí danh, nhận nhiều kiểu đầu vào, nhánh dự phòng chết, `except Exception` nuốt lỗi), lọt ca biên (`None`, thiếu config, lỗi ghi đĩa) và thêm khoá ngoài hợp đồng. Làm reviewer dễ dãi (PASS sớm, sót lỗi chặn merge) và có thể bịa dòng log hoặc đường dẫn file; khi spec giữ đúng phạm vi reviewer (`SKILL.md` § 4) thì mọi lượt đều bắt lỗi chặn merge thật, kèm `file:dòng` và số đo.
 
 ## Phải nói rõ trong spec — câu chèn sẵn vào `--spec`

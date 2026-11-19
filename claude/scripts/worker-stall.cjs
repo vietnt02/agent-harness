@@ -8,7 +8,10 @@
  *                    at most --ask-max minutes (then `stale ask-unanswered>…`)
  *   stale <why>      nothing in its worktree changed for --idle-min minutes (nor, for an agy terminal
  *                    worker, its conversation DB), or the worker's messages
- *                    since the last run hold >= --api-errors 502/503/429-type errors
+ *                    since the last run hold >= --api-errors 502/503/429-type errors; an idle line
+ *                    adds `holding=<name> <n>m pid=<pid>`, the longest-running process in the
+ *                    worktree other than the agent, its shell and the helpers it started with (MCP
+ *                    servers): a command waiting on input
  * A worker with a transcript that is only reading for a long time also shows `stale`: a cue to look
  * (worker-read twice, a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker
  * run in a terminal has no Orca transcript: no error count and no ask wait then (an unanswered ask
@@ -150,6 +153,53 @@ function agyLastStep(workspace, dir = AGY_CONVERSATIONS) {
   return null;
 }
 
+// The process that has run longest with its working directory in `workspace`, other than the agent,
+// its shell and what the agent starts itself (its MCP servers: children of the agent, not of a shell),
+// as ` holding=<name> <minutes>m pid=<pid>`, or '' (none, or lsof/ps unavailable). A command waiting
+// on input that never comes (`npm exec` asking to install) shows here.
+const NOT_HOLDING = /^-?(zsh|bash|sh|dash|fish|login|claude|agy|antigravity|codex|gemini|orca-provider-exec)$/;
+function processes(dir) {
+  const own = typeof process.getuid === 'function' ? ['-u', String(process.getuid())] : [];
+  const out = execFileSync('lsof', ['-w', '-a', ...own, '-d', 'cwd', '-Fpn'], { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'] });
+  // lsof prints real paths (`/private/tmp`, not `/tmp`).
+  let real = dir;
+  try { real = fs.realpathSync(dir); } catch (_) { /* as given */ }
+  const inside = (p) => [dir, real].some((d) => p === d || p.startsWith(`${d}/`));
+  const pids = [];
+  let pid = null;
+  for (const line of out.split('\n')) {
+    if (line[0] === 'p') pid = line.slice(1);
+    else if (line[0] === 'n' && pid && inside(line.slice(1))) pids.push(pid);
+  }
+  if (!pids.length) return [];
+  const ps = execFileSync('ps', ['-o', 'pid=,ppid=,etime=,args=', '-p', pids.join(',')], { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'] });
+  return ps.split('\n').map((l) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(l)).filter(Boolean).map((m) => ({ pid: m[1], ppid: m[2], etime: m[3], args: m[4] }));
+}
+// `[[dd-]hh:]mm:ss` → seconds, minutes.
+function secondsOf(etime) {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime || '');
+  return m ? Number(m[1] || 0) * 86400 + Number(m[2] || 0) * 3600 + Number(m[3]) * 60 + Number(m[4]) : 0;
+}
+const minutesOf = (etime) => Math.floor(secondsOf(etime) / 60);
+// The agent's own helpers (MCP servers, Orca's provider bridge) start with it, in its first second on
+// the Claude agents measured. A command it runs comes after a model reply, and Codex and agy run it as
+// `bash -lc '<cmd>'`, which bash replaces by the command: the agent's child too, told apart only by
+// its later start.
+const STARTED_WITH_S = 10;
+function heldBy(workspace, list = processes) {
+  let rows = [];
+  try { rows = list(workspace); } catch (_) { return ''; }
+  const name = (w) => path.basename(String(w || ''));
+  const own = (r) => { const [a, b] = r.args.split(/\s+/); return NOT_HOLDING.test(name(a)) || (name(a) === 'node' && NOT_HOLDING.test(name(b))); };
+  const shell = (r) => /^-?(zsh|bash|sh|dash|fish|login)$/.test(name(r.args.split(/\s+/)[0]));
+  const agents = new Map(rows.filter((r) => own(r) && !shell(r)).map((r) => [r.pid, secondsOf(r.etime)]));
+  const helper = (r) => !!r.ppid && agents.has(r.ppid) && agents.get(r.ppid) - secondsOf(r.etime) <= STARTED_WITH_S;
+  const held = rows
+    .filter((r) => !own(r) && !helper(r))
+    .sort((x, y) => secondsOf(y.etime) - secondsOf(x.etime))[0];
+  return held ? ` holding=${name(held.args.split(/\s+/)[0])} ${minutesOf(held.etime)}m pid=${held.pid}` : '';
+}
+
 // Since when the last newErrors run saw the worker waiting on its ask (ms), or false.
 function waitingAsk(dispatch, stateDir = path.join(os.tmpdir(), 'claude-worker-stall')) {
   try { return Number(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).waiting) || false; } catch (_) { return false; }
@@ -185,10 +235,11 @@ function status(o, deps = {}) {
   const cutoff = now - o.idle * 60000;
   const recent = changedSince(workspace, cutoff);
   if (recent) return `running changed=${recent}${step} state=${state}`;
-  return last && last >= cutoff ? `running${step} state=${state}` : `stale idle>${o.idle}m${step} state=${state}`;
+  if (last && last >= cutoff) return `running${step} state=${state}`;
+  return `stale idle>${o.idle}m${step}${(deps.heldBy || heldBy)(workspace)} state=${state}`;
 }
 
-module.exports = { args, status, newErrors, waitingAsk, workerText, changedSince, agyLastStep, API_ERROR, ASK_SENT };
+module.exports = { args, status, newErrors, waitingAsk, workerText, changedSince, agyLastStep, heldBy, minutesOf, API_ERROR, ASK_SENT };
 if (require.main !== module) return;
 
 const o = args(process.argv.slice(2));

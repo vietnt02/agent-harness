@@ -34,7 +34,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ; không làm thay. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Spawn reviewer khi cần (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; worker sửa theo finding đã quyết. |
 | 7. Cổng, chạy thật | Đọc toàn bộ diff tới đúng SHA sẽ merge, chạy check của repo trên SHA đó, merge. Tự chạy lệnh ghi production thật, đọc lại đích. Sau deploy đọc thứ đang chạy trên production. | — |
-| 8. Báo cáo | Báo user đã kiểm gì, chưa kiểm gì, release worker. | `worker_done`: đã kiểm gì, chưa kiểm gì. |
+| 8. Báo cáo | Báo user đã kiểm gì, chưa kiểm gì; worker đã release thì gỡ worktree (§ 3). | `worker_done`: đã kiểm gì, chưa kiểm gì. |
 
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
 coordinator trả lời từ thứ đang có, hoặc chạy **một** lệnh xác nhận một đích đã biết (một file, một
@@ -67,8 +67,8 @@ worker thì chốt model, worktree ngay trong plan; duyệt plan là duyệt man
 Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Mỗi worker
 một dòng:
 
-    Manifest khối <X> — parallel <n> (cap <N>), <agent> <slug> <effort>.
-      Kế hoạch: <k> phase · <n> worker · w1-<việc>: phase 1, 2 · w2-<việc>: phase 3
+    Manifest khối <X> — parallel <n> (cap <N>).
+      Kế hoạch: <k> phase · <n> worker · w1-<việc> (<agent> <slug> <effort> · <dấu hiệu>): phase 1, 2 · w2-<việc> (…): phase 3
       <repo> · <worktree> · <paths> · được: rà, lập kế hoạch, edit, commit, push nhánh, mở PR
       KHÔNG (worker): merge, deploy, publish, ghi prod (Lark, n8n, DB), chạy job thật, gửi tin: chỉ dry-run
 
@@ -79,7 +79,7 @@ một dòng:
   và mọi báo cáo; `--name`, `--display-name` chỉ thêm khi `--worktree new-child|new-top-level`.
   Reviewer là một dòng `w<N>-review-w<M>`, tính vào cap.
 - Đổi phase, worker hay model sau khi plan duyệt → plan về `draft`, hỏi lại, không báo sau;
-  ngoại lệ: đổi sang carbon theo **Chọn model** (dưới) chạy luôn, báo trong report.
+  ngoại lệ: giao lại neon theo **Chọn model** (dưới) chạy luôn, báo trong report.
 - Manifest chỉ phủ tầng A của worker. Tầng C plan ghi tên thì coordinator chạy theo plan; tầng C
   ngoài plan thì park (`CLAUDE.md` § Irreversible actions). Bot không người không bao giờ mở tầng C.
 
@@ -100,6 +100,8 @@ chiếu trỏ đúng path, bằng chứng coordinator sẽ thu); và yêu cầu:
   § 1–3; worker chạy mutation và kiểm thực tế trước review, PR ghi kết quả; coordinator soát ở bước 7.
   Test chặn mặc định side effect ra ngoài (thông báo OS, gửi tin, ghi API); lượt kiểm thật chạy
   trên bản sao state, không bao giờ trên state bản live đọc (`ntv-test` § 2);
+- việc dời, tách, gộp hay bỏ phần đang chạy, cả vòng sửa của nó: liệt kê thứ phải giữ nguyên (bộ lọc,
+  link, trạng thái) và số nào phải khớp;
 - báo cáo nói đã kiểm gì, bằng cách nào, và chưa kiểm gì, vì sao;
 - các câu trong mục "Phải nói rõ trong spec" của file model đang dùng;
 - worker mở trình duyệt: câu tắt tiếng sau mỗi lần tải trang (`~/.claude/knowledge/browser-debug.md`);
@@ -131,10 +133,25 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 - Không dùng model Claude cho worker, reviewer hay checker (quota Claude để cho coordinator); ngoại
   lệ: review thay đổi của harness hay rule cho agent (`CLAUDE.md`, `AGENTS.md` của repo) là subagent Claude (`ntv-implement` § Verify), và chặng rà
   là subagent `ntv-scout` (Sonnet, § 1).
-- Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Builder và
-  research mọi mức độ → `agy gemini-4-hydrogen high`; `agy gemini-4-carbon high` chỉ khi user chỉ
-  định hoặc hydrogen trượt review hai vòng trên cùng một thiết kế đã duyệt. Mọi model Gemini trên
-  `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác. Reviewer mặc định `agy gemini-4-argon high`.
+- Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Mọi model
+  Gemini trên `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác.
+- **Builder** chọn theo dấu hiệu đọc được trong spec lúc giao, không theo khó/dễ (lúc giao chưa biết):
+  - `agy gemini-4-neon high` khi việc có một trong hai dấu hiệu: (1) code mới hay sửa có trạng thái
+    lưu giữa các lần chạy (watermark, sổ ghi, bản ghi dở), thử lại, hay ghi ra ngoài repo (Lark,
+    issue, DB hay KV nơi khác đọc, API ngoài), cả vòng sửa của việc đó; (2) dời, tách, gộp hay bỏ
+    phần đang chạy của giao diện hay luồng dữ liệu (vòng sửa theo finding của việc này xét theo
+    dòng hydrogen).
+  - `agy gemini-4-hydrogen high` khi việc không có dấu hiệu nào ở trên và mọi phần của nó là: sửa mà
+    spec chỉ rõ từng chỗ và kết quả ở mỗi chỗ (vòng sửa theo finding, thiết kế đã duyệt tới mức
+    file); thêm mới không đổi hành vi phần đang chạy; docs; research.
+  - Việc không khớp dòng nào → neon: spec chưa chốt hết kết quả, worker phải tự suy ra.
+  - Dòng manifest của worker ghi model và dấu hiệu đã khớp (`w5-tach-trang (agy gemini-4-neon high ·
+    dấu hiệu 2)`); không khớp dòng nào thì ghi vì sao.
+- **Builder trượt review hai vòng** trên cùng một thiết kế đã duyệt: hydrogen → giao lại neon; neon →
+  park track, Report kèm findings hai vòng và đề xuất của coordinator (thường là sửa thiết kế hay
+  spec). Carbon, argon làm builder hay reviewer chỉ khi user chỉ định.
+- **Reviewer** `agy gemini-4-neon high`: worker riêng, context mới, không nhận hội thoại hay báo cáo
+  của builder; độc lập là đủ, cùng model với builder cũng được. **Checker** (§ 4) `agy gemini-4-hydrogen high`.
 - Không giao task dài cho model context ngắn (`gpt-luna`): chia task nhỏ, mỗi task một worker mới,
   commit + push mỗi nhóm việc ≤ 30 phút.
 - Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter. Slug: agy `agy models`;
@@ -160,9 +177,15 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   mới, `worker-read --source transcript` thì không. Tin gấp mà worker không làm theo trong vài phút
   (đang chạy một lệnh dài, hoặc spec giao trước khi có câu kiểm hộp thư) → coordinator tự
   `worker-stop`, rồi `worker-start --spec-file` mới gồm spec cũ, nội dung tin và câu kiểm hộp thư,
-  cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. Không có việc kế tiếp →
-  release ngay (`worker-release`, chỉ worker đã `worker_done`, chưa thì `worker-stop`; worker trong worktree mới không tự đóng), gỡ worktree sau khi lưu
-  báo cáo. Đừng release rồi vài phút sau spawn lại; cũng đừng giữ "phòng khi cần".
+  cùng `--worktree path:` cũ; không nhờ user bấm Steer, không chờ user. **Release:** runtime có
+  `orchestration.worker-auto-release.v1` (`orca status --json`, `runtime.capabilities`) tự release
+  worker khoảng 2 phút sau khi nhận `worker_done` và hoãn khi một tin làm worker chạy lại, nên
+  coordinator không `worker-release` tay (release lúc thư còn trong hộp làm Orca báo HIGH giả). Có
+  việc kế tiếp cho đúng worker đó → `worker-keep-open` ngay khi nhận `worker_done`, xong việc đó thì
+  `worker-release`. Runtime không có capability đó → `worker-release` sau khi kiểm xong (chỉ worker
+  đã `worker_done`, chưa thì `worker-stop`). Gỡ worktree khi `worker-show` báo `terminalState:
+  released` và báo cáo đã lưu. Đừng để worker release rồi vài phút sau spawn lại; cũng đừng giữ
+  "phòng khi cần".
 - **Worker im lâu:** đọc `worker-read --source transcript` hai lần cách nhau vài phút trước khi kết
   luận. Im lặng, timeout hay `unverifiable` không bao giờ đủ để tự dừng, bỏ hay chạy lại worker
   (guide). Worker còn sống thì nó vẫn là người sửa duy nhất của worktree.
@@ -170,7 +193,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 ## 4. Cổng
 
 **Review.** Diff logic từ 30 dòng (trừ test, doc, lockfile), hoặc task chạm tiền, thư gửi khách, dữ
-liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-4-argon high`, worker riêng) trước khi
+liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-4-neon high`, worker riêng, § 2) trước khi
 merge. Reviewer nhận diff, Scope, mục Nghiệm thu và hai câu hỏi cố định: lượt chạy xấu nhất (số
 item tối đa × thời gian đo trên lần chạy thật) có lọt trần thời gian của runtime không; và tiến trình
 nào khác (nút bấm, lịch, webhook) ghi hay gửi cho cùng bản ghi trong cùng khoảng thời gian. Spec reviewer đòi dán nguyên findings kèm output
@@ -180,8 +203,7 @@ bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo m
 các finding đã sửa. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
 thật; PASS của reviewer chỉ là đầu vào. **Tiêu chí dừng:** chỉ finding làm sai output thật khi dùng
 bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" vào PR. Sau khi thiết kế ổn định tối đa
-2 vòng review; hydrogen trượt cả hai thì đổi sang carbon (§ 2) thay cho vòng 3; muốn vòng 3 với
-cùng worker thì hỏi user như một câu về chi phí.
+2 vòng review; builder trượt cả hai thì theo **Chọn model** (§ 2).
 
 **Nghiệm thu** — user chỉ nhận bản đã qua nghiệm thu:
 
