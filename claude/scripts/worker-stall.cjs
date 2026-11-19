@@ -10,7 +10,8 @@
  *                    worker, its conversation DB), or the worker's messages
  *                    since the last run hold >= --api-errors 502/503/429-type errors; an idle line
  *                    adds `holding=<name> <n>m pid=<pid>`, the longest-running process in the
- *                    worktree other than the agent and its shell (a command waiting on input)
+ *                    worktree other than the agent, its shell and the helpers it started with (MCP
+ *                    servers): a command waiting on input
  * A worker with a transcript that is only reading for a long time also shows `stale`: a cue to look
  * (worker-read twice, a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker
  * run in a terminal has no Orca transcript: no error count and no ask wait then (an unanswered ask
@@ -174,21 +175,28 @@ function processes(dir) {
   const ps = execFileSync('ps', ['-o', 'pid=,ppid=,etime=,args=', '-p', pids.join(',')], { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'] });
   return ps.split('\n').map((l) => /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(l)).filter(Boolean).map((m) => ({ pid: m[1], ppid: m[2], etime: m[3], args: m[4] }));
 }
-// `[[dd-]hh:]mm:ss` → minutes.
-function minutesOf(etime) {
+// `[[dd-]hh:]mm:ss` → seconds, minutes.
+function secondsOf(etime) {
   const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime || '');
-  return m ? Number(m[1] || 0) * 1440 + Number(m[2] || 0) * 60 + Number(m[3]) : 0;
+  return m ? Number(m[1] || 0) * 86400 + Number(m[2] || 0) * 3600 + Number(m[3]) * 60 + Number(m[4]) : 0;
 }
+const minutesOf = (etime) => Math.floor(secondsOf(etime) / 60);
+// The agent's own helpers (MCP servers, Orca's provider bridge) start with it, in its first second on
+// the Claude agents measured. A command it runs comes after a model reply, and Codex and agy run it as
+// `bash -lc '<cmd>'`, which bash replaces by the command: the agent's child too, told apart only by
+// its later start.
+const STARTED_WITH_S = 10;
 function heldBy(workspace, list = processes) {
   let rows = [];
   try { rows = list(workspace); } catch (_) { return ''; }
   const name = (w) => path.basename(String(w || ''));
   const own = (r) => { const [a, b] = r.args.split(/\s+/); return NOT_HOLDING.test(name(a)) || (name(a) === 'node' && NOT_HOLDING.test(name(b))); };
   const shell = (r) => /^-?(zsh|bash|sh|dash|fish|login)$/.test(name(r.args.split(/\s+/)[0]));
-  const agents = new Set(rows.filter((r) => own(r) && !shell(r)).map((r) => r.pid));
+  const agents = new Map(rows.filter((r) => own(r) && !shell(r)).map((r) => [r.pid, secondsOf(r.etime)]));
+  const helper = (r) => !!r.ppid && agents.has(r.ppid) && agents.get(r.ppid) - secondsOf(r.etime) <= STARTED_WITH_S;
   const held = rows
-    .filter((r) => !own(r) && !(r.ppid && agents.has(r.ppid)))
-    .sort((x, y) => minutesOf(y.etime) - minutesOf(x.etime))[0];
+    .filter((r) => !own(r) && !helper(r))
+    .sort((x, y) => secondsOf(y.etime) - secondsOf(x.etime))[0];
   return held ? ` holding=${name(held.args.split(/\s+/)[0])} ${minutesOf(held.etime)}m pid=${held.pid}` : '';
 }
 

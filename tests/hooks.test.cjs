@@ -834,6 +834,14 @@ test('worktree-after-release: a worker Orca released by itself is reminded when 
   const other = '{"ok":true,"result":{"dispatchId":"ctx_cd34","state":"abandoned","terminalState":"retained","workspace":"w::/y"}}';
   assert.deepEqual(ids(`${show}; orca orchestration worker-show --dispatch ctx_cd34 --json`, `${json}\n${other}`), ['ctx_ab12'],
     'each dispatch by its own record');
+  // `--full` prints the record over many lines (fields as Orca 1.4.263 printed them).
+  const full = (terminalState) => JSON.stringify({ ok: true, result: {
+    dispatch: { id: 'ctx_ab12', status: 'completed' },
+    worker: { dispatchId: 'ctx_ab12', state: 'succeeded', worktreeId: 'w::/x' },
+    projection: { liveness: { verdict: 'exited' }, resource: { state: terminalState, terminalState } },
+  } }, null, 2);
+  assert.deepEqual(ids(`${show} --full`, full('released')), ['ctx_ab12']);
+  assert.deepEqual(ids(`${show} --full`, full('retained')), []);
 });
 
 test('worktree-after-release: a refused release keeps its worktree; dirty file names stay whole', () => {
@@ -877,13 +885,21 @@ test('worktree-after-release: a refused release keeps its worktree; dirty file n
     const line = worktreeAfterRelease.describe('ctx_1', show, list([]));
     assert.match(line, /1 file chưa commit \(automations\.md\)/);
     // A later dispatch on the same worktree (a fix round) keeps it: running, or kept open for a next task.
-    for (const other of [{ state: 'running', terminalState: 'live' }, { state: 'succeeded', terminalState: 'retained' }]) {
+    for (const other of [{ state: 'running', terminalState: 'active', liveness: 'unverifiable' },
+      { state: 'succeeded', terminalState: 'retained', liveness: 'alive' }]) {
       const shared = worktreeAfterRelease.describe('ctx_1', show, list([{ dispatchId: 'ctx_2', workspace: `id::${wt}`, ...other }]));
       assert.match(shared, /ctx_2/);
       assert.doesNotMatch(shared, /worktree rm/);
     }
-    const stale = worktreeAfterRelease.describe('ctx_1', show, list([{ dispatchId: 'ctx_0', state: 'stopped', terminalState: 'retained', workspace: `id::${wt}` }]));
-    assert.match(stale, /1 file chưa commit/, 'an old stopped dispatch does not hold the worktree');
+    // An exited agent, and a context-only dispatch (retained and unverifiable for good), use nothing.
+    for (const old of [{ state: 'stopped', terminalState: 'retained', liveness: 'exited' },
+      { state: 'succeeded', terminalState: 'retained', liveness: 'unverifiable' }]) {
+      const stale = worktreeAfterRelease.describe('ctx_1', show, list([{ dispatchId: 'ctx_0', workspace: `id::${wt}`, ...old }]));
+      assert.match(stale, /1 file chưa commit/, JSON.stringify(old));
+    }
+    const unread = worktreeAfterRelease.describe('ctx_1', show, () => 'garbage');
+    assert.match(unread, /worker-list/);
+    assert.doesNotMatch(unread, /worktree rm/, 'a worktree it could not check is never handed to rm');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

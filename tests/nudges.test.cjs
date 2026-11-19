@@ -450,6 +450,15 @@ test('worker-stall: an idle worker names the process holding its worktree, never
     { pid: '23', ppid: '22', etime: '18:05', args: 'npm exec tsx scripts/sign.ts' },
   ];
   assert.equal(w.heldBy('/wt', () => claude), ' holding=npm 18m pid=23');
+  // Codex and agy run a command as `bash -lc '<cmd>'`, which bash replaces by the command: the agent's
+  // own child, started after it; its MCP server started with it.
+  const codex = [
+    { pid: '100', ppid: '1', etime: '50:00', args: '/opt/codex/bin/codex exec --json' },
+    { pid: '101', ppid: '100', etime: '49:59', args: 'node /opt/mcp/server.js' },
+    { pid: '102', ppid: '100', etime: '35:10', args: 'npm exec some-cli' },
+  ];
+  assert.equal(w.heldBy('/wt', () => codex), ' holding=npm 35m pid=102');
+  assert.equal(w.heldBy('/wt', () => codex.slice(0, 2)), '', 'a helper started with the agent holds nothing');
   assert.equal(w.heldBy('/wt', () => { throw new Error('no lsof'); }), '');
   assert.equal(w.minutesOf('1-02:03:04'), 1440 + 120 + 3);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stall-held-'));
