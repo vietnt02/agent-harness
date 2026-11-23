@@ -21,7 +21,7 @@
  *        command that sends text, `orca orchestration send --body`, `git commit -m`, `gh pr create --body`, are not read)
  *     5b. `tier-c-guard` `remoteDockerWrite` (`ssh <host> … docker run|pull|compose up…`): a worker is always denied
  *     3. `push-after-pr-guard` (blocks git push onto a branch with a MERGED/CLOSED PR/MR)
- *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_airflow)
+ *     4. `airflow-sql-guard` (blocks inline state-changing psql over ssh vps_main)
  *   - Direct interactive session (non-Orca worker):
  *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, reminds once per sub-repo/worktree per session, on the first non-Read tool in `repos/*`, to read `AGENTS.md`; the reminder reaches agy before its next step)
  *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
@@ -538,7 +538,7 @@ function handlePreToolUse(payload) {
     }
   }
 
-  // 4. Airflow SQL guard (blocks inline state-changing psql over ssh vps_airflow)
+  // 4. Airflow SQL guard (blocks inline state-changing psql over ssh vps_main)
   if (claudeTool === 'Bash' && /\bssh\b/.test(command) && /\bpsql\b/.test(command)) {
     const res = runClaudeHook('airflow-sql-guard.cjs', {
       tool_name: 'Bash',
@@ -549,7 +549,7 @@ function handlePreToolUse(payload) {
       process.stdout.write(
         JSON.stringify({
           decision: 'deny',
-          reason: res.stderr || 'airflow-sql-guard: SQL that changes state on vps_airflow Postgres must run via psql -f.',
+          reason: res.stderr || 'airflow-sql-guard: SQL that changes state on vps_main Postgres must run via psql -f.',
         })
       );
       return;
