@@ -2,7 +2,8 @@
 /**
  * worker-stall.cjs - one line for one Orca worker, in the "<state> [context]" form watch.sh judges:
  *   done <state>     the worker's Task ended (succeeded, failed, stopped, cancelled, abandoned)
- *   running <why>    a file in its worktree changed within --idle-min minutes, and no API error streak;
+ *   running <why>    a file in its worktree changed within --idle-min minutes (the checkout of a new
+ *                    worktree is no change: `new-worktree=<n>m` while it is younger), and no API error streak;
  *                    or an agy terminal worker's last conversation step is that recent (it plans and
  *                    reads before it edits); or `waiting-coordinator`: its last `orca orchestration ask` has no reply yet, for
  *                    at most --ask-max minutes (then `stale ask-unanswered>…`)
@@ -107,6 +108,9 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
   fs.writeFileSync(file, JSON.stringify({ cursor, waiting }));
   return count;
 }
+
+// How long after a worktree's birth its checkout may still be writing files.
+const CHECKOUT_MS = 60 * 1000;
 
 // The newest file time under `dir` (no .git, node_modules), stopping early once one is recent.
 function changedSince(dir, sinceMs) {
@@ -274,8 +278,13 @@ function status(o, deps = {}) {
     return mins >= max ? `stale ask-unanswered>${max}m state=${state}` : `running waiting-coordinator ${mins}m state=${state}`;
   }
   const cutoff = now - o.idle * 60000;
-  const recent = changedSince(workspace, cutoff);
+  // The checkout writes every file of a new worktree at its birth: those times are no worker's edit,
+  // so only files written after CHECKOUT_MS past it count; a worktree younger than --idle-min runs.
+  let born = 0;
+  try { born = fs.statSync(workspace).birthtimeMs || 0; } catch (_) { /* no birth time: every file counts */ }
+  const recent = changedSince(workspace, born ? Math.max(cutoff, born + CHECKOUT_MS) : cutoff);
   if (recent) return `running changed=${recent}${step} state=${state}`;
+  if (born >= cutoff) return `running new-worktree=${Math.max(0, Math.floor((now - born) / 60000))}m${step} state=${state}`;
   if (last && last >= cutoff) return `running${step} state=${state}`;
   return `stale idle>${o.idle}m${step}${(deps.heldBy || heldBy)(workspace)} state=${state}`;
 }

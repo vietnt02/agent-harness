@@ -293,10 +293,13 @@ test('worker-stall: a stopped worker is done; errors count only in new worker me
   assert.throws(() => w.status(o, { show: () => ({ state: 'running', workspace: 'id::/no/such/dir' }), newErrors: () => 0 }), /no worktree/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-ws-'));
   try {
+    // A worker's edit comes after the checkout that wrote the worktree's files at its birth.
+    const edit = Date.now() + 2 * 60000;
     fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
-    const deps = { show: () => ({ state: 'running', workspace: `id::${dir}` }), newErrors: () => 0 };
+    fs.utimesSync(path.join(dir, 'a.txt'), new Date(edit), new Date(edit));
+    const deps = { show: () => ({ state: 'running', workspace: `id::${dir}` }), newErrors: () => 0, now: edit + 1000 };
     assert.match(w.status(o, deps), /^running changed=a\.txt/);
-    const later = Date.now() + 11 * 60000;
+    const later = edit + 11 * 60000;
     assert.match(w.status(o, { ...deps, now: later }), /^stale idle>10m/);
     assert.match(w.status(o, { ...deps, newErrors: () => 3 }), /^stale api-errors=3/);
     const page = (messages, limited, cursor) => ({ result: { transcript: { messages, limited, nextCursor: cursor }, cursor } });
@@ -415,9 +418,10 @@ test('worker-stall: an agy worker run in a terminal has no transcript; the age o
     assert.match(w.status(o, { ...deps, now: now + 8 * 60000 + 1000 }), /^stale idle>10m agy-step=10m state=running$/, 'no file and no step within --idle-min');
     assert.match(w.status(o, { ...deps, newErrors: () => 0 }), /^stale idle>10m state=running$/, 'a worker with a transcript is judged by its files, never by an agy DB');
     fs.writeFileSync(path.join(ws, 'a.txt'), 'x');
-    assert.match(w.status(o, { ...deps, now: Date.now() }), /^running changed=a\.txt agy-step=0m state=running$/);
+    fs.utimesSync(path.join(ws, 'a.txt'), new Date(now), new Date(now)); // an edit after the checkout
+    assert.match(w.status(o, { ...deps, now: now + 1000 }), /^running changed=a\.txt agy-step=2m state=running$/);
     assert.throws(() => w.status(o, { ...deps, newErrors: () => { throw Object.assign(new Error('Command failed: dispatch_not_found'), { stderr: 'dispatch_not_found' }); } }), /dispatch_not_found/, 'any other read error still fails');
-    assert.match(w.status(o, { ...deps, newErrors: () => 0, now: Date.now() }), /^running changed=a\.txt state=running$/, 'a worker with a transcript keeps its line');
+    assert.match(w.status(o, { ...deps, newErrors: () => 0, now: now + 1000 }), /^running changed=a\.txt state=running$/, 'a worker with a transcript keeps its line');
     // agy keeps its DB in WAL mode. Closed by agy, a DB has no -wal; any reader's open then leaves an
     // empty -wal stamped with the read time, which is no step. While agy holds it open, the -wal has
     // the latest steps and its time is the last step.
@@ -639,4 +643,64 @@ test('ask-batch-guard: a message the user typed mid-turn lets the parked ask thr
   const typed = { type: 'attachment', attachment: { type: 'queued_command', prompt: 'dừng lại, hỏi tôi về tên bảng', origin: { kind: 'human' } } };
   assert.equal(spacedAsk([answered, tool]), 'q1', 'held without it');
   assert.equal(spacedAsk([answered, tool, typed]), null);
+});
+
+test('ask-format-guard: a question running several sentences with no bullet line is held once', () => {
+  const { runOnQuestions } = require('../claude/hooks/ask-format-guard.cjs');
+  const runOn = 'Bản báo cáo tuần đã có đủ số liệu. Hai biểu đồ còn thiếu nhãn trục. Gửi bản này trước không?';
+  const bulleted = 'Báo cáo tuần:\n- Số liệu đã đủ.\n- Hai biểu đồ còn thiếu nhãn trục.\n- Gửi bản này trước không?';
+  assert.deepEqual(runOnQuestions({ questions: [{ question: runOn }] }), [runOn]);
+  assert.deepEqual(runOnQuestions({ questions: [{ question: bulleted }] }), [], 'bullet lines pass');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: '(a) Gửi bản nháp.\n(b) Chờ thêm số liệu?' }] }), [], 'lettered lines are points on their own lines');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Gửi báo cáo tuần cho nhóm kho không?' }] }), [], 'one sentence passes');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Plan ~/plans/x.md, câu 2: gửi báo cáo khi bảng đã khớp?' }] }), [],
+    'a label with a colon and a path stays one point');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Gửi tin này cho chị Lan không?\n\n"Dạ chị ơi, em kiểm xong rồi. Số tồn kho đã khớp. Chị xem giúp em nhé."' }] }), [],
+    'a quoted draft is the message, not the ask: it is never reshaped');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Dựng bảng tạm theo kế hoạch dưới đây (nhánh mới, bản nháp; chưa merge) được không?' }] }), [],
+    'a semicolon inside a parenthesised aside ends no sentence');
+  assert.equal(runOnQuestions({ questions: [{ question: 'Số dư đầu kỳ lấy từ đâu? (Trả lời câu này là đồng ý dựng tab mới. Claude mở PR, chưa merge.)' }] }).length, 1,
+    'an aside that runs sentences is context and counts');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'II. Kế hoạch thu tiền tháng này là số nào?' }] }), [], 'a roman-numeral label is no sentence');
+  assert.deepEqual(runOnQuestions({}), []);
+  const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: sid('ask-format'), tool_input: { questions: [{ question: bulleted }, { question: runOn }] } };
+  const held = hook('ask-format-guard.cjs', call);
+  assert.equal(held.status, 2);
+  assert.match(held.stderr, /own `- ` line/);
+  assert.equal(hook('ask-format-guard.cjs', call).status, 0, 'the same ask sent again passes');
+  assert.equal(hook('ask-format-guard.cjs', { ...call, tool_input: { questions: [{ question: bulleted }] } }).status, 0);
+  assert.equal(hook('ask-format-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
+});
+
+test('worker-stall: the checkout of a new worktree is no change; a file the worker writes later is', () => {
+  const w = require('../claude/scripts/worker-stall.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-born-'));
+  try {
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'x'); // written by the checkout, at the worktree's birth
+    const born = fs.statSync(dir).birthtimeMs;
+    if (!born) return; // a filesystem with no birth time: every file counts, as before
+    const show = () => ({ state: 'ready', workspace: `id::${dir}` });
+    const deps = (now) => ({ show, newErrors: () => 0, waitingAsk: () => null, heldBy: () => '', now, stateDir: path.join(os.tmpdir(), `nudge-born-state-${process.pid}`) });
+    const o = { dispatch: 'ctx_born', idle: 10, errors: 3 };
+    assert.equal(w.status(o, deps(born + 2 * 60000)), 'running new-worktree=2m state=ready', 'not changed=.gitignore');
+    const edited = path.join(dir, 'src.js');
+    fs.writeFileSync(edited, 'y');
+    const later = new Date(born + 3 * 60000);
+    fs.utimesSync(edited, later, later);
+    assert.equal(w.status(o, deps(born + 4 * 60000)), 'running changed=src.js state=ready');
+    assert.match(w.status(o, deps(born + 30 * 60000)), /^stale idle>10m/, 'an old worktree with nothing new is stale');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('worker-start-receipt: on Windows, agy run in a terminal (no Orca chat home) gets no chat-config warning', () => {
+  const { acpHomes, agyConfigLines } = require('../claude/hooks/worker-start-receipt.cjs');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-orca-data-'));
+  try {
+    assert.deepEqual(acpHomes('win32', () => data), [], 'no antigravity-chat folder: nothing to check');
+    assert.deepEqual(agyConfigLines(acpHomes('win32', () => data)), []);
+    const chat = path.join(data, 'antigravity-chat');
+    fs.mkdirSync(chat);
+    assert.deepEqual(acpHomes('win32', () => data), [chat], 'Orca chat in use: its config is checked');
+    assert.match(agyConfigLines([chat], data)[0], /không trỏ về/, 'a chat home whose config is not linked is still told');
+  } finally { fs.rmSync(data, { recursive: true, force: true }); }
 });

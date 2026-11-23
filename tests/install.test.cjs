@@ -99,7 +99,7 @@ function countHooksInSettings(settings) {
   return count;
 }
 
-test('1. clean home: symlinks, repo resolution, 22 hooks format, templates, no backup', (t) => {
+test('1. clean home: symlinks, repo resolution, 23 hooks format, templates, no backup', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -127,7 +127,7 @@ test('1. clean home: symlinks, repo resolution, 22 hooks format, templates, no b
     );
   }
 
-  // Settings has exactly 22 hooks in correct OS format
+  // Settings has exactly 23 hooks in correct OS format
   const settingsPath = path.join(home, '.claude', 'settings.json');
   assert.ok(fs.existsSync(settingsPath), 'settings.json does not exist');
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -151,7 +151,7 @@ test('1. clean home: symlinks, repo resolution, 22 hooks format, templates, no b
       }
     }
   }
-  assert.strictEqual(hookCount, 22, `Expected 22 hooks, found ${hookCount}`);
+  assert.strictEqual(hookCount, 23, `Expected 23 hooks, found ${hookCount}`);
 
   // 3 templates copied
   const templates = ['identities.md', 'knowledge-index.md', 'user-profile.md'];
@@ -165,6 +165,13 @@ test('1. clean home: symlinks, repo resolution, 22 hooks format, templates, no b
     const installedContent = fs.readFileSync(tmplPath, 'utf8');
     assert.strictEqual(installedContent, originalContent);
   }
+
+  // agy: the repo's AGENTS.md is a symlink; the personal GEMINI.md beside it is a real copy of its template
+  const agyAgents = path.join(home, '.gemini', 'config', 'AGENTS.md');
+  assert.ok(fs.lstatSync(agyAgents).isSymbolicLink(), 'agy AGENTS.md comes from the repo');
+  const agyMine = path.join(home, '.gemini', 'config', 'GEMINI.md');
+  assert.ok(!fs.lstatSync(agyMine).isSymbolicLink(), 'agy GEMINI.md is the user\'s own copy');
+  assert.strictEqual(fs.readFileSync(agyMine, 'utf8'), fs.readFileSync(path.join(repoDir, 'templates', 'agy-mine', 'GEMINI.md'), 'utf8'));
 
   // No backup directory
   const backupDir = path.join(home, '.claude', 'backups');
@@ -183,6 +190,9 @@ test('2. second run: settings and hooks.json byte identical, no new backup, no n
   const settingsBefore = fs.readFileSync(settingsPath);
   const hooksBefore = fs.readFileSync(hooksPath);
   const symlinksBefore = getAllSymlinks(home);
+  // The user filled in their agy GEMINI.md: a rerun keeps it.
+  const agyMine = path.join(home, '.gemini', 'config', 'GEMINI.md');
+  fs.writeFileSync(agyMine, '# filled in\n');
 
   const secondRes = runInstall(home);
   assert.strictEqual(secondRes.status, 0, `second install failed: ${secondRes.stderr}`);
@@ -195,6 +205,7 @@ test('2. second run: settings and hooks.json byte identical, no new backup, no n
   assert.deepStrictEqual(hooksAfter, hooksBefore, 'hooks.json changed on second run');
   assert.strictEqual(symlinksAfter.length, symlinksBefore.length, 'Symlink count changed on second run');
   assert.ok(!fs.existsSync(path.join(home, '.claude', 'backups')), 'Backup directory created on second run');
+  assert.strictEqual(fs.readFileSync(agyMine, 'utf8'), '# filled in\n', 'the filled-in GEMINI.md is kept');
 });
 
 test('2b. a link to a file the repo moved is removed; the moved file is linked; a link elsewhere is kept', (t) => {
@@ -243,7 +254,7 @@ test('3. dry-run on empty home does not create any files', (t) => {
   assert.match(res.stdout, /gỡ 0 lệnh/, 'a hook not linked yet is not reported as removed');
 });
 
-test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 22 hooks added', (t) => {
+test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom hook kept, 23 hooks added', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -291,7 +302,7 @@ test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom 
   const backedUpSettings = path.join(backupFolder, '.claude', 'settings.json');
   assert.ok(fs.existsSync(backedUpSettings), `Backed up settings.json missing: ${backedUpSettings}`);
 
-  // In new settings: custom hook kept, 22 hooks added -> total 23 hooks
+  // In new settings: custom hook kept, 23 hooks added -> total 24 hooks
   const newSettings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf8'));
   let foundCustomHook = false;
   for (const group of newSettings.hooks.PostToolUse || []) {
@@ -302,10 +313,10 @@ test('4. existing normal CLAUDE.md and custom hook: CLAUDE.md backed up, custom 
     }
   }
   assert.ok(foundCustomHook, 'Custom hook was removed');
-  assert.strictEqual(countHooksInSettings(newSettings), 23, 'Expected 23 total hooks (1 custom + 22 added)');
+  assert.strictEqual(countHooksInSettings(newSettings), 24, 'Expected 24 total hooks (1 custom + 23 added)');
 });
 
-test('5. settings already has 22 hooks in shell form: merge adds 0 hooks on any OS', (t) => {
+test('5. settings already has 23 hooks in shell form: merge adds 0 hooks on any OS', (t) => {
   const home = makeTempHome();
   t.after(() => cleanupTempHome(home));
 
@@ -325,7 +336,7 @@ test('5. settings already has 22 hooks in shell form: merge adds 0 hooks on any 
   assert.strictEqual(res.status, 0, `install failed: ${res.stderr}`);
 
   const updatedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  assert.strictEqual(countHooksInSettings(updatedSettings), 22, 'Should still have exactly 22 hooks');
+  assert.strictEqual(countHooksInSettings(updatedSettings), 23, 'Should still have exactly 23 hooks');
   assert.ok(!fs.existsSync(path.join(claudeDir, 'backups')), 'No backup should be created when 0 hooks added');
 });
 
@@ -458,7 +469,7 @@ test('7. run each hook in installed settings: Claude Code invocation, exit 0 or 
     }
   }
 
-  assert.strictEqual(testedHooks, 22, `Expected to test 22 hooks, tested ${testedHooks}`);
+  assert.strictEqual(testedHooks, 23, `Expected to test 23 hooks, tested ${testedHooks}`);
 });
 
 test('8. install --node <path> uses specified node binary', (t) => {

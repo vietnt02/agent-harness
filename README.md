@@ -53,17 +53,29 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
 
 ## Các bước sau khi cài đặt
 
-Điền thông tin cá nhân vào 3 file trong `~/.claude/rules/mine/` (đã được tạo từ template):
+Điền thông tin cá nhân vào 4 file (đã được tạo từ template; cài lại không ghi đè):
 1. `~/.claude/rules/mine/identities.md`: Cấu hình tài khoản GitHub / GitLab tương ứng theo từng đường dẫn repo.
 2. `~/.claude/rules/mine/user-profile.md`: Thông tin cá nhân, vai trò, quyền hạn và quy tắc máy tính của bạn.
 3. `~/.claude/rules/mine/knowledge-index.md`: Chỉ mục kiến thức khi cần kích hoạt các file trong `~/.claude/knowledge/`.
+4. `~/.gemini/config/GEMINI.md`: Phần riêng của agy (bạn là ai, bảng tài khoản, chỉ mục knowledge). agy nạp file này cùng `~/.gemini/config/AGENTS.md`, là rule chung được symlink từ `agy/AGENTS.md` của repo. Máy đã có một `~/.gemini/config/AGENTS.md` tự viết: bộ cài chuyển nó vào thư mục sao lưu, nên chép ngay phần riêng của bạn (bạn là ai, bảng tài khoản, chỉ mục knowledge) từ bản sao lưu sang `GEMINI.md`; tới lúc đó agy chạy với bảng tài khoản để trống.
+
+### Máy mới: các bước agy phải làm tay
+
+Bộ cài không làm được các bước dưới; thiếu bước nào thì worker agy không chạy được khi không có người:
+- [ ] Skill Orca cho agy: `orca skills install --skill orca-cli --skill orchestration`, rồi kiểm `~/.gemini/config/skills/` có `orchestration` và `orca-cli`.
+- [ ] Hook trạng thái Orca cho agy: `orca agent hooks on`, rồi `orca agent hooks status` báo antigravity đã cài và `~/.gemini/config/hooks.json` có khối `orca-status`.
+- [ ] Trong `~/.gemini/antigravity-cli/settings.json`, đặt `toolPermission: "always-proceed"` và `artifactReviewPolicy: "always-proceed"`; thiếu khoá sau thì plan của worker chờ người duyệt.
+- [ ] Ca umbrella của `agy/bridge-fixtures/run.cjs` cần `~/.gemini/config/bridge-fixtures/local.json` chứa `{"napHook": "<đường dẫn>"}`.
+- [ ] Mở agy một lần và tắt thẻ "Introducing <model>" (Esc) trước khi giao worker; thẻ này có thể làm `worker-start` báo `agent_prompt_blocked`.
+- [ ] Statusline (không có trong repo) phải tự chứa, không `require` file nào ngoài nó. Orca chỉ coi agy là sẵn sàng khi dưới ô nhập có 1–3 dòng status, không dòng nào chứa `──`, `esc to cancel` hay `for shortcuts`, và không dòng nào có dạng `<model> · low|medium|high`.
+- [ ] Thư viện AgentKit cho bridge: xem mục **Giới hạn đã biết**; thiếu thì 3 guard privacy, scout, secret của agy không chạy.
 
 ## Các thành phần KHÔNG có trong repo
 
 Repo này chủ động loại trừ các thành phần mang tính nội bộ hoặc phụ thuộc riêng:
 - Bộ công cụ AgentKit (`ak-*` và các hook liên quan của nó).
-- Các skill riêng của Orca (`orchestration`, `orca-cli`; Orca tự cài).
-- File `AGENTS.md` toàn cục của Antigravity (người dùng tự tạo riêng tại `~/.gemini/config/AGENTS.md`).
+- Các skill riêng của Orca (`orchestration`, `orca-cli`; cài bằng lệnh ở **Máy mới: các bước agy phải làm tay**).
+- Phần riêng của người dùng cho Antigravity: `~/.gemini/config/GEMINI.md`, tạo từ `templates/agy-mine/GEMINI.md` (rule chung `agy/AGENTS.md` thì có trong repo).
 - Cấu hình thanh trạng thái (statusline).
 
 ## Giới hạn đã biết

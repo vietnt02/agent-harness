@@ -122,7 +122,9 @@ chạy dev server thì spec cấp port riêng kèm `--strictPort`.
 
 **Song song và cap:** mặc định parallel tới cap (user chốt): mỗi track — nhóm việc chung file nguồn —
 một worker, một nhánh, dispatch cùng lúc. Serial chỉ khi user nói, hoặc áp lực bộ nhớ ≥ 2
-(`sysctl -n kern.memorystatus_vm_pressure_level`) mà user chưa cho vượt cap trong phiên (đã cho: chỉ
+(`sysctl -n kern.memorystatus_vm_pressure_level`; Windows không có mức áp lực: RAM còn dùng được
+`(Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory).AvailableMBytes` (tính cả standby) dưới 20% tổng
+(`(Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize`, KB) coi như mức 2, dưới 5% coi như mức 4) mà user chưa cho vượt cap trong phiên (đã cho: chỉ
 ngừng giao thêm ở mức 4). Cap là ràng buộc RAM của máy
 (`knowledge/orca.md`); "max N" của user là N worker sống cùng lúc xuyên phiên. Còn slot và còn việc
 đủ điều kiện thì giao ngay, không chờ cả wave. Dòng `# Track:` liệt kê việc và file giúp hook

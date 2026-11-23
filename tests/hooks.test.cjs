@@ -1834,3 +1834,34 @@ test('redact-secrets: credential values become [redacted], their labels and ordi
   const nested = redact('{"content":"{\\"text\\":\\"DB_PASSWORD=\\\\\\"Abc123!\\\\\\" appSecret=Zx81kLmQ accessToken: abc123def\\"}"}');
   for (const v of ['Abc123!', 'Zx81kLmQ', 'abc123def']) assert.ok(!nested.includes(v), v);
 });
+
+test('session-note-cap: `## Đang có hiệu lực` is capped whole, so closed blocks\' lines are ordered out', () => {
+  const { overCaps, newOverCaps, SECTION_CAPS } = require('../claude/hooks/lib/session-note-cap.cjs');
+  const cap = SECTION_CAPS['Đang có hiệu lực'];
+  const note = (n) => `---\nsession: s\nstatus: open\nscope: x\n---\n\n## Đang làm\n\n- a\n\n## Đang có hiệu lực\n\n${
+    Array.from({ length: n }, (_, i) => `- Bạn 20/11: quyết định số ${i} của một khối đã xong, chép lại nguyên văn cho đủ dài.`).join('\n')}\n\n## Đã xong\n\n## Resume\n`;
+  const short = note(5);
+  const long = note(Math.ceil(cap / 60) + 5);
+  assert.deepEqual(overCaps(short), [], 'a few live lines pass');
+  const over = overCaps(long).filter((v) => !v.line);
+  assert.equal(over.length, 1);
+  assert.match(over[0].msg, /"## Đang có hiệu lực" is \d+ chars \(cap 2500\): .*drop the lines of a closed block/);
+  assert.equal(newOverCaps(short, long).length, 1, 'an edit that grows it past the cap is told');
+  // problem() reads only the strings it is given; the path just has to sit under the notes folder.
+  const file = path.join(os.homedir(), '.claude', 'session-notes', 'slug', 'note.md');
+  assert.match(rulesBudget.problem(file, short, long), /closed block's lines leave with it/);
+  assert.equal(rulesBudget.problem(file, short, note(6)), null);
+});
+
+test('bridge fixtures: a Windows path goes into a payload template as a value, never as JSON text', () => {
+  const { fillVars } = require('../agy/bridge-fixtures/fill-vars.cjs');
+  const vars = { '{ACP}': 'C:\\Users\\me\\AppData\\Roaming\\orca\\antigravity-chat', '{CID}': 'c1' };
+  const tpl = { transcriptPath: '{ACP}\\brain\\{CID}\\t.jsonl', list: ['{CID}', 3], nested: { '{CID}': null } };
+  assert.deepEqual(fillVars(tpl, vars), {
+    transcriptPath: 'C:\\Users\\me\\AppData\\Roaming\\orca\\antigravity-chat\\brain\\c1\\t.jsonl', list: ['c1', 3], nested: { c1: null },
+  });
+  // The splice into JSON text it replaces: the same path made the payload unparseable.
+  let text = JSON.stringify(tpl);
+  for (const [k, v] of Object.entries(vars)) text = text.split(k).join(v);
+  assert.throws(() => JSON.parse(text), SyntaxError);
+});

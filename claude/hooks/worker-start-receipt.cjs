@@ -84,10 +84,12 @@ function describe(dispatch) {
 
 // GEMINI_HOME of each running Orca agy chat server (`ps -E` prints its env after the argv; the value
 // may hold spaces, so it runs to the next ` name=`, `_` and lower case included).
-// On win32, skip reading env and directly check <orcaData>/antigravity-chat.
-function acpHomes() {
-  if (process.platform === 'win32') {
-    return [path.join(orcaDataDir(), 'antigravity-chat')];
+// On win32, where `ps -E` does not exist, Orca's chat home <orcaData>/antigravity-chat when it exists:
+// agy run in a terminal (no Orca chat) never creates it, so there is no chat config to check.
+function acpHomes(platform = process.platform, dataDir = orcaDataDir) {
+  if (platform === 'win32') {
+    const home = path.join(dataDir(), 'antigravity-chat');
+    return fs.existsSync(home) ? [home] : [];
   }
   let pids = [];
   try { pids = run('pgrep', ['-f', 'agy_acp_server']).split('\n').filter(Boolean); } catch (_) { return []; }
@@ -110,7 +112,7 @@ function agyConfigLines(homes = acpHomes(), target = AGY_CONFIG) {
     }
   })
     .map((h) => `agy chat chạy với GEMINI_HOME="${h}" mà "${h}/config" không trỏ về ${target}: worker và phiên chat ` +
-      `agy chạy thiếu AGENTS.md toàn cục và skills. "${h}/config" là thư mục thật thì chuyển nó đi trước; rồi ` +
+      `agy chạy thiếu AGENTS.md, GEMINI.md toàn cục và skills. "${h}/config" là thư mục thật thì chuyển nó đi trước; rồi ` +
       `\`ln -sfn ${target} '${h}/config'\` (gỡ: \`rm '${h}/config'\`).`);
 }
 

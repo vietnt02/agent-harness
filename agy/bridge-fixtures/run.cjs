@@ -50,6 +50,7 @@ function versions() {
   try { runtimes = fs.readdirSync(RUNTIMES).filter((d) => !d.startsWith('.')).sort(); } catch (_) { /* none */ }
   return { cli, runtimes };
 }
+const { fillVars } = require('./fill-vars.cjs');
 const TEMPLATES = JSON.parse(fs.readFileSync(path.join(__dirname, 'payloads.json'), 'utf8'));
 const PREAMBLE = 'You are working inside Orca, a multi-agent IDE. You are a dispatched worker.';
 
@@ -87,9 +88,7 @@ function conversation(mode, worker, hasBrain = true) {
 }
 
 function payload(mode, convo, toolCall, extra = {}) {
-  let text = JSON.stringify(TEMPLATES[mode]);
-  for (const [k, v] of Object.entries(convo.vars)) text = text.split(k).join(v);
-  return { ...JSON.parse(text), toolCall, ...extra };
+  return { ...fillVars(TEMPLATES[mode], convo.vars), toolCall, ...extra };
 }
 
 function bridgeFull(p, tmp, event = 'PreToolUse') {
