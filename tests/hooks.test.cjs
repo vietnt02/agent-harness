@@ -1779,3 +1779,35 @@ test('secret-file-guard: a command printing a container config or process comman
   assert.match(first.stderr, /names only/);
   assert.equal(run().status, 0, 'said once: the same command run again passes');
 });
+
+test('lark-chat-secret-guard: a chat or mail read printed straight to the conversation is caught; to a file or through redact-secrets it passes', () => {
+  const { exposedRead } = require('../claude/hooks/lark-chat-secret-guard.cjs');
+  for (const c of [
+    'lark-cli --profile p im +chat-messages-list --chat-id oc_1 --concise',
+    'lark-cli im +threads-messages-list --thread t | sed -n 1,50p',
+    'lark-cli --profile p im +messages-mget --ids a,b | cut -c1-300',
+    'lark-cli mail +messages-search --query x',
+  ]) assert.ok(exposedRead(c), c);
+  for (const c of [
+    'lark-cli --profile p im +chat-messages-list --chat-id oc_1 > /tmp/s/msgs.json',
+    'lark-cli im +chat-messages-list --chat-id oc_1 2>&1 > /tmp/s/m.json',
+    'lark-cli im +chat-messages-list --chat-id oc_1 | node ~/.claude/scripts/redact-secrets.cjs | head',
+    'lark-cli im +messages-send --chat-id oc_1 --text hi',
+    'lark-cli base +record-list --table t',
+    "echo 'lark-cli im +chat-messages-list' > /tmp/spec.md",
+  ]) assert.equal(exposedRead(c), null, c);
+});
+
+test('redact-secrets: credential values become [redacted], their labels and ordinary text stay', () => {
+  const { redact } = require('../claude/scripts/redact-secrets.cjs');
+  const gh = 'github_pat_' + 'A1b2'.repeat(8);
+  const dump = `{"text":"token đây ${gh} nhé"}\nPBI_TOKEN=${'x9'.repeat(12)}\nMật khẩu tạm: Abc@12345\npassword là hunter2\nHọp lúc 9h nhé`;
+  const out = redact(dump);
+  assert.ok(!out.includes(gh), 'GitHub token');
+  assert.ok(!out.includes('x9x9'), 'KEY= value');
+  assert.ok(!out.includes('Abc@12345') && !out.includes('hunter2'), 'passwords');
+  assert.match(out, /PBI_TOKEN=\[redacted\]/);
+  assert.match(out, /Mật khẩu tạm: \[redacted\]/);
+  assert.ok(out.includes('Họp lúc 9h nhé'), 'ordinary text');
+  assert.equal(redact(out), out, 'idempotent');
+});
