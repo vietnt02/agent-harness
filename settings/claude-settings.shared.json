@@ -138,6 +138,10 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/ask-batch-guard.cjs\""
+          },
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/ask-format-guard.cjs\""
           }
         ]
       }

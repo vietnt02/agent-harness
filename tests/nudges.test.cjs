@@ -640,3 +640,23 @@ test('ask-batch-guard: a message the user typed mid-turn lets the parked ask thr
   assert.equal(spacedAsk([answered, tool]), 'q1', 'held without it');
   assert.equal(spacedAsk([answered, tool, typed]), null);
 });
+
+test('ask-format-guard: a question running several sentences with no bullet line is held once', () => {
+  const { runOnQuestions } = require('../claude/hooks/ask-format-guard.cjs');
+  const runOn = 'Plan đợt 2 còn T16. Review ra 4 lỗi chặn, đều là câu chữ. Merge T17 trước không?';
+  const bulleted = 'Topic 1:\n- Hook giữ ask một lần.\n- Sửa câu rule.\n- Bạn đồng ý không?';
+  assert.deepEqual(runOnQuestions({ questions: [{ question: runOn }] }), [runOn]);
+  assert.deepEqual(runOnQuestions({ questions: [{ question: bulleted }] }), [], 'bullet lines pass');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Merge T17 (ws#399) vào main?' }] }), [], 'one sentence passes');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Plan ~/.claude/plans/x.md, câu 2: đóng #398 khi merge ws#399?' }] }), [],
+    'a label with a colon and a path stays one point');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: '1) Gộp T16. 2) Hoãn T17?' }] }), [], 'a numbered line counts as a bullet');
+  assert.deepEqual(runOnQuestions({}), []);
+  const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: sid('ask-format'), tool_input: { questions: [{ question: bulleted }, { question: runOn }] } };
+  const held = hook('ask-format-guard.cjs', call);
+  assert.equal(held.status, 2);
+  assert.match(held.stderr, /own `- ` line/);
+  assert.equal(hook('ask-format-guard.cjs', call).status, 0, 'the same ask sent again passes');
+  assert.equal(hook('ask-format-guard.cjs', { ...call, tool_input: { questions: [{ question: bulleted }] } }).status, 0);
+  assert.equal(hook('ask-format-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
+});

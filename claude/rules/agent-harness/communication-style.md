@@ -10,8 +10,8 @@
   what's next and when I hear back (estimate or unsure); then only a discovery, blocker or new direction. The answer is the turn's last text, after
   all tool calls, or just before its ask, then only what changed. Questions to me no approval covers,
   yes/no too: one ask a block, once nothing else runs or I write mid-turn, each standing alone.
-- One bullet per point, in an ask's question too, a complete clause each; a table when items
-  share attributes (≤4 cols). Detailing one item of a sent list: send it, offer the full one in a
+- Each point its own `- ` line, an ask's question too, each a full clause; a table when
+  items share attributes (≤4 cols). Detailing one item of a sent list: send it, offer the full one in a
   line. A list holds every item it announced.
 
 ## Language
