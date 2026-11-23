@@ -9,9 +9,11 @@
  */
 'use strict';
 
-const KEY = String.raw`(?:[A-Za-z0-9]+[_-])*(?:token|key|secret|password|passwd|pwd|apikey)`;
-const Q = String.raw`\\?["']?`; // an optional quote, escaped inside a JSON string or not
-const VALUE = String.raw`(?!\[redacted\])[^\s"'\\,}]+`;
+// A bare "key" is ordinary text ("primary key: id"): only a prefixed one (`api_key`) counts.
+const KEY = String.raw`(?:(?:[A-Za-z0-9]+[_-])*(?:token|secret|password|passwd|pwd|apikey)|(?:[A-Za-z0-9]+[_-])+key)`;
+const CAMEL = String.raw`[a-z][A-Za-z0-9]*(?:Token|Key|Secret|Password)`; // appSecret, accessToken
+const Q = String.raw`(?:\\)*["']?`; // an optional quote, escaped once or more (JSON inside JSON)
+const VALUE = String.raw`(?!\[redacted\]|null\b)[^\s"'\\,}]+`;
 const RULES = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted]'],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[redacted]'],
@@ -26,7 +28,8 @@ const RULES = [
   [/(\bBearer\s+)(?!\[redacted\])[A-Za-z0-9._~+/-]{12,}=*/gi, '$1[redacted]'],
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[redacted]@'],
   [new RegExp(String.raw`((?:^|[^A-Za-z0-9])${KEY}${Q})(\s*[=:]\s*)(${Q})${VALUE}`, 'gi'), '$1$2$3[redacted]'],
-  [new RegExp(String.raw`((?:^|[^\p{L}])(?:password|passwd|pwd|pass|mk|mật khẩu)(?: (?:tạm|wifi|mới))?${Q})(\s*[:=]\s*|\s+là\s+)(${Q})(?!(?:gì|gi|đâu|bao|chưa|nào|sao)(?:$|[^\p{L}]))${VALUE}`, 'giu'), '$1$2$3[redacted]'],
+  [new RegExp(String.raw`((?:^|[^A-Za-z0-9])${CAMEL}${Q})(\s*[=:]\s*)(${Q})${VALUE}`, 'g'), '$1$2$3[redacted]'],
+  [new RegExp(String.raw`((?:^|[^\p{L}])(?:password|passwd|pwd|pw|mật khẩu)(?: (?:tạm|wifi|mới))?${Q})(\s*[:=]\s*|\s+là\s+)(${Q})(?!(?:gì|gi|đâu|bao|chưa|nào|sao)(?:$|[^\p{L}]))${VALUE}`, 'giu'), '$1$2$3[redacted]'],
 ];
 
 function redact(text) {

@@ -627,6 +627,8 @@ test('user-intent: a request for an answer waits like a question; a work order d
     'fix bug, tell me when done',
     'Thêm bước liệt kê cho từng worker',
     'chạy serial, giải thích ngắn trong PR',
+    'giải thích rồi sửa luôn',
+    'liệt kê worker rồi dừng hết',
   ]) assert.equal(isQuestion(t), false, t);
 });
 

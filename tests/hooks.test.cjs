@@ -939,6 +939,7 @@ test('worker-start-receipt: a text receipt gives its dispatch; selector_not_foun
   assert.deepEqual(receipts(err).errors, ['No Orca workspace matched the worktree selector path:/x'], 'the message alone, as the guide is searched');
   assert.deepEqual(receipts(err).codes, ['selector_not_found']);
   assert.deepEqual(receipts('error: selector_not_found').codes, ['selector_not_found']);
+  assert.deepEqual(receipts('Error: selector_not_found: path:/x').codes, ['selector_not_found']);
   assert.deepEqual(receipts('Worker ctx_aa11 [ready] for task_1\nspec: if selector_not_found, read worktree ps').codes, [], 'a word in spec text');
 });
 
@@ -1829,5 +1830,7 @@ test('redact-secrets: credential values become [redacted], their labels and ordi
   assert.equal(redact(out), out, 'idempotent');
   const json = redact('{"password":"hunter2","content":"DB_PASSWORD=\\"Abc123!\\" api_key=zz12 postgres://u:S3cret@h Bearer abcdefghijklmnop"}');
   for (const v of ['hunter2', 'Abc123!', 'zz12', 'S3cret', 'abcdefghijklmnop']) assert.ok(!json.includes(v), v);
-  for (const t of ['Mật khẩu là gì vậy?', 'MONKEY: banana']) assert.equal(redact(t), t, t);
+  for (const t of ['Mật khẩu là gì vậy?', 'MONKEY: banana', 'primary key: user_id', 'Pass: 3/4 tests', 'mk: sẽ gửi sau', '"secret": null']) assert.equal(redact(t), t, t);
+  const nested = redact('{"content":"{\\"text\\":\\"DB_PASSWORD=\\\\\\"Abc123!\\\\\\" appSecret=Zx81kLmQ accessToken: abc123def\\"}"}');
+  for (const v of ['Abc123!', 'Zx81kLmQ', 'abc123def']) assert.ok(!nested.includes(v), v);
 });

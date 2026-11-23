@@ -26,9 +26,9 @@ const ANYWHERE = /(tại sao|vì sao|sao lại|sao không|sao vậy|thế nào|l
 // Only a clause that opens with it, in a message no other clause of which orders work ("chạy …, xong
 // gửi tôi link" is an order).
 const REQUEST = /^((cho|gửi|đưa|chỉ)\s+(tôi|mình|anh|em)\s+(xem\s+)?(câu lệnh|lệnh|command|link|danh sách|thông tin|số|bảng|file|đường dẫn|cách)|giải thích|liệt kê|show me|give me|tell me|explain)(?=$|[^\p{L}])/u;
-const WORK = /(^|[^\p{L}])(chạy|làm|sửa|fix|triển khai|merge|thêm|tạo|xoá|xóa|deploy|unpause|pause|backfill|cài|đẩy|push|mở|giao|run|add|create|delete)(?=$|[^\p{L}])/u;
+const WORK = /(^|[^\p{L}])(chạy|làm|sửa|fix|triển khai|merge|thêm|tạo|xoá|xóa|deploy|unpause|pause|backfill|cài|đẩy|push|mở|giao|dừng|stop|run|add|create|delete)(?=$|[^\p{L}])/u;
 function isRequest(t) {
-  const clauses = t.split(/[.!,;:\n]+/).map((s) => s.trim()).filter(Boolean);
+  const clauses = t.split(/[.!,;:\n]+|\s(?:rồi|và|xong|sau đó|then|and)\s/).map((s) => s.trim()).filter(Boolean);
   const asks = clauses.filter((s) => REQUEST.test(s));
   return asks.length > 0 && !DECISION_RE.test(t) && !clauses.some((s) => !REQUEST.test(s) && WORK.test(s));
 }
