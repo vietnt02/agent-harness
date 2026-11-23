@@ -628,6 +628,7 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
   // Bash command strings use forward slashes: a shell reads `\` as an escape (Git Bash on Windows too).
   const L = linked.split(path.sep).join('/');
   const T = tmp.split(path.sep).join('/');
+  const H = execFileSync('git', ['-C', tmp, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
   try {
     await t.test('git quoted as text, in a comment or a heredoc passes', () => {
       for (const c of [
@@ -728,6 +729,8 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git pull -Xdiff-algorithm=patience',
         'git worktree add -q ../wt -b fix/x origin/main',
         'git worktree add -bfix/x ../wt origin/main',
+        'git worktree add -Bx ../wt origin/main',
+        'git worktree add -qBx ../wt origin/main',
         'git worktree remove ../wt',
         'git worktree move ../wt ../wt2',
         'git worktree prune',
@@ -740,8 +743,8 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git worktree remove --forc ../wt',
         'git worktree remove -ff ../wt',
         'git worktree move -f ../wt ../wt2',
-        'git worktree add -Bx ../wt origin/main',
-        'git worktree add -qBx ../wt origin/main',
+        `git worktree add -B${H} ../wt origin/main`,
+        `git worktree add -qB${H} ../wt origin/main`,
         'git worktree add -fq ../wt x',
         'git worktree add -fB x ../wt',
         'git branch -df x',
@@ -756,7 +759,6 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git pull origin +main:main',
         'git pull -f',
         'git worktree remove -f ../wt',
-        'git worktree add -B main ../wt origin/main',
         'git worktree add --force ../wt main',
         'git branch -d -f x',
         'git branch --delete --force x',
@@ -1481,6 +1483,51 @@ test('secret-file-guard: a variable set from a dotenv key carries it', () => {
     assert.deepEqual(leak('source .env; X=$A_KEY; echo $X'), ['.env']);
     assert.deepEqual(leak('source .env; export Y="${A_KEY}"; Z=$Y; printf "%s" "$Z"'), ['.env']);
     assert.deepEqual(leak('source .env; N=3; echo $N'), []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('main-checkout-guard: upkeep after a merge passes; a branch or reset that drops unpushed commits stays gated', () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcg-upkeep-')));
+  const main = path.join(tmp, 'main');
+  const bare = path.join(tmp, 'remote.git');
+  const P = (p) => p.split(path.sep).join('/');
+  const git = (...a) => execFileSync('git', ['-C', main, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  try {
+    execFileSync('git', ['init', '-q', main]);
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    git('commit', '-qm', 'base', '--allow-empty');
+    git('remote', 'add', 'origin', bare);
+    git('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    for (const b of ['done', 'pr', 'ahead']) git('branch', b);
+    git('push', '-q', 'origin', 'done', 'pr', 'ahead');
+    git('checkout', '-q', 'done'); git('commit', '-qm', 'merged work', '--allow-empty'); git('push', '-q', 'origin', 'done');
+    git('checkout', '-q', 'ahead'); git('commit', '-qm', 'only local', '--allow-empty');
+    git('checkout', '-q', '-b', 'local'); git('commit', '-qm', 'never pushed', '--allow-empty');
+    git('checkout', '-q', 'pr');
+    git('fetch', '-q', 'origin');
+    const writes = (c) => mainCheckoutGuard.writesMainCheckout(c, main);
+    const M = P(main);
+    const W = P(path.join(tmp, 'wt-new'));
+    for (const c of [
+      `W=${W}; M=${M}; git -C $M worktree add -q --detach $W HEAD && cd $W && git merge --no-ff --no-commit origin/main`,
+      `git -C ${M} worktree add -q -b revert/x ${W} origin/main && cd ${W} && git revert --no-edit HEAD`,
+      'git worktree add -q -b feat/x ../wt-rel origin/main && cd ../wt-rel && git commit -qam m',
+      `git -C ${M} fetch -q --prune origin && git -C ${M} branch -D done`,
+      'git branch -D done pr',
+      `git worktree add -q -B pr ${W} origin/pr`,
+      `git worktree add -q -B brand-new ${W} origin/main`,
+    ]) assert.equal(writes(c), false, c);
+    for (const c of [
+      `git worktree add -q ${W} && cd ${M} && git merge origin/main`,
+      `cd ${P(path.join(tmp, 'nowhere'))} && git merge origin/main`,
+      'git branch -D local',
+      'git branch -D done local',
+      'git branch -D missing',
+      'git worktree add -B ahead ../wt origin/ahead',
+      'git worktree add -fB pr ../wt origin/pr',
+    ]) assert.equal(writes(c), true, c);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

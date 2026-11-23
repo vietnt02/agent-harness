@@ -5,9 +5,11 @@
  * once with a reminder: new work goes in its own worktree from `origin/<base>` (CLAUDE.md §
  * Mutation gate), and reading the latest code needs only `git fetch` + `git show origin/<b>:<path>`.
  * Upkeep that starts no work there passes: `pull` of the branch's own upstream, `worktree
- * add/move/remove/prune`, `branch -d`. Forms that merge, reset or drop work stay gated: `pull` with a
- * refspec, `--squash`, `--no-commit`, `--no-ff` or `--force`; `-f`/`--force`, `-B`, `-D`; removing a
- * detached worktree whose commits no ref holds.
+ * add/move/remove/prune`, `branch -d`, `branch -D` of a branch whose tip a remote-tracking ref holds,
+ * `worktree add -B` of a branch that is new or already inside its start point. Forms that merge,
+ * reset or drop work stay gated: `pull` with a refspec, `--squash`, `--no-commit`, `--no-ff` or
+ * `--force`; `-f`/`--force`; any other `-B`, `-D`; removing a detached worktree whose commits no ref
+ * holds. A `cd` into the path an earlier `worktree add` of the same command makes is a linked worktree.
  * The same command run again passes (lib/block-once.cjs). A linked worktree and a repo in the
  * session scratchpad pass. `git -c core.hooksPath=…` turns the repo's checks off and is always
  * blocked (CLAUDE.md § Irreversible actions: never bypass a check). Subagents are skipped.
@@ -26,6 +28,9 @@ const STASH_READ = new Set(['list', 'show', 'create']);
 // `worktree add -B` resets an existing branch; `--force`/`-f` drops a dirty worktree or a lock. A short
 // cluster may carry them anywhere but after `-b` (whose value follows: `-bfix/x`); git takes `--fo…`.
 const WORKTREE_FORCED = /^(-[ac-zAC-Z]*[fB]|--fo)/;
+const WORKTREE_FORCE = /^(-[ac-zAC-Z]*f|--fo)/;
+// `worktree add` options whose value is the next word.
+const ADD_VALUE = new Set(['-b', '--reason', '--orphan']);
 // `pull` that does more than bring the branch up to its upstream: a merge of another branch, a
 // staged or forced result.
 const PULL_MORE = /^(--(squash|no-commit|no-ff|fo)|-(?![Xsjo])[a-zA-Z]*f[a-zA-Z]*$)/;
@@ -86,6 +91,23 @@ function gitWrite(raw, words) {
   const sub = words[i];
   const args = words.slice(i + 1);
   const operands = args.filter((a, k) => !a.startsWith('-') && !(sub === 'pull' && PULL_VALUE.has(args[k - 1])));
+  // `worktree add`: the path it makes, and the branch a `-B` resets with its start point.
+  if (sub === 'worktree' && args[0] === 'add' && !args.some((a) => WORKTREE_FORCE.test(a))) {
+    let resets = null;
+    const ops = [];
+    for (let k = 1; k < args.length; k++) {
+      const a = args[k];
+      const b = /^-[ac-zAC-Z]*B(.*)$/.exec(a);
+      if (b) { resets = b[1] || args[++k] || ''; continue; }
+      if (ADD_VALUE.has(a) || /^-[ac-zAC-Z]*b$/.test(a)) { k++; continue; }
+      if (!a.startsWith('-')) ops.push(a);
+    }
+    return { dirs, adds: ops[0] || null, resets, start: ops[1] || 'HEAD' };
+  }
+  // `branch -D <b>…`: upkeep when a remote-tracking ref holds each tip (read where it runs).
+  if (sub === 'branch' && args.includes('-D') && args.every((a) => !a.startsWith('-') || ['-D', '-q', '--quiet'].includes(a))) {
+    return { dirs, deletes: operands };
+  }
   if (sub === 'worktree' && args[0] === 'remove' && !args.some((a) => WORKTREE_FORCED.test(a))) {
     return operands[1] ? { dirs, removes: operands[1] } : null;
   }
@@ -106,14 +128,14 @@ function gitWrite(raw, words) {
 // The directory a `cd`/`pushd` leads to from `base`, or null when it cannot be known here (a
 // variable the command did not set to a literal, `-`, a stack entry, a directory that does not
 // exist yet).
-function cdTarget(words, base, vars = {}) {
+function cdTarget(words, base, vars = {}, made = new Set()) {
   if (base === null) return null;
   const args = words.slice(1).filter((a, k, all) => !(/^-[LPe@]+$/.test(a) && all.slice(0, k).every((b) => b.startsWith('-'))));
   const raw = args[0] === '--' ? args[1] : args[0];
   const target = raw && expandVars(raw, vars);
   if (words[0] === 'popd' || !target || target === '-' || /^[+-]\d+$/.test(target)) return null;
   const dir = resolveDir(target, base);
-  return fs.existsSync(dir) || inScratchpad(dir) ? dir : null;
+  return fs.existsSync(dir) || inScratchpad(dir) || made.has(dir) ? dir : null;
 }
 
 // True when a git write in the command may target a main checkout. Its directory: the `-C` paths,
@@ -123,6 +145,7 @@ function cdTarget(words, base, vars = {}) {
 function writesMainCheckout(command, cwd) {
   const cds = [];
   const sets = [];
+  const made = new Set(); // paths a `worktree add` earlier in the command makes
   const inScope = (scope, of) => scope === of || scope.startsWith(`${of}.`);
   const dirIn = (scope) => {
     let dir = cwd;
@@ -151,9 +174,9 @@ function writesMainCheckout(command, cwd) {
       continue;
     }
     let here = dirIn(raw.scope);
-    if (words.chdir !== undefined) here = cdTarget(['cd', words.chdir], here, vars);
+    if (words.chdir !== undefined) here = cdTarget(['cd', words.chdir], here, vars, made);
     if (['cd', 'pushd', 'popd'].includes(words[0])) {
-      cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars) });
+      cds.push({ scope: raw.scope, dir: cdTarget(words, here, vars, made) });
       continue;
     }
     // `for X in …` and `select X in …` rebind only X.
@@ -167,6 +190,16 @@ function writesMainCheckout(command, cwd) {
       const to = d === null ? null : expandVars(c, vars);
       return to === null ? null : resolveDir(to, d);
     }, here);
+    if (git.adds !== undefined) {
+      const to = dir !== null && git.adds && expandVars(git.adds, vars);
+      if (to) made.add(resolveDir(to, dir));
+      if (git.resets !== null && isMain(dir) && resetDrops(dir, expandVars(git.resets, vars), expandVars(git.start, vars))) return true;
+      continue;
+    }
+    if (git.deletes) {
+      if (isMain(dir) && git.deletes.some((b) => !onRemote(dir, expandVars(b, vars)))) return true;
+      continue;
+    }
     if (git.removes) {
       if (dir !== null && isMain(dir) && dropsCommits(worktreeAt(dir, expandVars(git.removes, vars) || git.removes))) return true;
       continue;
@@ -187,6 +220,25 @@ function dropsCommits(dir) {
   const git = (args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
   try { git(['symbolic-ref', '-q', 'HEAD']); return false; } catch (_) { /* detached, or no repo */ }
   try { return git(['for-each-ref', '--contains', 'HEAD', '--count=1', '--format=%(refname)']).trim() === ''; } catch (_) { return false; }
+}
+
+// True when `worktree add -B <b> … <start>` in `dir` resets a local branch `b` that holds commits
+// `start` lacks. A branch that does not exist yet loses nothing; unknown: true.
+function resetDrops(dir, b, start) {
+  if (!dir || !b || !start) return true;
+  const git = (args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+  try { git(['rev-parse', '-q', '--verify', `refs/heads/${b}`]); } catch (_) { return false; }
+  try { git(['merge-base', '--is-ancestor', `refs/heads/${b}`, start]); return false; } catch (_) { return true; }
+}
+
+// True when the tip of the local branch `b` in `dir` is on a remote-tracking ref (pushed), so
+// `branch -D` loses nothing. No such branch, or unknown: false.
+function onRemote(dir, b) {
+  if (!dir || !b) return false;
+  const git = (args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
+  let tip;
+  try { tip = git(['rev-parse', '-q', '--verify', `refs/heads/${b}`]).trim(); } catch (_) { return false; }
+  try { return git(['for-each-ref', '--contains', tip, '--count=1', '--format=%(refname)', 'refs/remotes']).trim() !== ''; } catch (_) { return false; }
 }
 
 // The worktree `git -C <base> worktree remove <operand>` removes: the path, else the one worktree whose
@@ -239,7 +291,8 @@ process.stdin.on('end', () => {
     process.stderr.write(
       'main-checkout-guard: this git command writes into the user\'s main checkout. New work goes in its own ' +
         'worktree from `origin/<base>`; to read the latest code: `git fetch`, then `git show origin/<b>:<path>`. ' +
-        'Upkeep passes unforced: `git pull` of the upstream, `git worktree add/move/remove/prune`, `git branch -d`.' + again(sessionId) + '\n'
+        'Upkeep passes unforced: `git pull` of the upstream, `git worktree add/move/remove/prune`, `git branch -d`, ' +
+        '`git branch -D` of a pushed branch, `git worktree add -B` of a branch with nothing beyond its start point.' + again(sessionId) + '\n'
     );
     process.exit(2);
   } catch (_) { /* fail-open */ }
