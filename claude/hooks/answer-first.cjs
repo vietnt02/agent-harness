@@ -4,8 +4,9 @@
  * no reply text yet. The harness records it as a `queued_command` attachment with
  * `origin.kind: "human"`; any assistant text block after it counts as the reply.
  * Never blocks; what it says comes back as additionalContext, so the reply can still put it right:
- * - A question with no reply text yet (CLAUDE.md § Mutation gate: a message with a question is
- *   answered first): answer it now in one line, and again where communication-style.md § Format
+ * - A question or a request for an answer with no reply text yet (CLAUDE.md § Mutation gate: it is
+ *   only answered, and nothing else runs, reads aside, until the user says go on): answer it now in
+ *   one line, and again where communication-style.md § Format
  *   puts the answer: the turn's last text, after the last tool call, or just before the
  *   AskUserQuestion when the turn asks. A chat client may fold the line written now, before more
  *   tool calls, out of sight, so that line alone reads as ignored.
@@ -70,7 +71,8 @@ process.stdin.on('end', () => {
       notes.push(isQuestion(pending.prompt)
         ? `answer-first: the user asked mid-turn ("${quote}") and no reply text followed. ` +
           'Answer it now in one line, and again in the turn\'s last text: after your last tool call, or just before ' +
-          'the AskUserQuestion if this turn asks (communication-style.md). The first line may be folded out of sight.'
+          'the AskUserQuestion if this turn asks (communication-style.md). The first line may be folded out of sight. ' +
+          'Until the user says go on, run nothing but reads that answer it: no write, plan or ask (CLAUDE.md § Mutation gate).'
         : `answer-first: the user wrote mid-turn ("${quote}"). Not a question, so work goes on: ` +
           'follow it if it is an instruction, and acknowledge it in your next text.');
     }

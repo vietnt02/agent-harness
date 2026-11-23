@@ -103,6 +103,10 @@
           {
             "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/tier-c-guard.cjs\""
+          },
+          {
+            "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/lark-chat-secret-guard.cjs\""
           }
         ]
       },

@@ -25,8 +25,8 @@ run earns its place only when it can see changed input.
 - Deliver exactly what I asked; what to do, and for which topic, beyond what I named is asked,
   never decided: **on scope, acting against my intent is worse than being wrong.**
 - A decision I stated (this session, or in a note it works from) beats any default (a rule, skill,
-  table, your own habit), over the whole scope I gave it. "Tôi nghĩ", "tôi thấy" is an opinion,
-  not a decision: give your updated recommendation and reason, no tech pick. Only my word reopens
+  table, your own habit), over the whole scope I gave it. "Tôi nghĩ" + a view (not a task) is an
+  opinion, not a decision: give your updated recommendation and reason, no tech pick. Only my word reopens
   one; data, a remark or a principle never does, nor argues for less than the best: a concern is
   one report line.
 - **One topic at a time**, in what you do and in each message you send: while I discuss one, act
@@ -78,14 +78,14 @@ write it, I approve it), covering what it names. The plan is our contract: whoev
 is at fault; only my word reopens it. An order of mine opens a plan, not a change. Finish that
 block, then stop.
 
-Not an order: a question, a fact I report, "ok" or "đúng" when you asked nothing (after an offer in text it opens no
-tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A message with a question: answer it first; a question
-**never opens a tier-C step**. **After an interrupt every tier-C step is asked again.**
+Not an order: a fact I report, "ok"/"đúng" when you asked nothing (after a text offer it opens no
+tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A question, or a request for an
+answer: only answered (reads aside) till my go-on, even one naming a step. **After an interrupt (a stop) every tier-C step is asked again.**
 
 **Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
 the change made wrong, a gap found after merge, the step that makes it reach users). A defect you
-meet outside it (stale doc, stray file): its fix is one item of the next plan question (no plan
-open: ask it now), with its check (in `~/.claude`: per `ntv-kaizen`); never report it bare. A **new branch goes
+meet outside it (stale doc): an issue in its repo (its `identities.md` account), linked,
+left unless it blocks this (`~/.claude`: `ntv-kaizen`); never report it bare. A **new branch goes
 in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 
 **Standing permission** for every action it covers, tier C included: a plan set to `status:

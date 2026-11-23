@@ -203,7 +203,7 @@ const ENGLISH_NOTE =
   'included (communication-style.md § Language); technical terms and code stay as they are.';
 const parkedNote = (phrase) =>
   `the reply names a problem it leaves ("${phrase}") with no PR/MR/Issue ref on that line and no ` +
-  'ask. Re-check it; if it is real, fix it now in its own PR and report the link; ' +
+  'ask. Re-check it; if it is real: inside this block, fix it now and report the link; outside it, open an issue in its repo and link it (CLAUDE.md § Mutation gate); ' +
   'only a business call or a tier-C step goes to the user, as one AskUserQuestion ' +
   '(CLAUDE.md § Mutation gate). If you were wrong about it, drop the line.';
 

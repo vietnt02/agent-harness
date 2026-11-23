@@ -3,7 +3,7 @@
  * ask-batch-guard.cjs - PreToolUse(AskUserQuestion): an ask after another ask of the same block, with
  * tools run in between, is held once. The user answers an ask and goes back to another app; a second
  * ask a few minutes later waits unseen, and the session stands still (communication-style.md § Format:
- * one ask a block, once nothing else can run). "Same block": an ask was answered since the user's last
+ * one ask a block, once nothing else runs or the user writes mid-turn). "Same block": an ask was answered since the user's last
  * typed message; Orca's worker messages and other harness records are not typed messages
  * (lib/user-intent.cjs `promptText`). Asks sent back to back (more than four questions) pass, and so
  * does the first ask after the user types. Said once per answered ask (lib/block-once.cjs, keyed on its
@@ -45,6 +45,8 @@ function spacedAsk(records) {
   for (let i = records.length - 1; i >= 0; i--) {
     const rec = records[i];
     if (promptText(rec) !== null) return null;
+    // A message the user typed mid-turn: the parked questions may go now (communication-style.md).
+    if (rec.type === 'attachment' && rec.attachment?.type === 'queued_command' && rec.attachment.origin?.kind === 'human') return null;
     const c = rec.message?.content;
     if (!Array.isArray(c)) continue;
     const answered = rec.type === 'user' && c.find((b) => b?.type === 'tool_result' && ASK_ANSWER.test(resultText(b)));
@@ -66,7 +68,7 @@ function spacedAskIn(file) {
 const NOTE =
   'ask-batch-guard: an AskUserQuestion was already answered since the user last typed, and tools ran ' +
   'since. The user answers and goes back to other work, so a later ask waits unseen and the session stands ' +
-  'still (communication-style.md § Format: one ask a block, once nothing else can run). If work of this block ' +
+  'still (communication-style.md § Format: one ask a block, once nothing else runs or the user writes mid-turn). If work of this block ' +
   'can still run without this answer, run it first and put this question in the block\'s last ask, with ' +
   'every other question and draft; if nothing can run without it, ask it.';
 

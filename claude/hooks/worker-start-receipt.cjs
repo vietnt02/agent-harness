@@ -145,20 +145,25 @@ function agyVersionLines(stampFile = path.join(os.homedir(), '.gemini', 'config'
 function receipts(output, max = MAX_IDS) {
   const ids = [];
   const errors = [];
+  const codes = [];
   const blocks = [...(output.match(/^\{[\s\S]*?^\}/gm) || []), ...output.split('\n').filter((l) => /^\{.*\}\s*$/.test(l))];
   for (const block of blocks) {
     try {
       const r = JSON.parse(block);
       if (r.result?.dispatchId) ids.push(r.result.dispatchId);
       if (r.ok === false && r.error?.message) errors.push(r.error.message);
+      if (r.ok === false && r.error?.code) codes.push(r.error.code);
     } catch (_) { /* not a receipt */ }
   }
-  // A filtered receipt: `"dispatch":"ctx_…"` fields, or bare `ctx_…` lines (`jq -r .result.dispatchId`).
+  // A filtered receipt: `"dispatch":"ctx_…"` fields, bare `ctx_…` lines (`jq -r .result.dispatchId`),
+  // or the text receipt (`Worker ctx_… [ready] for task_…`).
   if (!ids.length && !/"workers"\s*:/.test(output)) {
     for (const m of output.matchAll(/"dispatch(?:Id)?"\s*:\s*"(ctx_[0-9a-f]+)"/g)) ids.push(m[1]);
     for (const m of output.matchAll(/^(ctx_[0-9a-f]+)\s*$/gm)) ids.push(m[1]);
+    for (const m of output.matchAll(/^Worker (ctx_[0-9a-f]+) \[/gm)) ids.push(m[1]);
   }
-  return { ids: [...new Set(ids)].slice(0, max), errors: [...new Set(errors)] };
+  if (/^\s*(error:?\s*)?selector_not_found\b/im.test(output)) codes.push('selector_not_found');
+  return { ids: [...new Set(ids)].slice(0, max), errors: [...new Set(errors)], codes: [...new Set(codes)] };
 }
 
 const SEND = /(?:^|[;&|({\n]\s*|\b(?:then|do)\s+)(?:\w+=\S*\s+)*orca\s+orchestration\s+send\b/;
@@ -299,12 +304,16 @@ process.stdin.on('end', () => {
       process.exit(0);
     }
     if (!dispatches(command) || HELP.test(command)) process.exit(0);
-    const { ids, errors } = receipts(output);
+    const { ids, errors, codes } = receipts(output);
     let lines = ids.map((d) => { try { return describe(d); } catch (_) { return null; } }).filter(Boolean);
     if (!ids.length) lines = [`Output không có dispatchId của receipt (bị lọc, hay lệnh lỗi trước khi giao): ${FALLBACK}`];
     else if (!lines.length) lines = [`Không đọc được ${ids.join(', ')} từ Orca: ${FALLBACK}`];
     if (ANTIGRAVITY.test(command)) lines.push(...agyConfigLines(), ...agyVersionLines());
     lines.push(...watchLines(ids, launchArgs(command)));
+    if (codes.includes('selector_not_found')) {
+      lines.push('selector_not_found: `--worktree path:` chỉ nhận worktree của repo đã có trong Orca (`orca worktree ps --json` thấy nó); ' +
+        'repo chưa có thì `orca repo add --path <repo>` trước, hoặc đặt worker ở worktree của repo đã có và đọc repo kia bằng `git -C`.');
+    }
     for (const message of errors) {
       const refs = guideLines(message);
       lines.push(`ok:false "${message.slice(0, 200)}"` + (refs.length

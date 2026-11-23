@@ -628,6 +628,7 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
   // Bash command strings use forward slashes: a shell reads `\` as an escape (Git Bash on Windows too).
   const L = linked.split(path.sep).join('/');
   const T = tmp.split(path.sep).join('/');
+  const H = execFileSync('git', ['-C', tmp, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
   try {
     await t.test('git quoted as text, in a comment or a heredoc passes', () => {
       for (const c of [
@@ -728,6 +729,8 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git pull -Xdiff-algorithm=patience',
         'git worktree add -q ../wt -b fix/x origin/main',
         'git worktree add -bfix/x ../wt origin/main',
+        'git worktree add -Bx ../wt origin/main',
+        'git worktree add -qBx ../wt origin/main',
         'git worktree remove ../wt',
         'git worktree move ../wt ../wt2',
         'git worktree prune',
@@ -740,8 +743,8 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git worktree remove --forc ../wt',
         'git worktree remove -ff ../wt',
         'git worktree move -f ../wt ../wt2',
-        'git worktree add -Bx ../wt origin/main',
-        'git worktree add -qBx ../wt origin/main',
+        `git worktree add -B${H} ../wt origin/main`,
+        `git worktree add -qB${H} ../wt origin/main`,
         'git worktree add -fq ../wt x',
         'git worktree add -fB x ../wt',
         'git branch -df x',
@@ -756,7 +759,6 @@ test('main-checkout-guard: only git that runs is a git write', async (t) => {
         'git pull origin +main:main',
         'git pull -f',
         'git worktree remove -f ../wt',
-        'git worktree add -B main ../wt origin/main',
         'git worktree add --force ../wt main',
         'git branch -d -f x',
         'git branch --delete --force x',
@@ -925,6 +927,20 @@ test('dispatch-split-guard: a claude worker id outside the bare aliases is caugh
   assert.equal(pin(`${ws} --agent=claude --model sonnet`), null);
   assert.equal(pin(`${ws} --agent codex --model gpt-sol`), null, 'any agent the coordinator picks');
   assert.equal(pin(`${ws} --agent antigravity --model gemini-3.8-flash --effort high`), null);
+});
+
+test('worker-start-receipt: a text receipt gives its dispatch; selector_not_found is named', () => {
+  const { receipts } = require('../claude/hooks/worker-start-receipt.cjs');
+  const out = '== /tmp/w1.out\nWorker ctx_1ad8a46f5dff [ready] for task_566d5e54e91a\n== /tmp/w2.out\n' +
+    'Worker ctx_aff668246327 [ready] for task_1\nWorker ctx_c7112062884c [ready] for task_2\n';
+  assert.deepEqual(receipts(out).ids, ['ctx_1ad8a46f5dff', 'ctx_aff668246327', 'ctx_c7112062884c']);
+  assert.deepEqual(receipts('Started. See Worker ctx_1ad8a46f5dff [ready]').ids, [], 'only a receipt line');
+  const err = '{"ok":false,"error":{"code":"selector_not_found","message":"No Orca workspace matched the worktree selector path:/x"}}';
+  assert.deepEqual(receipts(err).errors, ['No Orca workspace matched the worktree selector path:/x'], 'the message alone, as the guide is searched');
+  assert.deepEqual(receipts(err).codes, ['selector_not_found']);
+  assert.deepEqual(receipts('error: selector_not_found').codes, ['selector_not_found']);
+  assert.deepEqual(receipts('Error: selector_not_found: path:/x').codes, ['selector_not_found']);
+  assert.deepEqual(receipts('Worker ctx_aa11 [ready] for task_1\nspec: if selector_not_found, read worktree ps').codes, [], 'a word in spec text');
 });
 
 test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a released one, stop the dispatch Orca reopened and start the task again with its model', () => {
@@ -1155,6 +1171,7 @@ test('session-notes: once every note of the session is done, the kaizen summary 
       /a serious break no hook stops yet .*its fix is a hook, never a sentence/, /two fair readings of which lead to two different actions/])
       assert.match(notes.kaizenReminder([file]), kind);
     assert.match(notes.kaizenReminder([file]), /clear rule broken without such harm, or an intent misread, is no file/);
+    assert.match(notes.kaizenReminder([file]), /tell the user in one line that this step runs and about how long/);
     assert.doesNotMatch(notes.kaizenReminder([file]), /every correction from Viet/);
     // A note this session wrote without its id on the session: line is named; its own note, a done
     // one, a file with no front matter or one outside the notes folder is not.
@@ -1486,6 +1503,52 @@ test('secret-file-guard: a variable set from a dotenv key carries it', () => {
   }
 });
 
+test('main-checkout-guard: upkeep after a merge passes; a branch or reset that drops unpushed commits stays gated', () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcg-upkeep-')));
+  const main = path.join(tmp, 'main');
+  const bare = path.join(tmp, 'remote.git');
+  const P = (p) => p.split(path.sep).join('/');
+  const git = (...a) => execFileSync('git', ['-C', main, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  try {
+    execFileSync('git', ['init', '-q', main]);
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    git('commit', '-qm', 'base', '--allow-empty');
+    git('remote', 'add', 'origin', bare);
+    git('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    for (const b of ['done', 'pr', 'ahead']) git('branch', b);
+    git('push', '-q', 'origin', 'done', 'pr', 'ahead');
+    git('checkout', '-q', 'done'); git('commit', '-qm', 'merged work', '--allow-empty'); git('push', '-q', 'origin', 'done');
+    git('checkout', '-q', 'ahead'); git('commit', '-qm', 'only local', '--allow-empty');
+    git('checkout', '-q', '-b', 'local'); git('commit', '-qm', 'never pushed', '--allow-empty');
+    git('checkout', '-q', 'pr');
+    git('fetch', '-q', 'origin');
+    const writes = (c) => mainCheckoutGuard.writesMainCheckout(c, main);
+    const M = P(main);
+    const W = P(path.join(tmp, 'wt-new'));
+    for (const c of [
+      `W=${W}; M=${M}; git -C $M worktree add -q --detach $W HEAD && cd $W && git merge --no-ff --no-commit origin/main`,
+      `git -C ${M} worktree add -q -b revert/x ${W} origin/main && cd ${W} && git revert --no-edit HEAD`,
+      'git worktree add -q -b feat/x ../wt-rel origin/main && cd ../wt-rel && git commit -qam m',
+      `git -C ${M} fetch -q --prune origin && git -C ${M} branch -D done`,
+      'git branch -D done pr',
+      `git worktree add -q -B pr ${W} origin/pr`,
+      `git worktree add -q -B brand-new ${W} origin/main`,
+      `git worktree add --orphan -b fresh ${W} && cd ${W} && git commit -qm y --allow-empty`,
+    ]) assert.equal(writes(c), false, c);
+    for (const c of [
+      `git worktree add -q ${W} && cd ${M} && git merge origin/main`,
+      `cd ${P(path.join(tmp, 'nowhere'))} && git merge origin/main`,
+      'git branch -D local',
+      'git branch -D done local',
+      'git branch -D missing',
+      'git worktree add -B ahead ../wt origin/ahead',
+      'git worktree add -fB pr ../wt origin/pr',
+    ]) assert.equal(writes(c), true, c);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('main-checkout-guard: core.hooksPath counts only when git runs with it', () => {
   const { hooksOff } = mainCheckoutGuard;
   for (const c of ['git -c core.hooksPath=/dev/null commit -m x', 'git -C r -c core.hookspath=x push', 'bash -c "git -c core.hooksPath=x commit"'])
@@ -1600,6 +1663,17 @@ test('tier-c-guard: wrangler --local writes local state only, so it may follow a
   assert.ok(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production --remote'));
   assert.equal(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production --local --persist-to=.wrangler/state'), null);
   assert.equal(tierCGuard.chainedProdWrite('ls && npx wrangler d1 execute DB --persist-to .wrangler/state --command "select 1"'), null);
+  // A dry run or a help page writes nothing.
+  for (const c of [
+    "a && cf --profile p dns records edit X --zone z --body '{\"ttl\":60}' --dry-run",
+    'cf cli search "create kv" | head -4; cf kv namespaces create --help 2>&1 | grep -A6 "^Options"',
+    'npm ci; npm test; npx wrangler deploy --dry-run --outdir /tmp/x',
+    'ls && gh pr merge --help',
+  ]) assert.equal(tierCGuard.chainedProdWrite(c), null, c);
+  for (const c of [
+    "a && cf --profile p dns records edit X --zone z --body '{\"ttl\":60}'",
+    'npm ci; npx wrangler deploy',
+  ]) assert.ok(tierCGuard.chainedProdWrite(c), c);
 });
 
 test('tier-c-guard: a docker write over ssh is a production write; a subagent and a worker never make one (kaizen fixtures)', () => {
@@ -1709,4 +1783,54 @@ test('secret-file-guard: a command printing a container config or process comman
   assert.equal(first.status, 2);
   assert.match(first.stderr, /names only/);
   assert.equal(run().status, 0, 'said once: the same command run again passes');
+});
+
+test('lark-chat-secret-guard: a chat or mail read printed straight to the conversation is caught; to a file or through redact-secrets it passes', () => {
+  const { exposedRead } = require('../claude/hooks/lark-chat-secret-guard.cjs');
+  for (const c of [
+    'lark-cli --profile p im +chat-messages-list --chat-id oc_1 --concise',
+    'lark-cli im +threads-messages-list --thread t | sed -n 1,50p',
+    'lark-cli --profile p im +messages-mget --ids a,b | cut -c1-300',
+    'lark-cli mail +message --message-id abc',
+    'lark-cli mail +messages --message-ids a,b',
+    'lark-cli mail +thread --thread-id t',
+    'lark-cli mail +triage --query x',
+    'lark-cli mail user_mailbox.messages get --params x',
+    'lark-cli im messages list --params x',
+    'lark-cli im +chat-messages-list --chat-id oc_1 2>&1',
+    'lark-cli im +chat-messages-list --chat-id oc_1 2>&1 | head -50',
+    'lark-cli im +messages-search --query token 2>/dev/null | jq .',
+    'lark-cli im +messages-search --query token >&2',
+  ]) assert.ok(exposedRead(c), c);
+  for (const c of [
+    'lark-cli --profile p im +chat-messages-list --chat-id oc_1 > /tmp/s/msgs.json',
+    'lark-cli im +chat-messages-list --chat-id oc_1 2>&1 > /tmp/s/m.json',
+    'lark-cli im +chat-messages-list --chat-id oc_1 | node ~/.claude/scripts/redact-secrets.cjs | head',
+    'lark-cli im +messages-send --chat-id oc_1 --text hi',
+    'lark-cli mail +rule-list',
+    'lark-cli im +chat-messages-list --help',
+    'lark-cli im +chat-messages-list --chat-id oc_1 | jq .data > /tmp/x.json',
+    'lark-cli im +chat-messages-list --chat-id oc_1 &> /tmp/x.json',
+    'lark-cli base +record-list --table t',
+    "echo 'lark-cli im +chat-messages-list' > /tmp/spec.md",
+  ]) assert.equal(exposedRead(c), null, c);
+});
+
+test('redact-secrets: credential values become [redacted], their labels and ordinary text stay', () => {
+  const { redact } = require('../claude/scripts/redact-secrets.cjs');
+  const gh = 'github_pat_' + 'A1b2'.repeat(8);
+  const dump = `{"text":"token đây ${gh} nhé"}\nPBI_TOKEN=${'x9'.repeat(12)}\nMật khẩu tạm: Abc@12345\npassword là hunter2\nHọp lúc 9h nhé`;
+  const out = redact(dump);
+  assert.ok(!out.includes(gh), 'GitHub token');
+  assert.ok(!out.includes('x9x9'), 'KEY= value');
+  assert.ok(!out.includes('Abc@12345') && !out.includes('hunter2'), 'passwords');
+  assert.match(out, /PBI_TOKEN=\[redacted\]/);
+  assert.match(out, /Mật khẩu tạm: \[redacted\]/);
+  assert.ok(out.includes('Họp lúc 9h nhé'), 'ordinary text');
+  assert.equal(redact(out), out, 'idempotent');
+  const json = redact('{"password":"hunter2","content":"DB_PASSWORD=\\"Abc123!\\" api_key=zz12 postgres://u:S3cret@h Bearer abcdefghijklmnop"}');
+  for (const v of ['hunter2', 'Abc123!', 'zz12', 'S3cret', 'abcdefghijklmnop']) assert.ok(!json.includes(v), v);
+  for (const t of ['Mật khẩu là gì vậy?', 'MONKEY: banana', 'primary key: user_id', 'Pass: 3/4 tests', 'mk: sẽ gửi sau', '"secret": null']) assert.equal(redact(t), t, t);
+  const nested = redact('{"content":"{\\"text\\":\\"DB_PASSWORD=\\\\\\"Abc123!\\\\\\" appSecret=Zx81kLmQ accessToken: abc123def\\"}"}');
+  for (const v of ['Abc123!', 'Zx81kLmQ', 'abc123def']) assert.ok(!nested.includes(v), v);
 });

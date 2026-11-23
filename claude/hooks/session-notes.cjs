@@ -129,7 +129,7 @@ function closedNote(own, id, markDir = MARK_DIR) {
 function kaizenReminder(files, transcript) {
   return (
     `The session note ${[].concat(files).join(', ')} is now \`status: done\`: before the final report, sum up this session's kaizen ` +
-    '(skills/ntv-kaizen § Record a mistake). Read the transcript' +
+    '(skills/ntv-kaizen § Record a mistake); first tell the user in one line that this step runs and about how long it takes. Read the transcript' +
     (transcript ? ` ${transcript}` : ' (the session .jsonl)') +
     ', not your memory, and list only what a hook, script, skill or reworded sentence must fix: a harness defect met ' +
     '(a hook or script that misfired or lacks a step it is the only route for, a skill that gave a wrong step), a serious ' +
