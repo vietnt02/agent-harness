@@ -45,6 +45,8 @@ function spacedAsk(records) {
   for (let i = records.length - 1; i >= 0; i--) {
     const rec = records[i];
     if (promptText(rec) !== null) return null;
+    // A message the user typed mid-turn: the parked questions may go now (communication-style.md).
+    if (rec.type === 'attachment' && rec.attachment?.type === 'queued_command' && rec.attachment.origin?.kind === 'human') return null;
     const c = rec.message?.content;
     if (!Array.isArray(c)) continue;
     const answered = rec.type === 'user' && c.find((b) => b?.type === 'tool_result' && ASK_ANSWER.test(resultText(b)));

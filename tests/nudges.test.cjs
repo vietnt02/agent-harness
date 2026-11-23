@@ -620,5 +620,21 @@ test('user-intent: a request for an answer waits like a question; a work order d
     'đã tạo secret rồi, làm tiếp plan đi',
     'cho phép vượt cap 4 nhé',
     'ok chạy plan đi',
+    'chạy backfill dag sales từ 1/11 đến 20/11, xong gửi tôi link log',
+    'làm hết, xong gửi anh link PR',
+    'triển khai đi, rồi cho tôi xem bảng kết quả',
+    'unpause dag x và thêm comment giải thích vào README',
+    'fix bug, tell me when done',
+    'Thêm bước liệt kê cho từng worker',
+    'chạy serial, giải thích ngắn trong PR',
   ]) assert.equal(isQuestion(t), false, t);
+});
+
+test('ask-batch-guard: a message the user typed mid-turn lets the parked ask through', () => {
+  const { spacedAsk } = require('../claude/hooks/ask-batch-guard.cjs');
+  const answered = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'q1', content: 'Your questions have been answered: x' }] } };
+  const tool = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b', name: 'Bash', input: {} }] } };
+  const typed = { type: 'attachment', attachment: { type: 'queued_command', prompt: 'dừng lại, hỏi tôi về tên bảng', origin: { kind: 'human' } } };
+  assert.equal(spacedAsk([answered, tool]), 'q1', 'held without it');
+  assert.equal(spacedAsk([answered, tool, typed]), null);
 });

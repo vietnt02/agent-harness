@@ -30,7 +30,7 @@ const STASH_READ = new Set(['list', 'show', 'create']);
 const WORKTREE_FORCED = /^(-[ac-zAC-Z]*[fB]|--fo)/;
 const WORKTREE_FORCE = /^(-[ac-zAC-Z]*f|--fo)/;
 // `worktree add` options whose value is the next word.
-const ADD_VALUE = new Set(['-b', '--reason', '--orphan']);
+const ADD_VALUE = new Set(['-b', '--reason']);
 // `pull` that does more than bring the branch up to its upstream: a merge of another branch, a
 // staged or forced result.
 const PULL_MORE = /^(--(squash|no-commit|no-ff|fo)|-(?![Xsjo])[a-zA-Z]*f[a-zA-Z]*$)/;

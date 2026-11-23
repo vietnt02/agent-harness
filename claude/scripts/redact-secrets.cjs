@@ -2,13 +2,18 @@
 /**
  * redact-secrets.cjs - stdin -> stdout with credential values replaced by `[redacted]`: a token by its
  * known prefix (GitHub, GitLab, Slack, OpenAI/Anthropic-style `sk-`, AWS access key, Google API key),
- * the value of a `*_TOKEN=` / `*_KEY=` / `*_SECRET=` / `*_PASSWORD=` pair, and the word after
- * "password" / "mật khẩu" (`:`, `=` or "là"). The label stays, so a reader still sees that a secret
+ * Lark token, JWT, Bearer, PEM private key, URL credentials), the value of a `token`/`key`/`secret`/
+ * `password` pair in any case, quoted or not (JSON included), and the word after "password" / "mật khẩu"
+ * (`:`, `=` or "là"; a question such as "mật khẩu là gì" is left). The label stays, so a reader still sees that a secret
  * was there. For dumps of chat, mail or logs read into a conversation: `… | node redact-secrets.cjs`.
  */
 'use strict';
 
+const KEY = String.raw`(?:[A-Za-z0-9]+[_-])*(?:token|key|secret|password|passwd|pwd|apikey)`;
+const Q = String.raw`\\?["']?`; // an optional quote, escaped inside a JSON string or not
+const VALUE = String.raw`(?!\[redacted\])[^\s"'\\,}]+`;
 const RULES = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted]'],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[redacted]'],
   [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[redacted]'],
   [/\bglpat-[A-Za-z0-9_-]{20,}/g, '[redacted]'],
@@ -16,8 +21,12 @@ const RULES = [
   [/\bsk-[A-Za-z0-9_-]{20,}/g, '[redacted]'],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted]'],
   [/\bAIza[0-9A-Za-z_-]{35}\b/g, '[redacted]'],
-  [/\b([A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PWD))(\s*[=:]\s*)(?!\[redacted\])[^\s"'\\,}]+/g, '$1$2[redacted]'],
-  [/(\b(?:password|passwd|pwd)|mật khẩu(?: tạm)?)(\s*[:=]\s*|\s+là\s+)(?!\[redacted\])[^\s"'\\,}]+/giu, '$1$2[redacted]'],
+  [/\b[tu]-[A-Za-z0-9_-]{30,}/g, '[redacted]'],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted]'],
+  [/(\bBearer\s+)(?!\[redacted\])[A-Za-z0-9._~+/-]{12,}=*/gi, '$1[redacted]'],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[redacted]@'],
+  [new RegExp(String.raw`((?:^|[^A-Za-z0-9])${KEY}${Q})(\s*[=:]\s*)(${Q})${VALUE}`, 'gi'), '$1$2$3[redacted]'],
+  [new RegExp(String.raw`((?:^|[^\p{L}])(?:password|passwd|pwd|pass|mk|mật khẩu)(?: (?:tạm|wifi|mới))?${Q})(\s*[:=]\s*|\s+là\s+)(${Q})(?!(?:gì|gi|đâu|bao|chưa|nào|sao)(?:$|[^\p{L}]))${VALUE}`, 'giu'), '$1$2$3[redacted]'],
 ];
 
 function redact(text) {

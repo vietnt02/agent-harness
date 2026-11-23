@@ -72,7 +72,7 @@ again; the one exception is an action the user approves by name in the Report's 
   action that needs a parked action's result.
 - Every listed action runs without a new ask, tier C included, after the checks
   `CLAUDE.md` § Irreversible actions puts before a tier-C step.
-- Never stop the plan to wait for an answer. A question the plan or the user's words already answer is no
+- Never stop the plan to wait for an answer, unless the user writes mid-run (below). A question the plan or the user's words already answer is no
   question; reads, probes and checks never need a yes. Whatever surfaces: a fix that makes a
   listed action's output do what the plan approved (`CLAUDE.md` § Mutation gate, Fixes need no
   ask) → fix, check, one-line report; anything else → park it and continue with the rest. A run the plan depends on: wait in the background with

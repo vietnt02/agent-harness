@@ -23,13 +23,21 @@ const LEADING = /^(thế\s+|vậy\s+)?(sao|tại sao|vì sao)\s(?!(chép|lưu|k�
 // Phrases that ask wherever they appear.
 const ANYWHERE = /(tại sao|vì sao|sao lại|sao không|sao vậy|thế nào|làm sao|bao giờ|bao nhiêu|khi nào|ở đâu|là gì|cái gì)/;
 // A request for an answer (a command, a fact, an explanation) waits like a question: "cho tôi câu lệnh".
-const REQUEST = /(^|[^\p{L}])((cho|gửi|đưa|chỉ)\s+(tôi|mình|anh|em)\s+(xem\s+)?(câu lệnh|lệnh|command|link|danh sách|thông tin|số|bảng|file|đường dẫn|cách)|giải thích|liệt kê cho|show me|give me|tell me|explain)(?=$|[^\p{L}])/u;
+// Only a clause that opens with it, in a message no other clause of which orders work ("chạy …, xong
+// gửi tôi link" is an order).
+const REQUEST = /^((cho|gửi|đưa|chỉ)\s+(tôi|mình|anh|em)\s+(xem\s+)?(câu lệnh|lệnh|command|link|danh sách|thông tin|số|bảng|file|đường dẫn|cách)|giải thích|liệt kê|show me|give me|tell me|explain)(?=$|[^\p{L}])/u;
+const WORK = /(^|[^\p{L}])(chạy|làm|sửa|fix|triển khai|merge|thêm|tạo|xoá|xóa|deploy|unpause|pause|backfill|cài|đẩy|push|mở|giao|run|add|create|delete)(?=$|[^\p{L}])/u;
+function isRequest(t) {
+  const clauses = t.split(/[.!,;:\n]+/).map((s) => s.trim()).filter(Boolean);
+  const asks = clauses.filter((s) => REQUEST.test(s));
+  return asks.length > 0 && !DECISION_RE.test(t) && !clauses.some((s) => !REQUEST.test(s) && WORK.test(s));
+}
 
 // True for a question or a request for an answer (CLAUDE.md § Mutation gate: only answered until the
 // user says go on).
 function isQuestion(text) {
   const t = text.toLowerCase();
-  if (t.includes('?') || ANYWHERE.test(t) || REQUEST.test(t)) return true;
+  if (t.includes('?') || ANYWHERE.test(t) || isRequest(t)) return true;
   return t
     .split(/[.!,;:\n]+/)
     .map((s) => s.trim())

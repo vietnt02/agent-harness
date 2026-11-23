@@ -79,12 +79,12 @@ is at fault; only my word reopens it. An order of mine opens a plan, not a chang
 block, then stop.
 
 Not an order: a fact I report, "ok"/"đúng" when you asked nothing (after a text offer it opens no
-tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A question or request: only
-answered (reads aside) till my go-on, a step it approves too. **After an interrupt (I stop a turn) every tier-C step is asked again.**
+tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A question, or a request for an
+answer: only answered (reads aside) till my go-on, even one naming a step. **After an interrupt (a stop) every tier-C step is asked again.**
 
 **Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
 the change made wrong, a gap found after merge, the step that makes it reach users). A defect you
-meet outside it (stale doc, stray file): an issue in its repo (assignee: `identities.md`), linked,
+meet outside it (stale doc): an issue in its repo (its `identities.md` account), linked,
 left unless it blocks this (`~/.claude`: `ntv-kaizen`); never report it bare. A **new branch goes
 in its own worktree** from `origin/<base>`, never `git checkout`/`switch` in my checkout.
 

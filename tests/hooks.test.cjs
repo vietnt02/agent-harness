@@ -936,8 +936,10 @@ test('worker-start-receipt: a text receipt gives its dispatch; selector_not_foun
   assert.deepEqual(receipts(out).ids, ['ctx_1ad8a46f5dff', 'ctx_aff668246327', 'ctx_c7112062884c']);
   assert.deepEqual(receipts('Started. See Worker ctx_1ad8a46f5dff [ready]').ids, [], 'only a receipt line');
   const err = '{"ok":false,"error":{"code":"selector_not_found","message":"No Orca workspace matched the worktree selector path:/x"}}';
-  assert.deepEqual(receipts(err).errors, ['selector_not_found: No Orca workspace matched the worktree selector path:/x']);
-  assert.deepEqual(receipts('error: selector_not_found').errors, ['selector_not_found']);
+  assert.deepEqual(receipts(err).errors, ['No Orca workspace matched the worktree selector path:/x'], 'the message alone, as the guide is searched');
+  assert.deepEqual(receipts(err).codes, ['selector_not_found']);
+  assert.deepEqual(receipts('error: selector_not_found').codes, ['selector_not_found']);
+  assert.deepEqual(receipts('Worker ctx_aa11 [ready] for task_1\nspec: if selector_not_found, read worktree ps').codes, [], 'a word in spec text');
 });
 
 test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a released one, stop the dispatch Orca reopened and start the task again with its model', () => {
@@ -1530,6 +1532,7 @@ test('main-checkout-guard: upkeep after a merge passes; a branch or reset that d
       'git branch -D done pr',
       `git worktree add -q -B pr ${W} origin/pr`,
       `git worktree add -q -B brand-new ${W} origin/main`,
+      `git worktree add --orphan -b fresh ${W} && cd ${W} && git commit -qm y --allow-empty`,
     ]) assert.equal(writes(c), false, c);
     for (const c of [
       `git worktree add -q ${W} && cd ${M} && git merge origin/main`,
@@ -1787,13 +1790,26 @@ test('lark-chat-secret-guard: a chat or mail read printed straight to the conver
     'lark-cli --profile p im +chat-messages-list --chat-id oc_1 --concise',
     'lark-cli im +threads-messages-list --thread t | sed -n 1,50p',
     'lark-cli --profile p im +messages-mget --ids a,b | cut -c1-300',
-    'lark-cli mail +messages-search --query x',
+    'lark-cli mail +message --message-id abc',
+    'lark-cli mail +messages --message-ids a,b',
+    'lark-cli mail +thread --thread-id t',
+    'lark-cli mail +triage --query x',
+    'lark-cli mail user_mailbox.messages get --params x',
+    'lark-cli im messages list --params x',
+    'lark-cli im +chat-messages-list --chat-id oc_1 2>&1',
+    'lark-cli im +chat-messages-list --chat-id oc_1 2>&1 | head -50',
+    'lark-cli im +messages-search --query token 2>/dev/null | jq .',
+    'lark-cli im +messages-search --query token >&2',
   ]) assert.ok(exposedRead(c), c);
   for (const c of [
     'lark-cli --profile p im +chat-messages-list --chat-id oc_1 > /tmp/s/msgs.json',
     'lark-cli im +chat-messages-list --chat-id oc_1 2>&1 > /tmp/s/m.json',
     'lark-cli im +chat-messages-list --chat-id oc_1 | node ~/.claude/scripts/redact-secrets.cjs | head',
     'lark-cli im +messages-send --chat-id oc_1 --text hi',
+    'lark-cli mail +rule-list',
+    'lark-cli im +chat-messages-list --help',
+    'lark-cli im +chat-messages-list --chat-id oc_1 | jq .data > /tmp/x.json',
+    'lark-cli im +chat-messages-list --chat-id oc_1 &> /tmp/x.json',
     'lark-cli base +record-list --table t',
     "echo 'lark-cli im +chat-messages-list' > /tmp/spec.md",
   ]) assert.equal(exposedRead(c), null, c);
@@ -1811,4 +1827,7 @@ test('redact-secrets: credential values become [redacted], their labels and ordi
   assert.match(out, /Mật khẩu tạm: \[redacted\]/);
   assert.ok(out.includes('Họp lúc 9h nhé'), 'ordinary text');
   assert.equal(redact(out), out, 'idempotent');
+  const json = redact('{"password":"hunter2","content":"DB_PASSWORD=\\"Abc123!\\" api_key=zz12 postgres://u:S3cret@h Bearer abcdefghijklmnop"}');
+  for (const v of ['hunter2', 'Abc123!', 'zz12', 'S3cret', 'abcdefghijklmnop']) assert.ok(!json.includes(v), v);
+  for (const t of ['Mật khẩu là gì vậy?', 'MONKEY: banana']) assert.equal(redact(t), t, t);
 });
