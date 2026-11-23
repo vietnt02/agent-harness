@@ -1658,6 +1658,17 @@ test('tier-c-guard: wrangler --local writes local state only, so it may follow a
   assert.ok(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production --remote'));
   assert.equal(tierCGuard.chainedProdWrite('npm run build && npx wrangler kv key delete k --env=production --local --persist-to=.wrangler/state'), null);
   assert.equal(tierCGuard.chainedProdWrite('ls && npx wrangler d1 execute DB --persist-to .wrangler/state --command "select 1"'), null);
+  // A dry run or a help page writes nothing.
+  for (const c of [
+    "a && cf --profile p dns records edit X --zone z --body '{\"ttl\":60}' --dry-run",
+    'cf cli search "create kv" | head -4; cf kv namespaces create --help 2>&1 | grep -A6 "^Options"',
+    'npm ci; npm test; npx wrangler deploy --dry-run --outdir /tmp/x',
+    'ls && gh pr merge --help',
+  ]) assert.equal(tierCGuard.chainedProdWrite(c), null, c);
+  for (const c of [
+    "a && cf --profile p dns records edit X --zone z --body '{\"ttl\":60}'",
+    'npm ci; npx wrangler deploy',
+  ]) assert.ok(tierCGuard.chainedProdWrite(c), c);
 });
 
 test('tier-c-guard: a docker write over ssh is a production write; a subagent and a worker never make one (kaizen fixtures)', () => {

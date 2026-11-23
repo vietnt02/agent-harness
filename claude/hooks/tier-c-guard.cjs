@@ -14,7 +14,8 @@
  * 2. A production write (`cf … update|create|delete…`, `wrangler deploy`, `gh pr merge`, `glab mr
  *    merge`) after another step in the same call is always blocked: `a | tail && cf …` runs the
  *    write even when `a` failed (a pipe returns its last command's status), so it runs alone.
- *    `wrangler … --local` (or `--persist-to`) writes local state only, so it is no production write.
+ *    `wrangler … --local` (or `--persist-to`) writes local state only, and `--dry-run` or `--help` writes
+ *    nothing, so none is a production write.
  * 3. A docker write on another host (`ssh <host> … docker run|pull|rm|rmi|stop|restart|kill|start|create`,
  *    `docker compose up|down|restart|stop|rm|pull|…`), in the ssh command, a heredoc or a script fed
  *    to it (lib/shell-words.cjs `scriptsRun`), changes that host: a subagent (it only reads) and an Orca
@@ -61,6 +62,7 @@ function prodWrite(words) {
   }
   const verbs = verbsOf(args);
   if (cmd === 'wrangler' && args.some((a) => a === '--local' || /^--persist-to(=|$)/.test(a))) return false;
+  if (args.some((a) => a === '--dry-run' || a === '--help' || a === '-h')) return false;
   if (PROD_VERBS[cmd]) return verbs.some((w) => PROD_VERBS[cmd].test(w));
   return (cmd === 'gh' && verbs[0] === 'pr' && verbs[1] === 'merge') || (cmd === 'glab' && verbs[0] === 'mr' && verbs[1] === 'merge');
 }
