@@ -608,3 +608,17 @@ test('worker-stall: heldBy finds a real process by its working directory', { ski
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('user-intent: a request for an answer waits like a question; a work order does not', () => {
+  const { isQuestion } = require('../claude/hooks/lib/user-intent.cjs');
+  for (const t of [
+    'cho tôi câu lệnh để tôi chạy, đừng để placeholder như thế',
+    'gửi tôi link PR nhé',
+    'giải thích kĩ phần này',
+  ]) assert.equal(isQuestion(t), true, t);
+  for (const t of [
+    'đã tạo secret rồi, làm tiếp plan đi',
+    'cho phép vượt cap 4 nhé',
+    'ok chạy plan đi',
+  ]) assert.equal(isQuestion(t), false, t);
+});

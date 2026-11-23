@@ -22,10 +22,14 @@ const NOT_ASKING = /không sao$/;
 const LEADING = /^(thế\s+|vậy\s+)?(sao|tại sao|vì sao)\s(?!(chép|lưu|kê)(\s|$))/;
 // Phrases that ask wherever they appear.
 const ANYWHERE = /(tại sao|vì sao|sao lại|sao không|sao vậy|thế nào|làm sao|bao giờ|bao nhiêu|khi nào|ở đâu|là gì|cái gì)/;
+// A request for an answer (a command, a fact, an explanation) waits like a question: "cho tôi câu lệnh".
+const REQUEST = /(^|[^\p{L}])((cho|gửi|đưa|chỉ)\s+(tôi|mình|anh|em)\s+(xem\s+)?(câu lệnh|lệnh|command|link|danh sách|thông tin|số|bảng|file|đường dẫn|cách)|giải thích|liệt kê cho|show me|give me|tell me|explain)(?=$|[^\p{L}])/u;
 
+// True for a question or a request for an answer (CLAUDE.md § Mutation gate: only answered until the
+// user says go on).
 function isQuestion(text) {
   const t = text.toLowerCase();
-  if (t.includes('?') || ANYWHERE.test(t)) return true;
+  if (t.includes('?') || ANYWHERE.test(t) || REQUEST.test(t)) return true;
   return t
     .split(/[.!,;:\n]+/)
     .map((s) => s.trim())

@@ -37,16 +37,18 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
      each worker's agent, model, effort and worktree follow its § 2, never a Defaults line.
    - **Defaults**: each reversible technical choice Claude made that the plan relies on, one line
      with its reason; the user may override any at the gate. An irreversible or user-visible
-     choice (a name others will read, a send time) is an open question, not a default.
+     choice (a name others will read, a send time) is an open question, not a default, unless the
+     user agreed to it (by name, or to the whole proposal that recommended it): then `chốt làm`, with
+     the user's words.
    - **Out of scope**.
    - **Open questions**.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
    promised for later (an outline, a draft), is an open question.
 4. Check or render everything the block has produced so far, and run every prerequisite check.
 5. In the turn that writes or changes the plan, ask at once, in one AskUserQuestion call, every
-   open question, recommended option first (the user's last reply holds a question, as a message
-   or as one answer in the box: that turn answers it and asks nothing, yet writes the reply's other
-   answers into the plan at once); each names the plan's full path and what it decides, since the
+   open question, recommended option first (the user's last reply holds a question or request, as a
+   message or as one answer in the box: that turn only answers it and asks nothing; the reply's other
+   answers go into the plan once the user says go on); each names the plan's full path and what it decides, since the
    box hides the text above it. Write each
    answer into the plan (its action's `chốt làm` or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
    left, in that same turn, ask the final gate in one AskUserQuestion: run this plan on autopilot?
@@ -70,13 +72,15 @@ again; the one exception is an action the user approves by name in the Report's 
   action that needs a parked action's result.
 - Every listed action runs without a new ask, tier C included, after the checks
   `CLAUDE.md` § Irreversible actions puts before a tier-C step.
-- Never stop the plan to ask. A question the plan or the user's words already answer is no
+- Never stop the plan to wait for an answer. A question the plan or the user's words already answer is no
   question; reads, probes and checks never need a yes. Whatever surfaces: a fix that makes a
   listed action's output do what the plan approved (`CLAUDE.md` § Mutation gate, Fixes need no
   ask) → fix, check, one-line report; anything else → park it and continue with the rest. A run the plan depends on: wait in the background with
   `~/.claude/scripts/watch.sh`, never on the user.
 - An action the plan does not list, or one needing intent the plan does not state: park it.
-- The user interrupts: stop; every tier-C step is asked again.
+- The user interrupts (stops the turn): stop; every tier-C step is asked again. A message sent mid-run
+  without stopping is read by what it says: a question or request in it is answered, the run halting
+  after the step under way until the user says go on; any message asks every `Đã park` item at once.
 - A classifier or permission denial: never retry it in another form; park that step with its
   exact command (`rules/mine/user-profile.md`).
 
@@ -93,4 +97,4 @@ Anything parked or surfaced: in the same turn, the report as text, then one AskU
 alone (the box hides the text above it); after the answers, only what they changed, never the
 report again. An answer approving a named action adds it to the plan, approved, and the next
 run starts with no new gate; any other change sends the plan back to `status: draft` and its gate.
-Nothing parked or surfaced: no ask, the plan stays `done`. Never ask mid-run.
+Nothing parked or surfaced: no ask, the plan stays `done`. Never ask mid-run unless the user writes.

@@ -1168,6 +1168,7 @@ test('session-notes: once every note of the session is done, the kaizen summary 
       /a serious break no hook stops yet .*its fix is a hook, never a sentence/, /two fair readings of which lead to two different actions/])
       assert.match(notes.kaizenReminder([file]), kind);
     assert.match(notes.kaizenReminder([file]), /clear rule broken without such harm, or an intent misread, is no file/);
+    assert.match(notes.kaizenReminder([file]), /tell the user in one line that this step runs and about how long/);
     assert.doesNotMatch(notes.kaizenReminder([file]), /every correction from Viet/);
     // A note this session wrote without its id on the session: line is named; its own note, a done
     // one, a file with no front matter or one outside the notes folder is not.

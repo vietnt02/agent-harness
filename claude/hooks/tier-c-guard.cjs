@@ -3,7 +3,7 @@
  * tier-c-guard.cjs - PreToolUse(Bash), two checks:
  * 1. A tier-C Airflow step (`airflow dags pause/unpause/backfill`, `airflow dags trigger` with
  *    `--conf`/`-c`) is blocked when the user's latest words do not ask for it (CLAUDE.md § Mutation
- *    gate: a question never opens a tier-C step; after an interrupt every tier-C step is asked
+ *    gate: a question or request is only answered till the go-on; after an interrupt every tier-C step is asked
  *    again). A trigger on the schedule's own config is not tier C (§ Irreversible actions) and
  *    passes; a merge is judged by its deploy (§ Irreversible actions), not here.
  *    Blocks when the latest human message is a question, or when an interrupt came fewer than
