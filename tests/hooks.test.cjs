@@ -929,6 +929,17 @@ test('dispatch-split-guard: a claude worker id outside the bare aliases is caugh
   assert.equal(pin(`${ws} --agent antigravity --model gemini-3.8-flash --effort high`), null);
 });
 
+test('worker-start-receipt: a text receipt gives its dispatch; selector_not_found is named', () => {
+  const { receipts } = require('../claude/hooks/worker-start-receipt.cjs');
+  const out = '== /tmp/w1.out\nWorker ctx_1ad8a46f5dff [ready] for task_566d5e54e91a\n== /tmp/w2.out\n' +
+    'Worker ctx_aff668246327 [ready] for task_1\nWorker ctx_c7112062884c [ready] for task_2\n';
+  assert.deepEqual(receipts(out).ids, ['ctx_1ad8a46f5dff', 'ctx_aff668246327', 'ctx_c7112062884c']);
+  assert.deepEqual(receipts('Started. See Worker ctx_1ad8a46f5dff [ready]').ids, [], 'only a receipt line');
+  const err = '{"ok":false,"error":{"code":"selector_not_found","message":"No Orca workspace matched the worktree selector path:/x"}}';
+  assert.deepEqual(receipts(err).errors, ['selector_not_found: No Orca workspace matched the worktree selector path:/x']);
+  assert.deepEqual(receipts('error: selector_not_found').errors, ['selector_not_found']);
+});
+
 test('worker-start-receipt: a send to a running worker says the receipt is only the mailbox; to a released one, stop the dispatch Orca reopened and start the task again with its model', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const states = { ctx_a1: { state: 'running' }, ctx_b2: { state: 'succeeded', released: true, worktree: 'wt1::/w' }, ctx_b3: { state: 'succeeded', released: false }, ctx_b4: { state: 'stopped', released: true, exited: true }, ctx_b5: { state: 'succeeded', released: true }, ctx_c3: { state: 'ready' }, ctx_d4: { state: 'ready', exited: true }, ctx_e5: { state: 'ready', worktree: 'wt1::/w/My Repo/a::b' }, ctx_e6: { state: 'ready' } };

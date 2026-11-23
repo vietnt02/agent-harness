@@ -150,14 +150,17 @@ function receipts(output, max = MAX_IDS) {
     try {
       const r = JSON.parse(block);
       if (r.result?.dispatchId) ids.push(r.result.dispatchId);
-      if (r.ok === false && r.error?.message) errors.push(r.error.message);
+      if (r.ok === false && r.error?.message) errors.push(r.error.code ? `${r.error.code}: ${r.error.message}` : r.error.message);
     } catch (_) { /* not a receipt */ }
   }
-  // A filtered receipt: `"dispatch":"ctx_…"` fields, or bare `ctx_…` lines (`jq -r .result.dispatchId`).
+  // A filtered receipt: `"dispatch":"ctx_…"` fields, bare `ctx_…` lines (`jq -r .result.dispatchId`),
+  // or the text receipt (`Worker ctx_… [ready] for task_…`).
   if (!ids.length && !/"workers"\s*:/.test(output)) {
     for (const m of output.matchAll(/"dispatch(?:Id)?"\s*:\s*"(ctx_[0-9a-f]+)"/g)) ids.push(m[1]);
     for (const m of output.matchAll(/^(ctx_[0-9a-f]+)\s*$/gm)) ids.push(m[1]);
+    for (const m of output.matchAll(/^Worker (ctx_[0-9a-f]+) \[/gm)) ids.push(m[1]);
   }
+  if (/\bselector_not_found\b/.test(output) && !errors.some((e) => /selector_not_found/.test(e))) errors.push('selector_not_found');
   return { ids: [...new Set(ids)].slice(0, max), errors: [...new Set(errors)] };
 }
 
@@ -305,6 +308,10 @@ process.stdin.on('end', () => {
     else if (!lines.length) lines = [`Không đọc được ${ids.join(', ')} từ Orca: ${FALLBACK}`];
     if (ANTIGRAVITY.test(command)) lines.push(...agyConfigLines(), ...agyVersionLines());
     lines.push(...watchLines(ids, launchArgs(command)));
+    if (errors.some((e) => /selector_not_found/.test(e))) {
+      lines.push('selector_not_found: `--worktree path:` chỉ nhận worktree của repo đã có trong Orca (`orca worktree ps --json` thấy nó); ' +
+        'repo chưa có thì `orca repo add --path <repo>` trước, hoặc đặt worker ở worktree của repo đã có và đọc repo kia bằng `git -C`.');
+    }
     for (const message of errors) {
       const refs = guideLines(message);
       lines.push(`ok:false "${message.slice(0, 200)}"` + (refs.length
