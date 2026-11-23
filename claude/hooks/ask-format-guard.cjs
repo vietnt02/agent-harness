@@ -5,9 +5,10 @@
  * its own `- ` line, in an ask's question too). The box shows the question as one block of text, so
  * context, facts and the question run together and the user reads it twice.
  * A sentence ends at `.`, `?`, `!` or `;` before a space or the end; a colon does not count, so a
- * label ("Plan <path>: …?") stays one point. A quoted draft (the message a send ask shows), code and a
- * parenthesised aside are not the ask's own sentences, nor is a roman-numeral label ("II. …"), so they
- * are left out before counting. Said once per question text (lib/block-once.cjs): the same ask sent
+ * label ("Plan <path>: …?") stays one point. A quoted draft (the message a send ask shows) and a fenced
+ * code block are not the ask's own sentences, nor is a roman-numeral label ("II. …") or a ';' inside a
+ * parenthesised aside with no sentence of its own, so they are left out before counting; an aside that
+ * runs sentences is context, and counts. Said once per question text (lib/block-once.cjs): the same ask sent
  * again passes. Fails open on any error.
  */
 'use strict';
@@ -16,13 +17,13 @@ const SENTENCE_END = /[.?!;](?=\s|$)/g;
 const BULLET_LINE = /^\s*(?:[-*•]|\d+[.)]|\([a-z0-9]\))\s/im;
 const ROMAN_LABEL = /^\s*[IVX]+\.\s+/gm;
 
-// The ask's own text: quoted drafts and code left out.
+// The ask's own text: quoted drafts and fenced code blocks left out.
 const ownText = (t) => t
   .replace(/```[\s\S]*?```/g, ' ')
   .replace(/"[^"]*"/g, ' ')
   .replace(/“[^”]*”/g, ' ');
-// What is counted: the own text without its parenthesised asides and roman-numeral labels.
-const counted = (own) => own.replace(/\([^()]*\)/g, ' ').replace(ROMAN_LABEL, '');
+// What is counted: the own text without roman-numeral labels and asides that hold no `.?!` sentence end.
+const counted = (own) => own.replace(/\([^()]*\)/g, (m) => (/[.?!](?=\s|\))/.test(m) ? m : ' ')).replace(ROMAN_LABEL, '');
 
 // The questions of an AskUserQuestion input that run two or more sentences with no bullet line.
 function runOnQuestions(input) {

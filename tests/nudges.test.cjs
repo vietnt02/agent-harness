@@ -659,6 +659,8 @@ test('ask-format-guard: a question running several sentences with no bullet line
     'a quoted draft is the message, not the ask: it is never reshaped');
   assert.deepEqual(runOnQuestions({ questions: [{ question: 'Dựng bảng tạm theo kế hoạch dưới đây (nhánh mới, bản nháp; chưa merge) được không?' }] }), [],
     'a semicolon inside a parenthesised aside ends no sentence');
+  assert.equal(runOnQuestions({ questions: [{ question: 'Số dư đầu kỳ lấy từ đâu? (Trả lời câu này là đồng ý dựng tab mới. Claude mở PR, chưa merge.)' }] }).length, 1,
+    'an aside that runs sentences is context and counts');
   assert.deepEqual(runOnQuestions({ questions: [{ question: 'II. Kế hoạch thu tiền tháng này là số nào?' }] }), [], 'a roman-numeral label is no sentence');
   assert.deepEqual(runOnQuestions({}), []);
   const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: sid('ask-format'), tool_input: { questions: [{ question: bulleted }, { question: runOn }] } };
