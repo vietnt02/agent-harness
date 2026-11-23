@@ -87,7 +87,7 @@ function problem(file, current, after) {
     const over = newOverCaps(current, after);
     if (over.length) {
       return `session note ${name}: ${over.map((v) => v.msg).join('; ')}. ` +
-        'It is current state, not a log: an approval of the open block is shortened, never dropped; a closed block\'s lines leave with it.';
+        'It is current state, not a log: an approval of the open block or the whole session is shortened, never dropped; a closed block\'s lines leave with it.';
     }
     const stray = strayHeadings(after.replace(/^---\n[\s\S]*?\n---/, ''));
     return stray.length
@@ -113,7 +113,7 @@ process.stdin.on('end', () => {
       const msgs = [];
       if (notes.length) {
         msgs.push(`session note over a cap or outside its sections (${notes.join(' | ')}). It is current state, ` +
-          `read again before acting: rewrite it into ${SECTIONS_TEXT}; an approval line is shortened, never dropped; ` +
+          `read again before acting: rewrite it into ${SECTIONS_TEXT}; an approval of the open block or the whole session is shortened, never dropped, a closed block's lines leave with it; ` +
           'how-tos go into their knowledge/skill file.');
       }
       if (msgs.length) {

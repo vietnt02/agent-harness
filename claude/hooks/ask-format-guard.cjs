@@ -5,27 +5,41 @@
  * its own `- ` line, in an ask's question too). The box shows the question as one block of text, so
  * context, facts and the question run together and the user reads it twice.
  * A sentence ends at `.`, `?`, `!` or `;` before a space or the end; a colon does not count, so a
- * label ("Plan <path>: …?") stays one point. Said once per question text (lib/block-once.cjs): the
- * same ask sent again passes. Fails open on any error.
+ * label ("Plan <path>: …?") stays one point. A quoted draft (the message a send ask shows), code and a
+ * parenthesised aside are not the ask's own sentences, nor is a roman-numeral label ("II. …"), so they
+ * are left out before counting. Said once per question text (lib/block-once.cjs): the same ask sent
+ * again passes. Fails open on any error.
  */
 'use strict';
 
 const SENTENCE_END = /[.?!;](?=\s|$)/g;
-const BULLET_LINE = /^\s*(?:[-*•]|\d+[.)])\s/m;
+const BULLET_LINE = /^\s*(?:[-*•]|\d+[.)]|\([a-z0-9]\))\s/im;
+const ROMAN_LABEL = /^\s*[IVX]+\.\s+/gm;
+
+// The ask's own text: quoted drafts and code left out.
+const ownText = (t) => t
+  .replace(/```[\s\S]*?```/g, ' ')
+  .replace(/"[^"]*"/g, ' ')
+  .replace(/“[^”]*”/g, ' ');
+// What is counted: the own text without its parenthesised asides and roman-numeral labels.
+const counted = (own) => own.replace(/\([^()]*\)/g, ' ').replace(ROMAN_LABEL, '');
 
 // The questions of an AskUserQuestion input that run two or more sentences with no bullet line.
 function runOnQuestions(input) {
   const qs = Array.isArray(input?.questions) ? input.questions : [];
   return qs
     .map((q) => String(q?.question || ''))
-    .filter((t) => !BULLET_LINE.test(t) && (t.match(SENTENCE_END) || []).length >= 2);
+    .filter((t) => {
+      const own = ownText(t);
+      return !BULLET_LINE.test(own) && (counted(own).match(SENTENCE_END) || []).length >= 2;
+    });
 }
 
 const NOTE =
   'ask-format-guard: a question runs several sentences on one block of text. The box shows it as ' +
   'written, so the user reads context, facts and the question run together (communication-style.md ' +
   '§ Format: each point on its own `- ` line, in an ask\'s question too). Put each point on its own ' +
-  '`- ` line, the question itself last, and send the ask again.';
+  '`- ` line and send the ask again.';
 
 module.exports = { runOnQuestions };
 if (require.main !== module) return;

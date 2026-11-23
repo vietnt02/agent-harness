@@ -232,7 +232,7 @@ try {
       console.log(
         `If this prompt approves a block, sets a limit or decides something no artifact holds yet, write it as one line ` +
           `under "## Đang có hiệu lực" in the session note (${files}) before this turn's first tool call; if it changes topic, ` +
-          'rewrite "## Đang làm" and fold the closed topic into one "## Đã xong" line. An opinion, question or acknowledgement: write nothing.'
+          'rewrite "## Đang làm" and fold the closed topic into one "## Đã xong" line, its "## Đang có hiệu lực" lines leaving with it. An opinion, question or acknowledgement: write nothing.'
       );
     }
     const closed = data.hook_event_name === 'PostToolUse' ? closedNote(own, id) : [];

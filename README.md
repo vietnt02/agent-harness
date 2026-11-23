@@ -57,7 +57,7 @@ Bộ cấu hình và harness dùng chung cho Claude Code và Antigravity (`agy`)
 1. `~/.claude/rules/mine/identities.md`: Cấu hình tài khoản GitHub / GitLab tương ứng theo từng đường dẫn repo.
 2. `~/.claude/rules/mine/user-profile.md`: Thông tin cá nhân, vai trò, quyền hạn và quy tắc máy tính của bạn.
 3. `~/.claude/rules/mine/knowledge-index.md`: Chỉ mục kiến thức khi cần kích hoạt các file trong `~/.claude/knowledge/`.
-4. `~/.gemini/config/GEMINI.md`: Phần riêng của agy (bạn là ai, bảng tài khoản, chỉ mục knowledge). agy nạp file này cùng `~/.gemini/config/AGENTS.md`, là rule chung được symlink từ `agy/AGENTS.md` của repo.
+4. `~/.gemini/config/GEMINI.md`: Phần riêng của agy (bạn là ai, bảng tài khoản, chỉ mục knowledge). agy nạp file này cùng `~/.gemini/config/AGENTS.md`, là rule chung được symlink từ `agy/AGENTS.md` của repo. Máy đã có một `~/.gemini/config/AGENTS.md` tự viết: bộ cài chuyển nó vào thư mục sao lưu, nên chép ngay phần riêng của bạn (bạn là ai, bảng tài khoản, chỉ mục knowledge) từ bản sao lưu sang `GEMINI.md`; tới lúc đó agy chạy với bảng tài khoản để trống.
 
 ### Máy mới: các bước agy phải làm tay
 

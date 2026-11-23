@@ -112,7 +112,7 @@ function agyConfigLines(homes = acpHomes(), target = AGY_CONFIG) {
     }
   })
     .map((h) => `agy chat chạy với GEMINI_HOME="${h}" mà "${h}/config" không trỏ về ${target}: worker và phiên chat ` +
-      `agy chạy thiếu AGENTS.md toàn cục và skills. "${h}/config" là thư mục thật thì chuyển nó đi trước; rồi ` +
+      `agy chạy thiếu AGENTS.md, GEMINI.md toàn cục và skills. "${h}/config" là thư mục thật thì chuyển nó đi trước; rồi ` +
       `\`ln -sfn ${target} '${h}/config'\` (gỡ: \`rm '${h}/config'\`).`);
 }
 
