@@ -1852,3 +1852,16 @@ test('session-note-cap: `## Đang có hiệu lực` is capped whole, so closed b
   assert.match(rulesBudget.problem(file, short, long), /closed block's lines leave with it/);
   assert.equal(rulesBudget.problem(file, short, note(6)), null);
 });
+
+test('bridge fixtures: a Windows path goes into a payload template as a value, never as JSON text', () => {
+  const { fillVars } = require('../agy/bridge-fixtures/fill-vars.cjs');
+  const vars = { '{ACP}': 'C:\\Users\\me\\AppData\\Roaming\\orca\\antigravity-chat', '{CID}': 'c1' };
+  const tpl = { transcriptPath: '{ACP}\\brain\\{CID}\\t.jsonl', list: ['{CID}', 3], nested: { '{CID}': null } };
+  assert.deepEqual(fillVars(tpl, vars), {
+    transcriptPath: 'C:\\Users\\me\\AppData\\Roaming\\orca\\antigravity-chat\\brain\\c1\\t.jsonl', list: ['c1', 3], nested: { c1: null },
+  });
+  // The splice into JSON text it replaces: the same path made the payload unparseable.
+  let text = JSON.stringify(tpl);
+  for (const [k, v] of Object.entries(vars)) text = text.split(k).join(v);
+  assert.throws(() => JSON.parse(text), SyntaxError);
+});

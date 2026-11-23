@@ -60,9 +60,10 @@ function files(dir) {
   });
 }
 
-test('skills hold no machine, repo or incident specifics', () => {
+test('skills and the agy rules hold no machine, repo or incident specifics', () => {
   const hits = [];
-  for (const file of files(SKILLS)) {
+  // agy/AGENTS.md is installed on every machine; the user's own part goes to their local GEMINI.md.
+  for (const file of [...files(SKILLS), path.join(REPO, 'agy', 'AGENTS.md')]) {
     fs.readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
       for (const [what, hit] of MARKS) {
         if (hit(line)) hits.push(`${path.relative(SKILLS, file)}:${i + 1} ${what}: ${line.trim().slice(0, 120)}`);

@@ -281,15 +281,21 @@ function main() {
     installFileSymlink(src, target, homeDir, backupDir, dryRun);
   }
 
-  // 4. Copy templates/rules-mine/*.md
-  const templatesDir = path.join(repoDir, 'templates', 'rules-mine');
-  if (fs.existsSync(templatesDir)) {
+  // 4. Copy each user's own files from their templates, never over one that exists:
+  //    templates/rules-mine/*.md -> ~/.claude/rules/mine/, templates/agy-mine/*.md -> ~/.gemini/config/
+  //    (agy loads that GEMINI.md beside the repo's AGENTS.md: the personal part stays off the repo).
+  const templateSets = [
+    [path.join(repoDir, 'templates', 'rules-mine'), path.join(homeDir, '.claude', 'rules', 'mine')],
+    [path.join(repoDir, 'templates', 'agy-mine'), path.join(homeDir, '.gemini', 'config')],
+  ];
+  for (const [templatesDir, targetDir] of templateSets) {
+    if (!fs.existsSync(templatesDir)) continue;
     const templateFiles = fs.readdirSync(templatesDir)
       .filter(f => f.endsWith('.md'))
       .sort();
     for (const fname of templateFiles) {
       const t = path.join(templatesDir, fname);
-      const target = path.join(homeDir, '.claude', 'rules', 'mine', fname);
+      const target = path.join(targetDir, fname);
       if (existsOrLink(target)) {
         console.log(`Đã có template: ${target} (bỏ qua)`);
       } else {

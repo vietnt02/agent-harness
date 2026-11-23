@@ -166,6 +166,13 @@ test('1. clean home: symlinks, repo resolution, 23 hooks format, templates, no b
     assert.strictEqual(installedContent, originalContent);
   }
 
+  // agy: the repo's AGENTS.md is a symlink; the personal GEMINI.md beside it is a real copy of its template
+  const agyAgents = path.join(home, '.gemini', 'config', 'AGENTS.md');
+  assert.ok(fs.lstatSync(agyAgents).isSymbolicLink(), 'agy AGENTS.md comes from the repo');
+  const agyMine = path.join(home, '.gemini', 'config', 'GEMINI.md');
+  assert.ok(!fs.lstatSync(agyMine).isSymbolicLink(), 'agy GEMINI.md is the user\'s own copy');
+  assert.strictEqual(fs.readFileSync(agyMine, 'utf8'), fs.readFileSync(path.join(repoDir, 'templates', 'agy-mine', 'GEMINI.md'), 'utf8'));
+
   // No backup directory
   const backupDir = path.join(home, '.claude', 'backups');
   assert.ok(!fs.existsSync(backupDir), 'Backup directory should not exist on fresh install');
@@ -183,6 +190,9 @@ test('2. second run: settings and hooks.json byte identical, no new backup, no n
   const settingsBefore = fs.readFileSync(settingsPath);
   const hooksBefore = fs.readFileSync(hooksPath);
   const symlinksBefore = getAllSymlinks(home);
+  // The user filled in their agy GEMINI.md: a rerun keeps it.
+  const agyMine = path.join(home, '.gemini', 'config', 'GEMINI.md');
+  fs.writeFileSync(agyMine, '# filled in\n');
 
   const secondRes = runInstall(home);
   assert.strictEqual(secondRes.status, 0, `second install failed: ${secondRes.stderr}`);
@@ -195,6 +205,7 @@ test('2. second run: settings and hooks.json byte identical, no new backup, no n
   assert.deepStrictEqual(hooksAfter, hooksBefore, 'hooks.json changed on second run');
   assert.strictEqual(symlinksAfter.length, symlinksBefore.length, 'Symlink count changed on second run');
   assert.ok(!fs.existsSync(path.join(home, '.claude', 'backups')), 'Backup directory created on second run');
+  assert.strictEqual(fs.readFileSync(agyMine, 'utf8'), '# filled in\n', 'the filled-in GEMINI.md is kept');
 });
 
 test('2b. a link to a file the repo moved is removed; the moved file is linked; a link elsewhere is kept', (t) => {
