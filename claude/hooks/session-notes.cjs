@@ -192,8 +192,8 @@ try {
   if (data.hook_event_name === 'SessionStart') {
     if (source === 'compact' || source === 'resume') {
       for (const n of own) {
-        // A note in the four sections is shown whole: its size grows with approvals and closed topics,
-        // never cut, so a compact cannot drop an approval. A cap it passes comes as an order to fix.
+        // A note in the four sections is shown whole, never cut, so a compact cannot drop an approval.
+        // A cap it passes (closed blocks' lines left in `## Đang có hiệu lực`) comes as an order to fix.
         // Only an older, long note in other sections gets the cut view.
         const over = overCaps(n.text);
         if (!strayHeadings(n.text).length || n.text.length <= VIEW_CHARS) {

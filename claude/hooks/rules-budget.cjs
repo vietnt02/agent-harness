@@ -87,7 +87,7 @@ function problem(file, current, after) {
     const over = newOverCaps(current, after);
     if (over.length) {
       return `session note ${name}: ${over.map((v) => v.msg).join('; ')}. ` +
-        'It is current state, not a log; an approval line is shortened, never dropped.';
+        'It is current state, not a log: an approval of the open block is shortened, never dropped; a closed block\'s lines leave with it.';
     }
     const stray = strayHeadings(after.replace(/^---\n[\s\S]*?\n---/, ''));
     return stray.length

@@ -3,20 +3,22 @@
  * only what a compact would make Claude get wrong; detail is re-read from the session jsonl).
  * Capped per section, not in total: a total cap made the sections compete, so a long `Đang làm`
  * squeezed out approvals. `Đang làm` and `Resume` never grow with the session: capped whole.
- * `Đang có hiệu lực` (one approval or decision a line) and `Đã xong` (one closed topic a line) grow
- * with the work done: capped per line, any number of lines. Counted in characters: a line cap
- * alone let notes grow by writing longer lines.
+ * `Đang có hiệu lực` holds the open block's approvals and limits: its lines leave with their block
+ * and a decision a plan or issue holds becomes its link, so it is capped whole too, and per line;
+ * left uncapped, a session of many blocks reloaded every closed block's lines at each compact.
+ * `Đã xong` (one closed topic a line) grows with the work done: capped per line only. Counted in
+ * characters: a line cap alone let notes grow by writing longer lines.
  */
 
 // The only `## ` sections a note holds, in this order.
 const NOTE_SECTIONS = ['Đang làm', 'Đang có hiệu lực', 'Đã xong', 'Resume'];
-const SECTION_CAPS = { 'Đang làm': 300, Resume: 300 };
+const SECTION_CAPS = { 'Đang làm': 300, 'Đang có hiệu lực': 2500, Resume: 300 };
 const LINE_CAPS = { 'Đang có hiệu lực': 250, 'Đã xong': 150 };
 // What to cut when a cap is passed, per section.
 const HOW_TO_CUT = {
   'Đang làm': 'keep one topic and its next step; the story so far is re-read from the session jsonl',
   Resume: 'IDs only',
-  'Đang có hiệu lực': 'the approved block in a few words, never wider; a decision an issue, PR or comment now holds becomes its link',
+  'Đang có hiệu lực': 'only the open block and what holds for the whole session: drop the lines of a closed block (its `## Đã xong` line keeps the link), a decision a plan, issue or PR now holds becomes its link, no kaizen notes',
   'Đã xong': 'one closed topic: its result link',
 };
 
