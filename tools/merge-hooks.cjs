@@ -279,15 +279,25 @@ function main() {
         } else {
           hookToAdd = JSON.parse(JSON.stringify(h));
         }
-        // A harness hook already installed with another command line (the node it calls moved, or an
-        // older install picked a versioned path an upgrade deleted): take this install's command.
-        if (had) {
-          for (const ih of had.hooks) {
-            if (getHookKey(ih, isWin) !== k) continue;
-            if (ih.command !== hookToAdd.command || !deepEqual(ih.args, hookToAdd.args)) {
-              ih.command = hookToAdd.command;
-              if (hookToAdd.args !== undefined) ih.args = hookToAdd.args;
-              else delete ih.args;
+        // A harness hook already installed calling another node (an older install picked a versioned
+        // path an upgrade deleted): point it at this install's node, in whatever group and form
+        // (shell string or command + args) it sits. Only the plain `<node> <script> …` shape is
+        // rewritten; a hook the user wrapped (env, another runtime, a wrapper script) is left alone.
+        if (k && existingHookKeys.has(k)) {
+          const wantNode = isWin ? hookToAdd.command : splitShellTokens(hookToAdd.command)[0];
+          const normTok = (t) => { const v = String(t).replace(/\\/g, '/'); return isWin ? v.toLowerCase() : v; };
+          for (const g of currentGroups) {
+            if (!g || !Array.isArray(g.hooks)) continue;
+            for (const ih of g.hooks) {
+              if (getHookKey(ih, isWin) !== k) continue;
+              const argsForm = Array.isArray(ih.args);
+              const tokens = argsForm ? [ih.command, ...ih.args] : splitShellTokens(String(ih.command || ''));
+              const plain = tokens.length > 1 && /\.cjs$/i.test(String(tokens[1])) &&
+                /^node(\.exe)?$/i.test(path.posix.basename(normTok(tokens[0])));
+              if (!plain || normTok(tokens[0]) === normTok(wantNode)) continue;
+              ih.command = argsForm
+                ? wantNode
+                : ih.command.replace(/^\s*("[^"]*"|'[^']*'|\S+)/, `"${wantNode}"`);
               claudeCommandsUpdated++;
             }
           }

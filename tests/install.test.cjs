@@ -622,22 +622,62 @@ test('reinstall moves an installed harness hook off a node that no longer exists
   askHook.command = askHook.command.replace(`"${goodNode}"`, `"${goneNode}"`);
   const foreign = { type: 'command', command: '/bin/sh /somewhere/else/hook.sh' };
   before.hooks.PreToolUse.push({ matcher: '*', hooks: [foreign] });
+  // The user's own copy of that hook under another matcher, also on the deleted node: repaired too.
+  before.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ ...askHook }] });
+  // A harness hook the user wrapped (env before node): left as the user wrote it.
+  const wrappedGroup = before.hooks.PostToolUse[0];
+  const wrapped = wrappedGroup.hooks[0];
+  wrapped.command = `NODE_OPTIONS=--max-old-space-size=64 ${wrapped.command.replace(`"${goodNode}"`, `"${goneNode}"`)}`;
+  const wrappedCommand = wrapped.command;
   fs.writeFileSync(settingsPath, JSON.stringify(before, null, 2));
   const count = (s) => Object.values(s.hooks).flat().reduce((n, g) => n + g.hooks.length, 0);
 
   const res = runMergeHooks(home, ['--node', goodNode]);
   assert.strictEqual(res.status, 0, `merge-hooks failed: ${res.stderr}`);
-  assert.match(res.stdout, /đổi lệnh chạy 1 lệnh/);
+  assert.match(res.stdout, /đổi lệnh chạy 2 lệnh/);
 
   const after = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  const text = JSON.stringify(after);
-  assert.ok(!text.includes(goneNode), 'the deleted node path is gone');
-  const askAfter = after.hooks.PreToolUse.flatMap((g) => g.hooks).find((h) => h.command.includes('ask-batch-guard.cjs'));
-  assert.ok(askAfter.command.startsWith(`"${goodNode}" `), askAfter.command);
+  const askAfter = after.hooks.PreToolUse.flatMap((g) => g.hooks).filter((h) => h.command.includes('ask-batch-guard.cjs'));
+  assert.strictEqual(askAfter.length, 2);
+  for (const h of askAfter) assert.ok(h.command.startsWith(`"${goodNode}" `), h.command);
+  assert.strictEqual(after.hooks.PostToolUse[0].hooks[0].command, wrappedCommand, 'a wrapped hook is left alone');
   assert.ok(after.hooks.PreToolUse.some((g) => g.hooks.some((h) => h.command === foreign.command)), 'a hook the harness does not own stays');
   assert.strictEqual(count(after), count(before), 'no hook added or lost');
 
   // Nothing left to change: a second run writes nothing.
   const again = runMergeHooks(home, ['--node', goodNode]);
   assert.match(again.stdout, /đổi lệnh chạy 0 lệnh/);
+});
+
+// Windows emulated on a POSIX runner (HARNESS_PLATFORM=win32 lowercases paths): the home must be all
+// lowercase there so the hook scripts still resolve. A real Windows runner has test 5 for this case.
+test('win32: an installed shell-form hook on the same node is left as is; on a deleted node it is repointed in shell form', { skip: process.platform === 'win32' }, (t) => {
+  const home = path.join('/tmp', `harness-win-${require('node:crypto').randomBytes(6).toString('hex')}`);
+  fs.mkdirSync(home);
+  t.after(() => cleanupTempHome(home));
+  const claudeDir = path.join(home, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const winNode = 'C:/Program Files/nodejs/node.exe';
+  const rawShared = fs.readFileSync(path.join(repoDir, 'settings', 'claude-settings.shared.json'), 'utf8');
+  const settingsPath = path.join(claudeDir, 'settings.json');
+  const win = (args) => runMergeHooks(home, ['--node', winNode, ...args], { HARNESS_PLATFORM: 'win32' });
+
+  // Same node, shell form, Windows separators and case: nothing to change, no backup.
+  const shellForm = rawShared.split('{HOME}').join(home).split('{NODE}').join('c:\\\\program files\\\\nodejs\\\\node.exe');
+  fs.writeFileSync(settingsPath, shellForm, 'utf8');
+  const same = win([]);
+  assert.strictEqual(same.status, 0, same.stderr);
+  assert.match(same.stdout, /đã thêm 0 lệnh.*đổi lệnh chạy 0 lệnh/);
+  assert.ok(!fs.existsSync(path.join(claudeDir, 'backups')), 'no backup when nothing changed');
+
+  // A deleted node: every hook repointed, each keeping its shell form.
+  fs.writeFileSync(settingsPath, rawShared.split('{HOME}').join(home).split('{NODE}').join('C:/old/node-v1/node.exe'), 'utf8');
+  const moved = win([]);
+  assert.strictEqual(moved.status, 0, moved.stderr);
+  assert.match(moved.stdout, /đổi lệnh chạy 23 lệnh, gỡ 0 lệnh/);
+  const hooks = Object.values(JSON.parse(fs.readFileSync(settingsPath, 'utf8')).hooks).flat().flatMap((g) => g.hooks);
+  for (const h of hooks) {
+    assert.strictEqual(h.args, undefined, 'shell form kept');
+    assert.ok(h.command.startsWith(`"${winNode}" `), h.command);
+  }
 });

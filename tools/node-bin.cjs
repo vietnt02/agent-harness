@@ -11,7 +11,8 @@ function getNodeBin() {
   }
   const dirs = (process.env.PATH || '').split(path.delimiter);
   for (const dir of dirs) {
-    if (!dir) continue;
+    // A relative entry would give a command that breaks once a hook runs from another cwd.
+    if (!dir || !path.isAbsolute(dir)) continue;
     const candidate = path.join(dir, 'node');
     try {
       if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
