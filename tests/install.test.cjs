@@ -680,4 +680,21 @@ test('win32: an installed shell-form hook on the same node is left as is; on a d
     assert.strictEqual(h.args, undefined, 'shell form kept');
     assert.ok(h.command.startsWith(`"${winNode}" `), h.command);
   }
+
+  // Args form (what a Windows install writes) on a deleted node: only `command` moves.
+  const argsSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const first = Object.values(argsSettings.hooks).flat()[0].hooks[0];
+  const script = splitScript(first.command);
+  first.command = 'C:/old/node-v1/node.exe';
+  first.args = [script];
+  fs.writeFileSync(settingsPath, JSON.stringify(argsSettings, null, 2));
+  const argsRun = win([]);
+  assert.match(argsRun.stdout, /đổi lệnh chạy 1 lệnh/);
+  const firstAfter = Object.values(JSON.parse(fs.readFileSync(settingsPath, 'utf8')).hooks).flat()[0].hooks[0];
+  assert.strictEqual(firstAfter.command, winNode);
+  assert.deepStrictEqual(firstAfter.args, [script]);
 });
+
+function splitScript(command) {
+  return command.match(/"([^"]+\.cjs)"/)[1];
+}

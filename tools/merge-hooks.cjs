@@ -297,7 +297,7 @@ function main() {
               if (!plain || normTok(tokens[0]) === normTok(wantNode)) continue;
               ih.command = argsForm
                 ? wantNode
-                : ih.command.replace(/^\s*("[^"]*"|'[^']*'|\S+)/, `"${wantNode}"`);
+                : ih.command.replace(/^\s*("[^"]*"|'[^']*'|\S+)/, () => `"${wantNode}"`);
               claudeCommandsUpdated++;
             }
           }
