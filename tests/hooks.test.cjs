@@ -929,7 +929,7 @@ test('worker-start-receipt: a codex worker whose AGENTS.md is longer than projec
     fs.writeFileSync(path.join(over, 'AGENTS.override.md'), 'x'.repeat(100));
     const lines = codexDocLines([long, short, over, path.join(tmp, 'none')], 32768);
     assert.equal(lines.length, 1);
-    assert.match(lines[0], /32768 byte .*long\/AGENTS\.md` \(40000 byte\)/);
+    assert.match(lines[0], /32768 byte .*long[\\/]AGENTS\.md` \(40000 byte\)/);
     assert.deepEqual(codexDocLines([long], 65536), [], 'a cap above the file names nothing');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
