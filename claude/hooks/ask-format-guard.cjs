@@ -41,9 +41,17 @@ const NOTE =
   'list and any draft in your message just before the ask (it stays in view while the ask waits), and keep ' +
   'the question to one line that names what it decides (communication-style.md § Format); then ask again.';
 
-// Whether the reply holds text of its own after the last tool result or user message, before the ask:
-// thinking and other tool calls of the same reply are skipped; true when the tail cannot tell.
-function hasContext(records) {
+// Whether the reply holds text of its own after the last tool result or user message, before the ask
+// `askId`: thinking and other tool calls of the same reply are skipped, and so are the results of those
+// calls (Claude Code runs a call of the reply before the next one streams in: text, Edit, its result,
+// the ask); true when the tail cannot tell.
+function hasContext(records, askId) {
+  const replyOf = new Map();
+  for (const r of records) {
+    if (r?.type !== 'assistant' || !Array.isArray(r?.message?.content)) continue;
+    for (const b of r.message.content) if (b?.type === 'tool_use' && b.id) replyOf.set(b.id, r.message.id);
+  }
+  const reply = askId ? replyOf.get(askId) : undefined;
   for (let i = records.length - 1; i >= 0; i--) {
     const r = records[i];
     const content = r?.message?.content;
@@ -54,7 +62,9 @@ function hasContext(records) {
       }
     } else if (r?.type === 'user' && !r.isMeta) {
       if (typeof content === 'string') return false;
-      if (Array.isArray(content) && content.some((b) => b?.type === 'tool_result' || (b?.type === 'text' && String(b.text || '').trim()))) return false;
+      if (!Array.isArray(content)) continue;
+      const sibling = (b) => b?.type === 'tool_result' && reply !== undefined && replyOf.get(b.tool_use_id) === reply;
+      if (content.some((b) => (b?.type === 'tool_result' && !sibling(b)) || (b?.type === 'text' && String(b.text || '').trim()))) return false;
     }
   }
   return true;
@@ -96,7 +106,7 @@ process.stdin.on('end', () => {
       process.stderr.write(`${NOTE}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
       process.exit(2);
     }
-    if (input.transcript_path && !hasContext(tailRecords(input.transcript_path)) &&
+    if (input.transcript_path && !hasContext(tailRecords(input.transcript_path), input.tool_use_id) &&
       firstTime(input.session_id, 'ask-format-guard-context', JSON.stringify(input.tool_input?.questions || []))) {
       process.stderr.write(`${NO_CONTEXT}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
       process.exit(2);

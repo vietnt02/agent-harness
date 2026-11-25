@@ -1,7 +1,8 @@
 /**
  * shell-words.cjs - split a Bash command into simple commands, each a list of words, the way a
  * shell would read them closely enough for a guard: quotes (`'…'`, `"…"`, `$'…'`) kept together
- * (and removed), `\`+newline joined, separators outside quotes (`;` `&` `|` newline) end a command.
+ * (and removed), `\`+newline joined, separators outside quotes (`;` `&` `|` newline) end a command;
+ * an `&` of a redirection (`2>&1`, `>&2`, `<&3`, `&>file`) stays in its word.
  * A command substitution (`$(…)`, backticks, also inside `"…"`) or a subshell `(…)` is read up to
  * its own closing mark and yields its commands too; the outer word keeps the substitution's text.
  * Each command carries `.scope`, a dotted path of the subshells it runs in (`0`, `0.2`…), so a

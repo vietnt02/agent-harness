@@ -8,10 +8,13 @@
  * - Blocks once with a reminder (lib/block-once.cjs; the same command run again passes): a
  *   foreground loop of this shell around remote calls (ssh, docker exec, gh/glab api, airflow)
  *   unless it is a `for` over up to 5 items written out with no `sleep`, a foreground
- *   `while/until … sleep` poll, a background `sleep` or `while/until` loop that sleeps or calls out
- *   (not `while read` over input) not through ~/.claude/scripts/watch.sh,
- *   and a background watch.sh whose first report (the sooner of `--deadline` and `--checkpoint`)
- *   outlives the Bash `timeout` (default 1800000 ms), which would kill the watcher before it reports.
+ *   `while/until … sleep` poll, a background `sleep` that is the command's first work (a timer;
+ *   setup such as `cd`, `export`, `echo` or `mkdir` before it starts nothing to wait on) or a
+ *   `while/until` loop that sleeps or calls out (not `while read` over input) not through
+ *   ~/.claude/scripts/watch.sh (a `sleep` after other work is a pause and passes), and a background
+ *   watch.sh piped into another command (the pipe hides its exit code) or whose first report (the
+ *   sooner of `--deadline` and `--checkpoint`) outlives the Bash `timeout` (default 1800000 ms),
+ *   which would kill the watcher before it reports; both are said in one reminder.
  * An omitted foreground timeout is the harness default (120000 ms) and passes. Script files the
  * command runs are read the same way. `# watch-exempt: <reason>` lets a legitimate loop through.
  * Fails open on unreadable input.
@@ -67,8 +70,19 @@ function shape(text, deep = true) {
   const sleeps = progs.some((w) => w[0] === 'sleep');
   // A `sleep` waits when it is the command's first work (`sleep 600; gh run view`) or sits in a loop;
   // one after other work (`pg_ctl start; sleep 2; pg_isready`) is a pause inside a one-shot job.
-  const setup = /^(cd|pushd|popd|export|set|unset|source|\.|:|true|trap|umask|ulimit|shopt)$/;
-  const firstWork = progs.find((w) => w.length && !setup.test(w[0]));
+  const setup = /^(cd|pushd|popd|export|set|unset|source|\.|:|true|trap|umask|ulimit|shopt|echo|printf|mkdir|rm|touch|date)$/;
+  // A `$(…)` inside a setup command (`export T=$(gh auth token)`, `cd "$(git rev-parse …)"`) is part of
+  // that setup: its commands come first in the list, at a deeper scope, before the command holding it.
+  const holder = (k) => {
+    const up = String(all[k].scope).split('.').slice(0, -1).join('.');
+    for (let j = k + 1; up && j < all.length; j++) if (all[j].scope === up) return j;
+    return -1;
+  };
+  const inSetup = (k) => {
+    const j = holder(k);
+    return j >= 0 && all[j].some((x) => /\$\(|`/.test(x)) && (progs[j].length === 0 || setup.test(progs[j][0]));
+  };
+  const firstWork = progs.find((w, k) => w.length && !setup.test(w[0]) && !inSetup(k));
   let waitSleeps = !!firstWork && firstWork[0] === 'sleep';
   const isRemote = (w) => w[0] === 'ssh' || w[0] === 'airflow' ||
     (w[0] === 'docker' && w[1] === 'exec') || ((w[0] === 'gh' || w[0] === 'glab') && w[1] === 'api');
@@ -176,8 +190,10 @@ process.stdin.on('end', () => {
           'foreground: report what is ready first, then wait in the background. Foreground is only for --once.\n');
         process.exit(2);
       }
+      // Both reminders go in one `once`: a second one would never be said when the command comes back unchanged.
+      const notes = [];
       if (bg && pipedWatch(command, cwd || process.cwd())) {
-        once('watch-guard: a pipe after watch.sh (`| tail`) hides its exit code: REFUSED, TIMEOUT or CHECKPOINT ' +
+        notes.push('watch-guard: a pipe after watch.sh (`| tail`) hides its exit code: REFUSED, TIMEOUT or CHECKPOINT ' +
           'then reads as exit 0, as if the wait were done. Drop the pipe (its report is short) or put `set -o pipefail;` first.');
       }
       const limit = Number(input.timeout) || BG_TIMEOUT_MS;
@@ -194,10 +210,11 @@ process.stdin.on('end', () => {
       const wake = Math.max(...runs.map(reportsAt));
       const want = Math.min(wake * 1000 + 300000, MAX_TIMEOUT_MS);
       if (bg && wake * 1000 + 60000 > limit && want > limit) {
-        once(`watch-guard: the watcher first reports after ${wake} s (the sooner of --deadline and --checkpoint), ` +
+        notes.push(`watch-guard: the watcher first reports after ${wake} s (the sooner of --deadline and --checkpoint), ` +
           `past this call's timeout (${limit} ms): the harness would stop it before it reports. ` +
           `Pass \`timeout: ${want}\` with run_in_background.`);
       }
+      if (notes.length) once(notes.join(' Also: '));
       process.exit(0);
     }
     const sources = [command, ...scriptsIn(command, cwd || process.cwd())];

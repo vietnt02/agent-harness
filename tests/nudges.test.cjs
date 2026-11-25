@@ -696,6 +696,14 @@ test('ask-format-guard: an ask with no text of the reply since the last tool res
   assert.equal(hasContext([typed, text, ask1, held, meta, think]), false, 'a system reminder is no message of the user');
   assert.equal(hasContext([typed, text, ask1, held, text]), true, 'context written again before the second ask');
   assert.equal(hasContext([think]), true, 'a tail that cannot tell fails open');
+  // A call of the same reply runs before the ask streams in: text, Edit, its result, then the ask.
+  const reply = (blocks) => ({ type: 'assistant', message: { id: 'm1', content: blocks } });
+  const textM = reply([{ type: 'text', text: 'Script parse sai, đã sửa.' }]);
+  const editM = reply([{ type: 'tool_use', id: 'e2', name: 'Edit', input: {} }]);
+  const editResult = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e2', content: 'ok' }] } };
+  const askM = reply([{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }]);
+  assert.equal(hasContext([typed, textM, editM, editResult, askM], 'q2'), true, 'the result of a call of the same reply is no boundary');
+  assert.equal(hasContext([typed, text, edit, editResult, askM], 'q2'), false, 'a result of an earlier reply still is');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'afg-'));
   const transcript = path.join(tmp, 't.jsonl');
   fs.writeFileSync(transcript, [typed, text, ask1, held, think].map((r) => JSON.stringify(r)).join('\n') + '\n');

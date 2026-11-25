@@ -919,6 +919,8 @@ test('worker-start-receipt: a codex worker whose AGENTS.md is longer than projec
     assert.equal(codexDocCap(cfg), 65536, 'the top-level key, not a profile');
     fs.writeFileSync(cfg, '[profiles.a]\nproject_doc_max_bytes = 10\n');
     assert.equal(codexDocCap(cfg), 32768, 'only a profile sets it: the default');
+    fs.writeFileSync(cfg, 'project_doc_max_bytes = 65_536\n');
+    assert.equal(codexDocCap(cfg), 65536, 'a TOML integer with underscores');
     const long = path.join(tmp, 'long');
     const short = path.join(tmp, 'short');
     const over = path.join(tmp, 'over');
@@ -931,6 +933,7 @@ test('worker-start-receipt: a codex worker whose AGENTS.md is longer than projec
     assert.equal(lines.length, 1);
     assert.match(lines[0], /32768 byte .*long[\\/]AGENTS\.md` \(40000 byte\)/);
     assert.deepEqual(codexDocLines([long], 65536), [], 'a cap above the file names nothing');
+    assert.match(codexDocLines([short], 0)[0], /không nạp/, 'a cap of 0 loads nothing');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1631,8 +1634,11 @@ test('watch-guard: a background sleep waits only as the first work or inside a l
     'make build; sleep 3; curl -s localhost:8080', 'python3 mutate.py'])
     assert.equal(shape(t).waitSleeps, false, t);
   for (const t of ['sleep 600; orca orchestration worker-show --dispatch x', 'cd /tmp && sleep 300 && gh run view 1',
-    '(sleep 600; gh run view 1)', 'for i in 1 2; do make; sleep 5; done', "sh -c 'sleep 600; gh pr checks 1'"])
+    '(sleep 600; gh run view 1)', 'for i in 1 2; do make; sleep 5; done', "sh -c 'sleep 600; gh pr checks 1'",
+    'export GH_TOKEN=$(gh auth token --user u); sleep 600; gh pr checks 78', 'cd "$(git rev-parse --show-toplevel)" && sleep 600 && gh run view 1',
+    'echo "waiting for CI"; sleep 900; gh run view 123', 'mkdir -p /tmp/x; now=$(date +%s); echo "chờ 60 s"; sleep 60; python3 run.py'])
     assert.equal(shape(t).waitSleeps, true, t);
+  assert.equal(shape('echo "$(date)"; make build; sleep 3; curl -s localhost:8080').waitSleeps, false, 'a $(…) of a setup command is setup, the build is work');
   const W = '~/.claude/scripts/watch.sh --check "node x" --ok done --wait running';
   assert.equal(pipedWatch(`${W} 2>&1 | tail -5`, os.tmpdir()), true);
   assert.equal(pipedWatch(`${W} | grep WATCH`, os.tmpdir()), true);
@@ -1647,6 +1653,18 @@ test('shell-words: `2>&1`, `>&2` and `&>file` stay inside their command', () => 
   assert.equal(pipedInto(all, 0).length, 1);
   assert.deepEqual(commands('echo x >&2; b &> out.log').map((w) => [...w]), [['echo', 'x', '>&2'], ['b', '&>', 'out.log']]);
   assert.deepEqual(commands('a & b').map((w) => [...w]), [['a'], ['b']], 'a lone & still ends a command');
+});
+
+test('watch-guard: a piped watch.sh whose first report outlives the timeout gets both reminders in its one hold', () => {
+  const s = `wg-both-${process.pid}-${Date.now()}`;
+  const run = (input) => spawnSync(process.execPath, [path.join(HOOKS_DIR, 'watch-guard.cjs')], { encoding: 'utf8',
+    input: JSON.stringify({ tool_name: 'Bash', session_id: s, cwd: os.tmpdir(), tool_input: input }) });
+  const w = { command: '~/.claude/scripts/watch.sh --check "x" --ok done --wait running --checkpoint 3600 2>&1 | tail -5', run_in_background: true };
+  const first = run(w);
+  assert.equal(first.status, 2);
+  assert.match(first.stderr, /pipe after watch\.sh/);
+  assert.match(first.stderr, /first reports after 3600 s/);
+  assert.equal(run(w).status, 0, 'said once');
 });
 
 test('watch-guard: no timeout advice when the call already has the longest timeout', () => {

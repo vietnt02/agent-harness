@@ -51,9 +51,11 @@ description: "How Claude does execution work itself: before Claude itself edits 
   non-root user, never a list of points you thought of.
 - Before "done", name where Viet will see the change and look exactly there. A ratio names its
   denominator, exclusions and every miss by identifier.
-- Reviewing code: report everything you find, no severity filter unless Viet asks. After fixing
-  review findings, one last review round on the fix only (the diff since the reviewed commit), then stop. Orca review rounds follow the
-  stop rule Viet set: **Tiêu chí dừng** in `ntv-orca` § 4.
+- Reviewing code: the first round reports everything it finds, no severity filter unless Viet asks.
+  After fixing review findings, one last round reads only the fix (the diff since the reviewed
+  commit, and what it reads or writes): is each finding fixed, did the fix break what it touches;
+  it lists merge blockers only, then stop. Every review, Orca or subagent, follows the stop rule
+  Viet set: **Tiêu chí dừng** in `ntv-orca` § 4.
 - Reviewing someone's bug fix (its author's own check is this section's first bullet): reproduce the bug first
   with a free read on the runtime the PR/MR blames (a log, a run's output, whether a setting is set
   there, never a secret's value); the diagnosis is right only then, else report it as `chẩn đoán

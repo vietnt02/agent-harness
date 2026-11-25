@@ -196,8 +196,8 @@ function codexDocCap(file = CODEX_CONFIG) {
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch (_) { return CODEX_DOC_DEFAULT; }
   const top = text.split(/^\s*\[/m)[0];
-  const m = /^\s*project_doc_max_bytes\s*=\s*(\d+)/m.exec(top);
-  return m ? Number(m[1]) : CODEX_DOC_DEFAULT;
+  const m = /^\s*project_doc_max_bytes\s*=\s*(\d[\d_]*)/m.exec(top);
+  return m ? Number(m[1].replace(/_/g, '')) : CODEX_DOC_DEFAULT;
 }
 
 // A line for each worktree whose AGENTS.md (AGENTS.override.md when present) is longer than `cap`.
@@ -207,7 +207,10 @@ function codexDocLines(worktrees, cap = codexDocCap()) {
     const file = ['AGENTS.override.md', 'AGENTS.md'].map((n) => path.join(dir, n)).find((f) => fs.existsSync(f));
     if (!file) continue;
     const size = fs.statSync(file).size;
-    if (size > cap) {
+    if (cap === 0) {
+      lines.push(`\`project_doc_max_bytes = 0\` trong \`~/.codex/config.toml\`: Codex không nạp \`${file}\` (${size} byte); ` +
+        'đặt lại khoá đó quá độ dài file, rồi giao lại worker.');
+    } else if (size > cap) {
       lines.push(`Codex chỉ nạp ${cap} byte đầu của \`${file}\` (${size} byte): worker thiếu phần luật cuối file mà không biết. ` +
         'Nâng `project_doc_max_bytes` (khoá top-level của `~/.codex/config.toml`) quá độ dài đó, rồi giao lại worker.');
     }

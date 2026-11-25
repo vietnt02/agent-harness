@@ -29,9 +29,9 @@ the loop this stops.
    - a rule sentence two fair readings of which lead to two different actions; the fix rewords
      that sentence, never adds one;
    - a decision of Viet's that changes the harness: a rule, skill or default now gives a step he
-     overruled for work to come, his words saying it holds from now on (its file takes the decision
-     sections, step 3); an instruction for the work at hand (another model while one's quota is out)
-     changes no harness and is no file.
+     overruled, and his words state a lasting rule ("from now on", "always", "every …"), not a step
+     for the task at hand (its file takes the decision sections, step 3); an instruction for the work
+     at hand (another model while one's quota is out) changes no harness and is no file.
    Anything else is no file: a command shape a hook missed (a hook catches the common path,
    never every route; only the permission mode is a wall), a clear rule broken without such
    harm, Viet's intent misread (both
@@ -76,8 +76,9 @@ the loop this stops.
   serious harm is closed (deleted) with no change: a break is never fixed by adding or
   tightening a sentence. Otherwise fix per type: the harness defect in its hook, script or skill;
   a serious break with the hook that stops it; an ambiguous sentence reworded within the
-  `tools/rules-budget.cjs` caps; a decision file by every line of its `## Mọi chỗ phải sửa`, as
-  decided (only its `## Câu chưa chốt` is settled with Viet). No rule names an incident or its date; an example stays only when the
+  `tools/rules-budget.cjs` caps; a decision file by every line a fresh `grep` of the changed concept
+  prints (its `## Mọi chỗ phải sửa` is the writer's list, a lead), as decided (only its
+  `## Câu chưa chốt` is settled with Viet). No rule names an incident or its date; an example stays only when the
   rule is unclear without it.
 - The harness guides; the work's output is what counts, and every block costs the agent a read and
   a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a

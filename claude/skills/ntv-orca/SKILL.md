@@ -223,8 +223,8 @@ thô và `file:dòng`; finding coordinator tự gửi worker cũng dẫn `file:d
 giá trị, hoặc kèm một ca chạy thật. Phạm vi reviewer cố định (user chốt): diff, hai câu hỏi trên và
 bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo một lượt chạy thật trên bản sao state (`ntv-test` § 2); vòng 2 chỉ đọc
 bản sửa (diff từ SHA vòng 1 tới SHA mới, cộng chỗ đọc hay ghi giá trị mà bản sửa đổi), trả lời mỗi
-finding đã sửa đúng chưa và bản sửa có làm sai chỗ nó chạm không, chỉ liệt kê lỗi chặn merge; vòng 1
-là lượt duy nhất đọc cả diff. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
+finding đã sửa đúng chưa và bản sửa có làm sai chỗ nó chạm không (hai câu hỏi cố định chỉ hỏi lại khi
+bản sửa chạm tới chúng), chỉ liệt kê lỗi chặn merge; vòng 1 là lượt duy nhất đọc cả diff. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
 thật; PASS của reviewer chỉ là đầu vào. **Tiêu chí dừng:** chỉ finding làm sai output thật khi dùng
 bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" vào PR. Sau khi thiết kế ổn định tối đa
 2 vòng review; builder trượt cả hai thì theo **Chọn model** (§ 2).
