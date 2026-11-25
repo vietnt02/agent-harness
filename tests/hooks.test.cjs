@@ -1093,6 +1093,30 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     assert.equal(run('Bash', `cat ${E} # secret-ok: "cho đọc file env nhé"`, { checker: broken, userTexts }), '');
     assert.equal(run('Bash', 'ls -la', { checker: broken, userTexts }), '');
   }
+  // A machine without AgentKit (no checker file): the built-in checker judges what prints, as the kit does.
+  const none = guard.loadChecker(path.join(os.tmpdir(), `no-kit-${process.pid}`, 'privacy-checker.cjs'));
+  assert.ok(none, 'a missing kit file gives the built-in checker');
+  const noUser = () => [];
+  for (const c of [`set -a; . ./${E}; set +a; python3 -I plan_check.py`, `source repos/x/${E} && psql -c 'select 1'`, `node --env-file=${E} app.js`])
+    assert.equal(run('Bash', c, { checker: none, userTexts: noUser }), '', c);
+  for (const c of [`cat ${E}`, `source ${E}; echo $TOKEN`, 'cat ~/.ssh/id_ed25519', `head -3 repos/x/${E}`])
+    assert.match(run('Bash', c, { checker: none, userTexts: noUser }), /secret-file-guard: this Bash call would print/, c);
+  assert.match(run('Read', E, { checker: none, userTexts: noUser }), /secret-file-guard/);
+  assert.equal(run('Read', 'src/app.js', { checker: none, userTexts: noUser }), '');
+  // A kit file that is there but broken still fails closed.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-broken-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'privacy-checker.cjs'), 'throw new Error("moved")');
+    assert.equal(guard.loadChecker(path.join(dir, 'privacy-checker.cjs')), null);
+    // An answer picked in an ask approves a read; the question Claude wrote does not.
+    const t = path.join(dir, 't.jsonl');
+    const answered = 'User has answered your questions: "Cho nạp file môi trường của repo_x và chạy 5 câu chỉ đọc?"="Cho phép đọc". You can now continue with these answers in mind.';
+    fs.writeFileSync(t, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'q1', content: answered }] } }) + '\n');
+    assert.deepEqual(guard.askAnswers(t), ['Cho phép đọc']);
+    const call = (cmd) => guard.decide({ tool_name: 'Bash', tool_input: { command: cmd }, transcript_path: t }, { checker });
+    assert.equal(call(`cat ${E} # secret-ok: "Cho phép đọc"`), '');
+    assert.match(call(`cat ${E} # secret-ok: "file môi trường của repo_x"`), /secret-file-guard/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   // A command the checker cannot read stays denied, with its reason.
   const opaque = { checkPrivacy: () => ({ blocked: true, uninspectable: true, accesses: [], reason: 'eval of a variable' }) };
   assert.match(run('Bash', 'eval "$X"', { checker: opaque, userTexts }), /eval of a variable/);
@@ -1239,11 +1263,17 @@ test('main-checkout-guard: a variable naming a linked worktree survives commands
       `${G}; for s in a b; do\n  git -C $G checkout -q --detach HEAD\ndone`,
       `${G}; { echo start; }; git -C $G checkout -q --detach HEAD`,
       `${G}; printf '%s\\n' start; git -C $G checkout -q --detach HEAD`,
+      // A loop over literal worktree names: each word is judged.
+      `W=${path.dirname(gate).split(path.sep).join('/')}; for w in gate; do git -C $W/$w fetch -q origin; git -C $W/$w checkout -q --detach HEAD; done`,
+      `for d in ${gate.split(path.sep).join('/')} ${gate.split(path.sep).join('/')}; do git -C "$d" checkout -q --detach HEAD; done`,
     ]) assert.equal(writes(c), false, c);
     for (const c of [
       `${G}; unset G; git -C $G checkout -q --detach HEAD`,
       `${G}; read G; git -C $G checkout -q --detach HEAD`,
       `${G}; for G in a; do git -C $G checkout x; done`,
+      `W=${tmp.split(path.sep).join('/')}; for w in gate main; do git -C $W/$w checkout -q --detach HEAD; done`,
+      `for w in $(ls); do git -C $w checkout x; done`,
+      'for w in *; do git -C $w checkout x; done',
       `${G}; declare G=.; git -C $G checkout x`,
       `${G}; source ./env.sh; git -C $G checkout x`,
       `${G}; { G=.; }; git -C $G checkout x`,

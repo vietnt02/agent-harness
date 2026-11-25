@@ -10,6 +10,8 @@
  * reset or drop work stay gated: `pull` with a refspec, `--squash`, `--no-commit`, `--no-ff` or
  * `--force`; `-f`/`--force`; any other `-B`, `-D`; removing a detached worktree whose commits no ref
  * holds. A `cd` into the path an earlier `worktree add` of the same command makes is a linked worktree.
+ * A `for X in <literal words>` loop gives X each of its words in turn: a git write under `$X` is judged
+ * once per word.
  * The same command run again passes (lib/block-once.cjs). A linked worktree and a repo in the
  * session scratchpad pass. `git -c core.hooksPath=…` turns the repo's checks off and is always
  * blocked (CLAUDE.md § Irreversible actions: never bypass a check). Subagents are skipped.
@@ -161,13 +163,21 @@ function writesMainCheckout(command, cwd) {
     for (const v of sets) {
       if (v.forget) { if (inScope(scope, v.scope)) for (const k of Object.keys(vars)) delete vars[k]; continue; }
       if (inScope(scope, v.scope)) { if (v.value === null) delete vars[v.name]; else vars[v.name] = v.value; }
+      if (inScope(scope, v.scope) && v.values) vars[v.name] = v.values;
     }
     return vars;
   };
   const isMain = (dir) => dir === null || (!inScratchpad(dir) && isMainCheckout(dir));
+  // One variable map per word of each `for` loop seen (`vars[X]` an array): [vars] when none.
+  const variants = (vars) => {
+    const k = Object.keys(vars).find((n) => Array.isArray(vars[n]));
+    return k ? vars[k].flatMap((v) => variants({ ...vars, [k]: v })) : [vars];
+  };
+  const scalars = (vars) => Object.fromEntries(Object.entries(vars).filter(([, v]) => !Array.isArray(v)));
   for (const raw of commands(command)) {
     const words = program(raw);
-    const vars = varsIn(raw.scope);
+    const loopVars = varsIn(raw.scope);
+    const vars = scalars(loopVars);
     const set = assignments(raw);
     if (set) {
       for (const [name, value] of set) sets.push({ scope: raw.scope, name, value: expandVars(value, vars) });
@@ -180,37 +190,49 @@ function writesMainCheckout(command, cwd) {
       continue;
     }
     // `for X in …` and `select X in …` rebind only X.
-    if (['for', 'select'].includes(words[0]) && /^[A-Za-z_]\w*$/.test(words[1] || '')) sets.push({ scope: raw.scope, name: words[1], value: null });
+    if (['for', 'select'].includes(words[0]) && /^[A-Za-z_]\w*$/.test(words[1] || '')) {
+      const values = words[0] === 'for' && words[2] === 'in' && words.length > 3 ? words.slice(3).map((w) => expandVars(w, vars)) : [];
+      const literal = values.length && values.every((v) => v !== null && !/[*?[]/.test(v));
+      sets.push({ scope: raw.scope, name: words[1], value: null, values: literal ? values : undefined });
+    }
     else if (rebinds(raw, words)) sets.push({ forget: true, scope: raw.scope });
     const script = innerScript(words);
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);
     if (!git) continue;
+    const looped = Object.values(loopVars).some(Array.isArray);
+    if (variants(loopVars).some((each) => gitWrites(git, here, each, looped))) return true;
+  }
+  return false;
+
+  // True when the git write `git`, run from `here` with `vars`, may target a main checkout. Under a loop
+  // word, a directory that does not exist is unknown.
+  function gitWrites(git, here, vars, looped) {
     const dir = git.dirs && git.dirs.reduce((d, c) => {
       const to = d === null ? null : expandVars(c, vars);
-      return to === null ? null : resolveDir(to, d);
+      const next = to === null ? null : resolveDir(to, d);
+      return next !== null && looped && !fs.existsSync(next) && !inScratchpad(next) && !made.has(next) ? null : next;
     }, here);
     if (git.adds !== undefined) {
       const to = dir !== null && git.adds && expandVars(git.adds, vars);
       if (to) made.add(resolveDir(to, dir));
       if (git.resets !== null && isMain(dir) && resetDrops(dir, expandVars(git.resets, vars), expandVars(git.start, vars))) return true;
-      continue;
+      return false;
     }
     if (git.deletes) {
       if (isMain(dir) && git.deletes.some((b) => !onRemote(dir, expandVars(b, vars)))) return true;
-      continue;
+      return false;
     }
     if (git.removes) {
       if (dir !== null && isMain(dir) && dropsCommits(worktreeAt(dir, expandVars(git.removes, vars) || git.removes))) return true;
-      continue;
+      return false;
     }
     if (git.pulls) {
       if (isMain(git.dirs ? dir : null) && (dir === null || upstreamOf(dir) !== git.pulls)) return true;
-      continue;
+      return false;
     }
-    if (isMain(git.dirs ? dir : null)) return true;
+    return isMain(git.dirs ? dir : null);
   }
-  return false;
 }
 
 // True when removing the worktree at `dir` loses commits: its HEAD is detached and no ref (branch, tag,

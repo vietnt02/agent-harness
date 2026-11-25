@@ -102,12 +102,25 @@ class Apply(ast.NodeTransformer):
         return node
 
 
+def kill_tree(p):
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+        return
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
 def run_tests(root, python, tests, timeout, module_path):
     for pyc in (module_path.parent / "__pycache__").glob(f"{module_path.stem}.*.pyc"):
         pyc.unlink()
     t0 = time.time()
+    # Its own process group (Windows) or session (POSIX), so the whole tree can be killed below.
+    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+             else {"start_new_session": True})
     p = subprocess.Popen([python, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *tests], cwd=root,
-                         env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                         env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **group)
     try:
         rc = p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -116,10 +129,7 @@ def run_tests(root, python, tests, timeout, module_path):
         # Its own session: a signal or Ctrl-C here would otherwise leave pytest, and the servers
         # and workers its tests started, running after this script exits.
         if p.poll() is None:
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            kill_tree(p)
             p.wait()
     if rc is None:
         return "timeout", timeout
@@ -163,7 +173,7 @@ def main():
     run = lambda tests: run_tests(root, a.python, tests, a.timeout, path)
 
     sentinel.write_text(original)
-    for sig in (signal.SIGTERM, signal.SIGHUP):
+    for sig in (getattr(signal, n) for n in ("SIGTERM", "SIGHUP", "SIGBREAK") if hasattr(signal, n)):
         signal.signal(sig, lambda *_: sys.exit(1))  # through finally: the module is restored
     results = {"module": a.module, "tests": a.tests, "mutants": []}
     try:
@@ -172,10 +182,12 @@ def main():
         path.write_text(ast.unparse(tree))
         base, _ = run(a.tests)
         if base != "survived":
-            sys.exit(f"baseline: the tests do not pass on the unmutated module ({base.replace('killed', 'failed')})")
+            sys.exit(f"baseline: the tests do not pass on the unmutated module ({base.replace('killed', 'failed')}): "
+                     "a copy lacks the repo's installed dependencies (node_modules, a venv) until they are installed into it")
         # A wider suite that already fails would turn every survivor into killed_elsewhere.
         if a.confirm_tests and run(a.confirm_tests)[0] != "survived":
-            sys.exit("baseline: --confirm-tests do not pass on the unmutated module: narrow them to a passing set")
+            sys.exit("baseline: --confirm-tests do not pass on the unmutated module: install the repo's dependencies "
+                     "into the copy (node_modules, a venv: git archive carries none), or narrow them to a passing set")
         # Tests that import the module from elsewhere (an installed copy, PYTHONPATH) pass whatever
         # the copy holds: every mutant would "survive".
         path.write_text('raise RuntimeError("mutate canary")\n')

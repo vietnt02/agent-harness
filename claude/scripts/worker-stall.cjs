@@ -13,8 +13,9 @@
  *                    adds `holding=<name> <n>m pid=<pid>`, the longest-running process in the
  *                    worktree other than the agent, its shell and the helpers it started with (MCP
  *                    servers): a command waiting on input
- * A worker with a transcript that is only reading for a long time also shows `stale`: a cue to look
- * (worker-read twice, a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker
+ * A worker whose last transcript message (a tool call, a reply) is that recent runs too (`running
+ * said=<n>m`): one that only reads changes no file. A worker silent past --idle-min shows `stale`: a cue to
+ * look (worker-read twice, a few minutes apart), never to stop or rerun it (ntv-orca § 3). An agy worker
  * run in a terminal has no Orca transcript: no error count and no ask wait then (an unanswered ask
  * past --idle-min shows `stale`), and the line adds `agy-step=<n>m`, the age of the last write to its
  * own conversation DB (the newest one naming its worktree), which counts like a changed file. Anything it cannot read exits 1 with
@@ -80,6 +81,7 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
   let counting = true;
   let reset = false;
   let waiting = state.waiting || false; // false, or the time the ask was first seen
+  let last = Number(state.last) || 0; // the time of the worker's newest message
   for (let page = 0; page < MAX_PAGES; page++) {
     const a = ['orchestration', 'worker-read', '--dispatch', dispatch, '--source', 'transcript', '--limit', '50', '--json'];
     if (cursor) a.push('--cursor', cursor);
@@ -94,6 +96,7 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
     const msgs = t.messages || [];
     if (counting) for (const m of msgs) if (API_ERROR.test(workerText(m))) count++;
     for (const m of msgs) {
+      if (m && m.role !== 'user') last = Math.max(last, Number(m.timestamp) || 0);
       if (m && m.role === 'user') waiting = false;
       else if (ASK_SENT.test(workerText(m))) waiting = waiting || Number(m.timestamp) || Date.now();
     }
@@ -105,7 +108,7 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
     if (!t.limited || !msgs.length || !moved) break;
   }
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ cursor, waiting }));
+  fs.writeFileSync(file, JSON.stringify({ cursor, waiting, last }));
   return count;
 }
 
@@ -209,6 +212,11 @@ function heldBy(workspace, list = processes) {
   return held ? ` holding=${name(held.args.split(/\s+/)[0])} ${minutesOf(held.etime)}m pid=${held.pid}` : '';
 }
 
+// The time of the worker's newest message the last newErrors run saw (ms), or 0.
+function lastMessage(dispatch, stateDir = path.join(os.tmpdir(), 'claude-worker-stall')) {
+  try { return Number(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).last) || 0; } catch (_) { return 0; }
+}
+
 // Since when the last newErrors run saw the worker waiting on its ask (ms), or false.
 function waitingAsk(dispatch, stateDir = path.join(os.tmpdir(), 'claude-worker-stall')) {
   try { return Number(JSON.parse(fs.readFileSync(path.join(stateDir, `${dispatch.replace(/[^\w-]/g, '_')}.json`), 'utf8')).waiting) || false; } catch (_) { return false; }
@@ -284,12 +292,14 @@ function status(o, deps = {}) {
   try { born = fs.statSync(workspace).birthtimeMs || 0; } catch (_) { /* no birth time: every file counts */ }
   const recent = changedSince(workspace, born ? Math.max(cutoff, born + CHECKOUT_MS) : cutoff);
   if (recent) return `running changed=${recent}${step} state=${state}`;
+  const said = terminal ? 0 : (deps.lastMessage || lastMessage)(o.dispatch);
+  if (said >= cutoff) return `running said=${Math.max(0, Math.floor((now - said) / 60000))}m${step} state=${state}`;
   if (born >= cutoff) return `running new-worktree=${Math.max(0, Math.floor((now - born) / 60000))}m${step} state=${state}`;
   if (last && last >= cutoff) return `running${step} state=${state}`;
   return `stale idle>${o.idle}m${step}${(deps.heldBy || heldBy)(workspace)} state=${state}`;
 }
 
-module.exports = { args, status, bannerOf, modelCheck, newErrors, waitingAsk, workerText, changedSince, agyLastStep, heldBy, minutesOf, API_ERROR, ASK_SENT };
+module.exports = { args, status, bannerOf, modelCheck, newErrors, waitingAsk, lastMessage, workerText, changedSince, agyLastStep, heldBy, minutesOf, API_ERROR, ASK_SENT };
 if (require.main !== module) return;
 
 const o = args(process.argv.slice(2));

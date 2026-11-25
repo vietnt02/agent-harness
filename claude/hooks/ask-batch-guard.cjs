@@ -9,6 +9,9 @@
  * does the first ask after the user types. Said once per answered ask (lib/block-once.cjs, keyed on its
  * tool_use_id): the next ask passes whatever it holds, so the merged ask the note asks for, or a question
  * only the answers raised (a final gate after its open questions), is never held twice.
+ * An ask naming the same plan file (`plans/<…>.md`) as the answered one passes: ntv-autopilot writes the
+ * answers into that plan, checks its prerequisites again and asks the final gate in the same turn, while
+ * the user waits for it.
  * The transcript is read from its end in growing pieces until the user's last message or the answered ask
  * shows: a long block (workers running for many minutes) puts both far behind the tail.
  * Fails open whenever the transcript cannot be read.
@@ -36,11 +39,25 @@ function tailRecords(file, bytes = TAIL_BYTES) {
   }
 }
 
+const PLAN_PATH = /plans[\\/][^\s"'`)\]]+\.md/g;
+const planPaths = (input) => new Set((JSON.stringify(input?.questions || []).match(PLAN_PATH) || []).map((p) => p.replace(/\\+/g, '/')));
+
+// The input of the AskUserQuestion `id` at or before records[i].
+function askInput(records, i, id) {
+  for (let j = i; j >= 0; j--) {
+    const c = records[j].message?.content;
+    const use = Array.isArray(c) && c.find((b) => b?.type === 'tool_use' && b.id === id);
+    if (use) return use.input;
+  }
+  return undefined;
+}
+
 const resultText = (b) => (typeof b.content === 'string' ? b.content : (b.content || []).map((x) => x?.text || '').join('')).trim();
 
 // The tool_use_id of the ask answered since the user's last typed message when some other tool ran after
-// it, else null; undefined when `records` hold neither (read further back).
-function spacedAsk(records) {
+// it and `next` (the ask about to run) names none of its plan files, else null; undefined when `records`
+// hold neither (read further back).
+function spacedAsk(records, next) {
   let toolSince = false;
   for (let i = records.length - 1; i >= 0; i--) {
     const rec = records[i];
@@ -50,17 +67,22 @@ function spacedAsk(records) {
     const c = rec.message?.content;
     if (!Array.isArray(c)) continue;
     const answered = rec.type === 'user' && c.find((b) => b?.type === 'tool_result' && ASK_ANSWER.test(resultText(b)));
-    if (answered) return toolSince ? String(answered.tool_use_id || i) : null;
+    if (answered) {
+      if (!toolSince) return null;
+      const want = planPaths(next);
+      if (want.size && [...planPaths(askInput(records, i, answered.tool_use_id))].some((p) => want.has(p))) return null;
+      return String(answered.tool_use_id || i);
+    }
     if (rec.type === 'assistant' && c.some((b) => b?.type === 'tool_use' && b.name !== 'AskUserQuestion')) toolSince = true;
   }
   return records.whole === false ? undefined : null;
 }
 
 // spacedAsk over the transcript, read back from its end until it decides (the whole file at most).
-function spacedAskIn(file) {
+function spacedAskIn(file, next) {
   for (let bytes = TAIL_BYTES; ; bytes *= 4) {
     const records = tailRecords(file, bytes);
-    const found = spacedAsk(records);
+    const found = spacedAsk(records, next);
     if (found !== undefined || records.whole) return found || null;
   }
 }
@@ -81,7 +103,7 @@ process.stdin.on('end', () => {
   try {
     const input = JSON.parse(raw);
     if (input.tool_name !== 'AskUserQuestion' || !input.transcript_path) process.exit(0);
-    const answered = spacedAskIn(input.transcript_path);
+    const answered = spacedAskIn(input.transcript_path, input.tool_input);
     if (!answered) process.exit(0);
     const { firstTime } = require('./lib/block-once.cjs');
     if (!firstTime(input.session_id, 'ask-batch-guard', answered)) process.exit(0);

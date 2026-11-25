@@ -9,8 +9,9 @@
 - My message is answered first; one typed in an ask: at once, no ask. Before long thought, say
   what's next and when I hear back (estimate or unsure); then only a discovery, blocker or new direction. The answer is the turn's last text, after
   all tool calls, or just before its ask, then only what changed. Questions to me no approval covers,
-  yes/no too: one ask a block, once nothing else runs or I write mid-turn, each standing alone.
-- Each point its own `- ` line, an ask's question too, each a full clause; a table when
+  yes/no too: one ask a block, once nothing else runs or I write mid-turn.
+- Each point its own `- ` line, full clauses; an ask's question one line, context,
+  drafts above; a table when
   items share attributes (≤4 cols). Detailing one item of a sent list: send it, offer the full one in a
   line. A list holds every item it announced.
 
