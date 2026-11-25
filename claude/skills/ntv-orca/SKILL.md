@@ -64,7 +64,7 @@ qua phiên, hay user nói "supervised" → worker Orca. Orca không chạy (`orc
 
 **Manifest — một mục của plan `ntv-autopilot`** (`CLAUDE.md` § Mutation gate): plan có giao
 worker thì chốt model, worktree ngay trong plan; duyệt plan là duyệt manifest, không hỏi lại.
-Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Mỗi worker
+Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Ngoại lệ: reviewer chỉ đọc do câu của user mở (review PR/MR của bất kỳ ai) giao ngay, không plan, không manifest; đăng gì lên PR/MR vẫn hỏi riêng. Mỗi worker
 một dòng:
 
     Manifest khối <X> — parallel <n> (cap <N>).
@@ -139,7 +139,8 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   lệ: review thay đổi của harness hay rule cho agent (`CLAUDE.md`, `AGENTS.md` của repo) là subagent Claude (`ntv-implement` § Verify), và chặng rà
   là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Mọi model
-  Gemini trên `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác.
+  Gemini trên `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác: đề xuất
+  một model thay kèm lý do, user duyệt rồi mới giao.
 - **Builder** chọn theo dấu hiệu đọc được trong spec lúc giao, không theo khó/dễ (lúc giao chưa biết):
   - `agy gemini-4-neon high` khi việc có một trong hai dấu hiệu: (1) code mới hay sửa có trạng thái
     lưu giữa các lần chạy (watermark, sổ ghi, bản ghi dở), thử lại, hay ghi ra ngoài repo (Lark,
@@ -173,7 +174,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 - **Giao xong thì kết thúc lượt; Orca đánh thức** khi worker `worker_done`, hỏi, hay dừng không báo
   (`escalation`). Không chạy vòng poll hay script nào đọc `check`: process khác đọc là lấy mất tin.
   Mỗi lần được đánh thức: chạy đúng lệnh `check` của lời nhắc, xử lý mọi tin. Báo và hỏi user một
-  lần cho cả khối (một AskUserQuestion kèm mọi bản nháp), khi không còn worker hay bước nào của khối
+  lần cho cả khối (một AskUserQuestion, mọi bản nháp trên chat ngay trước nó), khi không còn worker hay bước nào của khối
   chạy được mà thiếu câu trả lời; mục gấp hay quyết định nghiệp vụ giữa khối cũng chờ tới lúc đó,
   vì ask đang mở làm cả phiên đứng. Riêng việc theo dõi treo:
   `watch.sh` với `~/.claude/scripts/worker-stall.cjs` (receipt của `worker-start` in sẵn lệnh; nó không

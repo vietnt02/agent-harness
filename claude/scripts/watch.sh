@@ -3,8 +3,8 @@
 # Bash call; exits the moment the state is anything but a listed wait state, so the
 # harness wakes Claude instead of a loop waiting silently on a value it never expected.
 #
-#   watch.sh --once --check CMD --ok LIST --wait LIST [--stderr-ok]          (foreground, first)
-#   watch.sh --check CMD --ok LIST --wait LIST --deadline DUR [--every SECS] [--stderr-ok]
+#   watch.sh --once --check CMD --ok A,B --wait C,D [--stderr-ok]            (foreground, first)
+#   watch.sh --check CMD --ok A,B --wait C,D --deadline DUR [--every SECS] [--stderr-ok]
 #            [--why-wait WHY] [--checkpoint SECS]
 #
 # CMD prints one line per item: "<state> [context...]". Only the first word is judged.
@@ -89,6 +89,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$check" ] && [ -n "$ok" ] && [ -n "$wait" ] || die "--check, --ok and --wait are required"
+[[ $ok =~ [[:space:]] || $wait =~ [[:space:]] ]] && die "--ok/--wait: comma-separated, no spaces, e.g. --wait IN_PROGRESS,QUEUED"
 case "$every" in ''|*[!0-9]*|0) die "--every must be a positive number of seconds" ;; esac
 # GitLab.com counts every request of one account in a 100-a-minute window the whole team shares.
 if [[ $check == *glab* || $check == *gitlab.com* ]] && [ "$every" -lt 30 ]; then every=30; fi

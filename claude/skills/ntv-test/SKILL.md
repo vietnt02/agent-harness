@@ -55,6 +55,7 @@ docs or tests-only diff is exempt. On a disposable copy of the exact commit, nev
 top=$(git rev-parse --show-toplevel); sha=<commit under review, after git fetch>
 git -C "$top" diff -U0 --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ <base>...$sha > <scratch>/change.diff
 mkdir <scratch>/copy && git -C "$top" archive $sha | tar -x -C <scratch>/copy
+(cd <scratch>/copy && <the repo's install step, e.g. npm ci>)   # git archive carries no dependencies
 python3 -I ~/.claude/skills/ntv-test/scripts/mutate.py <scratch>/copy <scratch>/mutants.json \
   --module <path.py> --tests <tests reaching it> --confirm-tests <the suite, as it passes> \
   --diff <scratch>/change.diff --python <the repo's interpreter>        # minutes: background

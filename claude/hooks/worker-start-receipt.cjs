@@ -136,6 +136,13 @@ function agyVersionLines(stampFile = path.join(os.homedir(), '.gemini', 'config'
   try { r = spawnSync(process.execPath, [runner], { encoding: 'utf8', timeout: 8000 }); } catch (_) { return []; }
   if (!r || r.status === 0 || r.status === 3 || r.status === null) return [];
   const tail = String(r.stdout || '').split('\n').filter((l) => /^(FAIL|  )/.test(l)).slice(0, 8).join('\n');
+  // No FAIL line: the runner itself broke before judging anything, which says nothing of the guards.
+  if (!/^FAIL/m.test(String(r.stdout || ''))) {
+    const errLines = String(r.stderr || '').split('\n');
+    const err = errLines.find((l) => /^\w*Error\b/.test(l)) || errLines.find((l) => /\S/.test(l)) || `exit ${r.status}`;
+    return [`agy đổi bản (CLI ${tested.cli || '?'} → ${cli || '?'}) nhưng fixture bridge không chạy được, nên chưa kiểm được ` +
+      `guard của agy: \`node ${runner}\` lỗi: ${err.trim().slice(0, 200)}`];
+  }
   return [`agy đổi bản (CLI ${tested.cli || '?'} → ${cli || '?'}, runtime chat ${(tested.runtimes || []).join(',') || '?'} → ` +
     `${runtimes.join(',') || '?'}) và fixture bridge FAIL: guard của agy có thể bỏ sót mà không báo. ` +
     `\`node ${runner}\` cho chi tiết:\n${tail}`];

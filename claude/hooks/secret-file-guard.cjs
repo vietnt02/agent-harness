@@ -22,8 +22,10 @@
  * `python3`/`node` script, `--env-file`, `ssh -i <key>`, `cp .env.example .env`, prose in heredocs
  * or quoted strings) passes.
  * - Which paths are secret: AgentKit's `~/.claude/hooks/lib/privacy-checker.cjs` (`checkPrivacy`,
- *   required, never edited). Missing, broken or throwing checker: fail closed on `SECRETISH`.
- * - Viet approves one read: `# secret-ok: "<his words, 8+ chars>"` matched against `userTexts`.
+ *   never edited). A machine without that file judges by `SECRETISH` the same way (a `source` that prints
+ *   nothing passes); a checker that is there but broken or throwing: fail closed on `SECRETISH`.
+ * - Viet approves one read: `# secret-ok: "<his words, 8+ chars>"` matched against what he typed
+ *   (`userTexts`) or picked as an answer in an AskUserQuestion box.
  * Known limits: a script (`python3 x.py ./.env`, `node app.js`) or unlisted subcommand (`git diff` /
  * `git show` on a dotenv) that prints secret values itself, command substitution feeding a dotenv
  * into `export`/`env` without `source`/`.`, an unquoted dotenv line that fails shell parsing, a key
@@ -56,12 +58,22 @@ const SIMPLE_PRINTERS = new Set([
 const KEY_NAME_PATTERN = /^\^(?:\[[\w-]+\]|\w)(?:\[[\w-]+\]|\w|[*+?])*=$/;
 const GREP_OPT_VAL = /^(--(max-count|after-context|before-context|context|label|include|exclude|exclude-dir|color|colour|directories|binary-files))$/;
 const REDIR = /(\d*<<<|\d*<<-?|\d*<>|&>>?|\d*>>?&?|\d*<&?)/;
+const ASK_ANSWER = /^(Your questions have been answered|The user answered|User has answered)/;
 const APPROVAL = /#\s*secret-ok:\s*"([^"\n]{8,})"/;
 const norm = (s) => String(s).normalize('NFC').replace(/\s+/g, ' ').trim();
 
-function loadChecker() {
+// The checker of a machine without AgentKit: a path is secret when `SECRETISH` names it.
+const BUILTIN_CHECKER = {
+  checkPrivacy: ({ toolInput = {} }) => {
+    const paths = fallbackPaths(String(toolInput.command || toolInput.file_path || toolInput.path || ''));
+    return paths.length ? { blocked: true, accesses: paths.map((filePath) => ({ filePath })) } : { blocked: false };
+  },
+};
+
+function loadChecker(file = KIT_CHECKER) {
+  if (!require('fs').existsSync(file)) return BUILTIN_CHECKER;
   try {
-    const kit = require(KIT_CHECKER);
+    const kit = require(file);
     return typeof kit.checkPrivacy === 'function' ? kit : null;
   } catch {
     return null;
@@ -298,6 +310,27 @@ function printedSecrets(command, isSecret, cwd) {
   return [...new Set(leaked)];
 }
 
+// The answers the user picked or typed in AskUserQuestion boxes (`"<question>"="<answer>"` in the
+// tool result), never the questions Claude wrote.
+function askAnswers(transcript) {
+  let raw = '';
+  try { raw = require('fs').readFileSync(transcript, 'utf8'); } catch { return []; }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line.includes('tool_result')) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    for (const b of Array.isArray(d.message?.content) ? d.message.content : []) {
+      if (b?.type !== 'tool_result') continue;
+      const text = (typeof b.content === 'string' ? b.content : (b.content || []).map((x) => x?.text || '').join('')).trim();
+      if (!ASK_ANSWER.test(text)) continue;
+      for (const m of text.matchAll(/"="((?:[^"\\]|\\.)*)"/g)) out.push(m[1]);
+    }
+  }
+  return out;
+}
+const typedOrPicked = (transcript) => [...require('./lib/user-intent.cjs').userTexts(transcript), ...askAnswers(transcript)];
+
 function approved(command, transcript, userTexts) {
   const m = APPROVAL.exec(command || '');
   if (!m || !transcript) return false;
@@ -306,7 +339,7 @@ function approved(command, transcript, userTexts) {
 }
 
 // The verdict on one call: { deny, paths, fallback, uninspectable, onlyDotenv, reason }.
-function judge(data, { checker = loadChecker(), userTexts = require('./lib/user-intent.cjs').userTexts } = {}) {
+function judge(data, { checker = loadChecker(), userTexts = typedOrPicked } = {}) {
   const tool = data.tool_name || '';
   const toolInput = data.tool_input || {};
   const isShell = tool === 'Bash' || tool === 'PowerShell';
@@ -362,7 +395,7 @@ function decide(data, opts = {}) {
     return (
       `secret-file-guard: AgentKit's privacy checker (${KIT_CHECKER}) did not load or failed, so every call naming a ` +
       `secret-looking path is denied (${access.paths.join(', ')}). Tell Viet: an \`ak update\` may have moved it; ` +
-      'until it loads again, a read he approves carries `# secret-ok: "<his exact words>"`.'
+      'until it loads again, a read he approves carries `# secret-ok: "<his exact words, or the answer he picked in an ask>"`.'
     );
   }
   const what = access.uninspectable ? access.reason || 'a command this guard cannot read' : access.paths.join(', ');
@@ -374,7 +407,7 @@ function decide(data, opts = {}) {
         '`grep -o \'^[A-Z_][A-Z0-9_]*=\' <file>` to list its keys). '
       : 'Keys and credentials stay unprinted; pass the path to a command or script that uses it without printing. ') +
     'If Viet must see a value, ask him; once he agrees, rerun the Bash command with the comment ' +
-    '`# secret-ok: "<his exact words, 8+ characters>"`, and print only what he asked for.'
+    '`# secret-ok: "<his exact words, or the answer he picked in an ask, 8+ characters>"`, and print only what he asked for.'
   );
 }
 
@@ -439,7 +472,7 @@ const inspectionNote = (hit) =>
   'flag names (`docker inspect <c> --format \'{{json .Config.Cmd}}\' | jq -c \'map(if startswith("-") then . else "<val>" end)\'`), ' +
   'env keys (`--format \'{{range .Config.Env}}{{println (index (split . "=") 0)}}{{end}}\'`), or a hash (`| sha256sum | cut -c1-12`).';
 
-module.exports = { decide, judge, printedSecrets, inspectionLeak, inspectionNote };
+module.exports = { decide, judge, printedSecrets, inspectionLeak, inspectionNote, loadChecker, askAnswers };
 if (require.main !== module) return;
 
 try {

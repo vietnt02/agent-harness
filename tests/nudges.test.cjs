@@ -377,6 +377,11 @@ test('worker-start-receipt: a new agy version runs the fixtures and speaks only 
     const [msg] = lines();
     assert.match(msg, /fixture bridge FAIL/);
     assert.match(msg, /a,b\|c/);
+    // The runner crashing (a bad JSON payload) is told apart from a guard that missed.
+    fs.writeFileSync(path.join(dir, 'run.cjs'), 'JSON.parse(\'{"p":"C:\\\\Users\\\\x\\\\y"}\'.replace(/\\\\\\\\/g, "\\\\"));');
+    const [crash] = lines();
+    assert.doesNotMatch(crash, /fixture bridge FAIL/);
+    assert.match(crash, /không chạy được.*SyntaxError/);
     assert.deepEqual(agyVersionLines(stamp, path.join(dir, 'no-runtimes'), '1.0.0'), [], 'same version: the runner is not run');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -645,30 +650,31 @@ test('ask-batch-guard: a message the user typed mid-turn lets the parked ask thr
   assert.equal(spacedAsk([answered, tool, typed]), null);
 });
 
-test('ask-format-guard: a question running several sentences with no bullet line is held once', () => {
+test('ask-format-guard: a question longer than one line (sentences, a list, a draft) is held once', () => {
   const { runOnQuestions } = require('../claude/hooks/ask-format-guard.cjs');
   const runOn = 'Bản báo cáo tuần đã có đủ số liệu. Hai biểu đồ còn thiếu nhãn trục. Gửi bản này trước không?';
   const bulleted = 'Báo cáo tuần:\n- Số liệu đã đủ.\n- Hai biểu đồ còn thiếu nhãn trục.\n- Gửi bản này trước không?';
+  const oneLine = 'Plan ~/.claude/plans/x/261125-bao-cao.md: gửi bản báo cáo tuần trước khi đủ nhãn trục?';
   assert.deepEqual(runOnQuestions({ questions: [{ question: runOn }] }), [runOn]);
-  assert.deepEqual(runOnQuestions({ questions: [{ question: bulleted }] }), [], 'bullet lines pass');
-  assert.deepEqual(runOnQuestions({ questions: [{ question: '(a) Gửi bản nháp.\n(b) Chờ thêm số liệu?' }] }), [], 'lettered lines are points on their own lines');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: bulleted }] }), [bulleted], 'a list belongs in the message before the ask');
+  assert.equal(runOnQuestions({ questions: [{ question: '(a) Gửi bản nháp.\n(b) Chờ thêm số liệu?' }] }).length, 1, 'lettered lines too');
+  assert.equal(runOnQuestions({ questions: [{ question: 'Gửi tin này cho chị Lan không?\n\n"Dạ chị ơi, em kiểm xong rồi. Chị xem giúp em nhé."' }] }).length, 1,
+    'a draft belongs in the message before the ask');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: oneLine }] }), [], 'one line naming the plan and what it decides passes');
   assert.deepEqual(runOnQuestions({ questions: [{ question: 'Gửi báo cáo tuần cho nhóm kho không?' }] }), [], 'one sentence passes');
-  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Plan ~/plans/x.md, câu 2: gửi báo cáo khi bảng đã khớp?' }] }), [],
-    'a label with a colon and a path stays one point');
-  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Gửi tin này cho chị Lan không?\n\n"Dạ chị ơi, em kiểm xong rồi. Số tồn kho đã khớp. Chị xem giúp em nhé."' }] }), [],
-    'a quoted draft is the message, not the ask: it is never reshaped');
+  assert.deepEqual(runOnQuestions({ questions: [{ question: 'Cho Claude đọc file môi trường, nhãn "Cho phép đọc. Chỉ 5 câu."?' }] }), [], 'a quoted phrase is no sentence');
   assert.deepEqual(runOnQuestions({ questions: [{ question: 'Dựng bảng tạm theo kế hoạch dưới đây (nhánh mới, bản nháp; chưa merge) được không?' }] }), [],
     'a semicolon inside a parenthesised aside ends no sentence');
   assert.equal(runOnQuestions({ questions: [{ question: 'Số dư đầu kỳ lấy từ đâu? (Trả lời câu này là đồng ý dựng tab mới. Claude mở PR, chưa merge.)' }] }).length, 1,
     'an aside that runs sentences is context and counts');
   assert.deepEqual(runOnQuestions({ questions: [{ question: 'II. Kế hoạch thu tiền tháng này là số nào?' }] }), [], 'a roman-numeral label is no sentence');
   assert.deepEqual(runOnQuestions({}), []);
-  const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: sid('ask-format'), tool_input: { questions: [{ question: bulleted }, { question: runOn }] } };
+  const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: sid('ask-format'), tool_input: { questions: [{ question: oneLine }, { question: runOn }] } };
   const held = hook('ask-format-guard.cjs', call);
   assert.equal(held.status, 2);
-  assert.match(held.stderr, /own `- ` line/);
+  assert.match(held.stderr, /message just before the ask/);
   assert.equal(hook('ask-format-guard.cjs', call).status, 0, 'the same ask sent again passes');
-  assert.equal(hook('ask-format-guard.cjs', { ...call, tool_input: { questions: [{ question: bulleted }] } }).status, 0);
+  assert.equal(hook('ask-format-guard.cjs', { ...call, tool_input: { questions: [{ question: oneLine }] } }).status, 0);
   assert.equal(hook('ask-format-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
 });
 
@@ -703,4 +709,65 @@ test('worker-start-receipt: on Windows, agy run in a terminal (no Orca chat home
     assert.deepEqual(acpHomes('win32', () => data), [chat], 'Orca chat in use: its config is checked');
     assert.match(agyConfigLines([chat], data)[0], /không trỏ về/, 'a chat home whose config is not linked is still told');
   } finally { fs.rmSync(data, { recursive: true, force: true }); }
+});
+
+test('ask-batch-guard: the final gate of a draft plan whose open questions were just answered passes; asks during its run do not', () => {
+  const { spacedAsk } = require('../claude/hooks/ask-batch-guard.cjs');
+  const user = (content) => ({ type: 'user', message: { role: 'user', content } });
+  const ask = (id, question) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'AskUserQuestion', input: { questions: [{ question }] } }] } });
+  const answer = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'Your questions have been answered: "x"="Claude tạo qua API". You can now continue with these answers in mind.' }]);
+  const tool = (id, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'ok' }]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abg-plans-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'plans', '-Users-x'), { recursive: true });
+    const plan = path.join(dir, 'plans', '-Users-x', '261125-header-auth.md');
+    const other = path.join(dir, 'plans', '-Users-x', '261125-other.md');
+    fs.writeFileSync(plan, '---\nstatus: draft\nsession: s\n---\n# Plan\n');
+    fs.writeFileSync(other, '---\nstatus: draft\n---\n');
+    // The plan's answers written with Bash, its prerequisites read again, then its gate.
+    const block = [user('làm plan Header Auth'), ask('q1', `Plan ${plan}: ai tạo credential?`), answer('q1'),
+      tool('t1', 'Bash', { command: `python3 edit_plan.py ${plan}` }), result('t1'), tool('t2', 'Bash', { command: 'gh auth status' }), result('t2')];
+    assert.equal(spacedAsk(block, { questions: [{ question: `Chạy plan ${plan} trên autopilot?` }] }), null, 'the gate of the same draft plan');
+    assert.equal(spacedAsk(block, { questions: [{ question: `Chạy plan ${other}?` }] }), 'q1', 'another plan stays held');
+    assert.equal(spacedAsk(block, { questions: [{ question: 'Đăng comment trả #489?' }] }), 'q1', 'an ask naming no plan stays held');
+    assert.equal(spacedAsk(block), 'q1', 'no next ask given: held as before');
+    // Approved and running: an ask naming the plan mid-run is held, as any.
+    fs.writeFileSync(plan, '---\nstatus: approved\nsession: s\n---\n# Plan\n');
+    assert.equal(spacedAsk(block, { questions: [{ question: `Plan ${plan}: merge PR #12 trước khi CI xanh?` }] }), 'q1', 'a running plan asks nothing');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('worker-stall: a worker that only reads, its last message recent, is running; silent past --idle-min, stale', () => {
+  const w = require('../claude/scripts/worker-stall.cjs');
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-said-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-old-ws-'));
+  try {
+    // An old worktree (a worker given an existing one): nothing in it changes while the worker reads.
+    const old = new Date(Date.now() - 60 * 60000);
+    fs.writeFileSync(path.join(dir, 'a.py'), 'x');
+    fs.utimesSync(path.join(dir, 'a.py'), old, old);
+    const now = Date.now();
+    const reading = { role: 'assistant', timestamp: now - 60000, blocks: [{ type: 'tool-call', name: 'Read', input: { file_path: 'a.py' } }] };
+    const page = (messages) => () => ({ result: { transcript: { messages, limited: false, nextCursor: 'c' } } });
+    const o = { dispatch: 'ctx_said', idle: 10, errors: 3 };
+    const deps = (msgs, at) => ({ show: () => ({ state: 'ready', workspace: `id::${dir}` }), now: at, heldBy: () => '',
+      newErrors: (d) => w.newErrors(d, page(msgs), state), waitingAsk: () => false, lastMessage: (d) => w.lastMessage(d, state) });
+    assert.equal(w.status(o, deps([reading], now)), 'running said=1m state=ready', 'dispatched a minute ago, reading');
+    assert.match(w.status(o, deps([], now + 15 * 60000)), /^stale idle>10m/, 'its last message 16 minutes old');
+    assert.match(w.status(o, deps([{ role: 'user', timestamp: now + 15 * 60000, blocks: [] }], now + 15 * 60000)), /^stale idle>10m/, 'a coordinator message is no step of the worker');
+  } finally {
+    fs.rmSync(state, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('watch.sh: a space-separated --ok/--wait list is refused at once; a comma-separated one waits on each state', { skip: spawnSync('bash', ['--version']).error && 'no bash' }, () => {
+  const script = path.join(__dirname, '..', 'claude', 'scripts', 'watch.sh');
+  const run = (...a) => spawnSync('bash', [script, '--once', '--check', 'echo IN_PROGRESS shopify theme check', ...a], { encoding: 'utf8' });
+  const spaced = run('--ok', 'SUCCESS', '--wait', 'IN_PROGRESS QUEUED PENDING');
+  assert.notEqual(spaced.status, 0);
+  assert.match(spaced.stderr + spaced.stdout, /comma-separated/);
+  const listed = run('--ok', 'SUCCESS', '--wait', 'IN_PROGRESS,QUEUED,PENDING');
+  assert.doesNotMatch(listed.stderr + listed.stdout, /comma-separated|UNEXPECTED/);
 });

@@ -48,12 +48,13 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
 5. In the turn that writes or changes the plan, ask at once, in one AskUserQuestion call, every
    open question, recommended option first (the user's last reply holds a question or request, as a
    message or as one answer in the box: that turn only answers it and asks nothing; the reply's other
-   answers go into the plan once the user says go on); each names the plan's full path and what it decides, since the
-   box hides the text above it. Write each
+   answers go into the plan once the user says go on); each question one line naming the plan's full path
+   and what it decides, its context in the message just before the ask. Write each
    answer into the plan (its action's `chốt làm` or `chốt hoãn`, Open questions emptied, a prerequisite it changes checked again). Once none is
    left, in that same turn, ask the final gate in one AskUserQuestion: run this plan on autopilot?
-   Its question names the plan's path, the actions by group, each tier C step by name, the
-   prerequisites with their results, the defaults and out of scope. Never ask it while a question
+   The message just before it lists the actions by group, each tier C step by name, the
+   prerequisites with their results, the defaults and out of scope; its question, one line, names
+   the plan's path. Never ask it while a question
    is open. A plan written on a yes to `ntv-architect`'s final gate is approved then: no second gate.
    Unless a yes starts the run (its Report ends the turn), end the turn with the plan's full path
    and a summary (the design settled, actions by group, each tier C step by name, Done when,
@@ -93,8 +94,8 @@ never listed here), then `**Đã park:**`, each item with why and the exact comm
 it needs. Every listed action done → `status: done`.
 
 Anything parked or surfaced: in the same turn, the report as text, then one AskUserQuestion
-(recommended option first) holding every `Đã park` item and each new point, each question standing
-alone (the box hides the text above it); after the answers, only what they changed, never the
+(recommended option first) holding every `Đã park` item and each new point, each question one line,
+its detail in the report above it; after the answers, only what they changed, never the
 report again. An answer approving a named action adds it to the plan, approved, and the next
 run starts with no new gate; any other change sends the plan back to `status: draft` and its gate.
 Nothing parked or surfaced: no ask, the plan stays `done`. Never ask mid-run unless the user writes.

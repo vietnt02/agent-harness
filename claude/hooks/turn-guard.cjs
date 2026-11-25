@@ -210,7 +210,7 @@ const parkedNote = (phrase) =>
 const doableNote = (phrase) =>
   `the reply hands the user a step a tool of yours reaches ("${phrase}") in **Cần bạn:**. Do it now: ` +
   'a read or an issue/PR step of this work is yours; a message to a real person is tier C, so it goes, ' +
-  'with its draft, in the block\'s one AskUserQuestion. Only a step no tool reaches stays in **Cần bạn:**, ' +
+  'in the block\'s one AskUserQuestion, its draft in the message just before it. Only a step no tool reaches stays in **Cần bạn:**, ' +
   'and it is a question in that ask too (communication-style.md § Who acts).';
 
 const guessNote = (phrase) =>
