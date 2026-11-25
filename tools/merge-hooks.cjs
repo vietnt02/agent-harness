@@ -2,6 +2,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { getNodeBin } = require('./node-bin.cjs');
 
 function splitShellTokens(cmd) {
   const tokens = [];
@@ -55,7 +56,7 @@ function getHookKey(h, isWin) {
 function parseArgs() {
   const args = process.argv.slice(2);
   let homeDir = '';
-  let nodePath = process.execPath;
+  let nodePath = getNodeBin();
   let dryRun = false;
   let backupDir = '';
 
@@ -221,6 +222,7 @@ function main() {
   const sharedHooks = sharedClaudeObj.hooks || {};
   let claudeCommandsAdded = 0;
   let claudeMatchersUpdated = 0;
+  let claudeCommandsUpdated = 0;
 
   if (!currentClaudeSettings.hooks || typeof currentClaudeSettings.hooks !== 'object' || Array.isArray(currentClaudeSettings.hooks)) {
     currentClaudeSettings.hooks = {};
@@ -261,23 +263,36 @@ function main() {
           had.matcher = sGroup.matcher;
           claudeMatchersUpdated++;
         }
-        if (k && !existingHookKeys.has(k)) {
-          let hookToAdd;
-          if (isWin) {
-            const tokens = splitShellTokens(h.command);
-            hookToAdd = {
-              type: 'command',
-              command: tokens[0].replace(/\\/g, '/'),
-              args: tokens.slice(1).map(t => t.replace(/\\/g, '/')),
-            };
-            for (const prop of Object.keys(h)) {
-              if (prop !== 'type' && prop !== 'command' && prop !== 'args') {
-                hookToAdd[prop] = h[prop];
-              }
+        let hookToAdd;
+        if (isWin) {
+          const tokens = splitShellTokens(h.command);
+          hookToAdd = {
+            type: 'command',
+            command: tokens[0].replace(/\\/g, '/'),
+            args: tokens.slice(1).map(t => t.replace(/\\/g, '/')),
+          };
+          for (const prop of Object.keys(h)) {
+            if (prop !== 'type' && prop !== 'command' && prop !== 'args') {
+              hookToAdd[prop] = h[prop];
             }
-          } else {
-            hookToAdd = JSON.parse(JSON.stringify(h));
           }
+        } else {
+          hookToAdd = JSON.parse(JSON.stringify(h));
+        }
+        // A harness hook already installed with another command line (the node it calls moved, or an
+        // older install picked a versioned path an upgrade deleted): take this install's command.
+        if (had) {
+          for (const ih of had.hooks) {
+            if (getHookKey(ih, isWin) !== k) continue;
+            if (ih.command !== hookToAdd.command || !deepEqual(ih.args, hookToAdd.args)) {
+              ih.command = hookToAdd.command;
+              if (hookToAdd.args !== undefined) ih.args = hookToAdd.args;
+              else delete ih.args;
+              claudeCommandsUpdated++;
+            }
+          }
+        }
+        if (k && !existingHookKeys.has(k)) {
           newHooks.push(hookToAdd);
           existingHookKeys.add(k);
         }
@@ -331,7 +346,7 @@ function main() {
     claudeAutoModeReplaced = true;
   }
 
-  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0 || claudeCommandsRemoved > 0 || claudeAutoModeReplaced) {
+  if (claudeCommandsAdded > 0 || claudeMatchersUpdated > 0 || claudeCommandsUpdated > 0 || claudeCommandsRemoved > 0 || claudeAutoModeReplaced) {
     if (!dryRun) {
       if (claudeFileExisted) {
         const backupTarget = path.join(backupDir, '.claude', 'settings.json');
@@ -394,7 +409,7 @@ function main() {
   }
 
   // --- 3. Summary ---
-  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh, cập nhật matcher ${claudeMatchersUpdated} lệnh, gỡ ${claudeCommandsRemoved} lệnh trỏ tới file đã xoá.`);
+  console.log(`Claude hooks: đã thêm ${claudeCommandsAdded} lệnh, cập nhật matcher ${claudeMatchersUpdated} lệnh, đổi lệnh chạy ${claudeCommandsUpdated} lệnh, gỡ ${claudeCommandsRemoved} lệnh trỏ tới file đã xoá.`);
   if (claudeAutoModeReplaced) console.log('Claude autoMode: đã thay bằng bản của harness.');
   console.log(`Agy hooks: ${agyStatus}.`);
 }
