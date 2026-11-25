@@ -183,11 +183,11 @@ def main():
         base, _ = run(a.tests)
         if base != "survived":
             sys.exit(f"baseline: the tests do not pass on the unmutated module ({base.replace('killed', 'failed')}): "
-                     "a copy lacks the repo's installed dependencies (node_modules, a venv) until they are installed into it")
+                     "if the copy lacks the repo's installed dependencies (node_modules, a venv), install them into it")
         # A wider suite that already fails would turn every survivor into killed_elsewhere.
         if a.confirm_tests and run(a.confirm_tests)[0] != "survived":
-            sys.exit("baseline: --confirm-tests do not pass on the unmutated module: install the repo's dependencies "
-                     "into the copy (node_modules, a venv: git archive carries none), or narrow them to a passing set")
+            sys.exit("baseline: --confirm-tests do not pass on the unmutated module: if the copy lacks the repo's "
+                     "dependencies (git archive carries none), install them into it; else narrow them to a passing set")
         # Tests that import the module from elsewhere (an installed copy, PYTHONPATH) pass whatever
         # the copy holds: every mutant would "survive".
         path.write_text('raise RuntimeError("mutate canary")\n')

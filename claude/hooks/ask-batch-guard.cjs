@@ -9,9 +9,9 @@
  * does the first ask after the user types. Said once per answered ask (lib/block-once.cjs, keyed on its
  * tool_use_id): the next ask passes whatever it holds, so the merged ask the note asks for, or a question
  * only the answers raised (a final gate after its open questions), is never held twice.
- * An ask naming the same plan file (`plans/<…>.md`) as the answered one passes: ntv-autopilot writes the
- * answers into that plan, checks its prerequisites again and asks the final gate in the same turn, while
- * the user waits for it.
+ * An ask naming the same plan file (`plans/<…>.md`) as the answered one, while that plan is still
+ * `status: draft`, passes: ntv-autopilot writes the answers into it, checks its prerequisites again and
+ * asks the final gate in the same turn, while the user waits for it. An approved plan runs without asks.
  * The transcript is read from its end in growing pieces until the user's last message or the answered ask
  * shows: a long block (workers running for many minutes) puts both far behind the tail.
  * Fails open whenever the transcript cannot be read.
@@ -40,6 +40,13 @@ function tailRecords(file, bytes = TAIL_BYTES) {
 }
 
 const PLAN_PATH = /plans[\\/][^\s"'`)\]]+\.md/g;
+// True when the plan file the question names by a path ending in `rel` (`plans/<…>.md`) is a draft on disk.
+const isDraft = (question, rel) => {
+  const word = question.split(/[\s"'`()]+/).find((w) => w.replace(/\\+/g, '/').replace(/[:?,.]+$/, '').endsWith(rel));
+  if (!word) return false;
+  const file = require('./lib/platform.cjs').expandHome(word.replace(/[:?,.]+$/, '').replace(/\.m$/, '.md'));
+  try { return /^status:\s*draft\b/m.test(fs.readFileSync(file, 'utf8').split(/^---\s*$/m)[1] || ''); } catch { return false; }
+};
 const planPaths = (input) => new Set((JSON.stringify(input?.questions || []).match(PLAN_PATH) || []).map((p) => p.replace(/\\+/g, '/')));
 
 // The input of the AskUserQuestion `id` at or before records[i].
@@ -70,7 +77,9 @@ function spacedAsk(records, next) {
     if (answered) {
       if (!toolSince) return null;
       const want = planPaths(next);
-      if (want.size && [...planPaths(askInput(records, i, answered.tool_use_id))].some((p) => want.has(p))) return null;
+      const text = (next?.questions || []).map((q) => String(q?.question || '')).join('\n');
+      const same = [...planPaths(askInput(records, i, answered.tool_use_id))].filter((p) => want.has(p));
+      if (same.some((p) => isDraft(text, p))) return null;
       return String(answered.tool_use_id || i);
     }
     if (rec.type === 'assistant' && c.some((b) => b?.type === 'tool_use' && b.name !== 'AskUserQuestion')) toolSince = true;
@@ -92,7 +101,7 @@ const NOTE =
   'since. The user answers and goes back to other work, so a later ask waits unseen and the session stands ' +
   'still (communication-style.md § Format: one ask a block, once nothing else runs or the user writes mid-turn). If work of this block ' +
   'can still run without this answer, run it first and put this question in the block\'s last ask, with ' +
-  'every other question and draft; if nothing can run without it, ask it.';
+  'every other question (its drafts in the message just before it); if nothing can run without it, ask it.';
 
 module.exports = { spacedAsk, spacedAskIn };
 if (require.main !== module) return;

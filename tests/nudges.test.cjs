@@ -711,23 +711,31 @@ test('worker-start-receipt: on Windows, agy run in a terminal (no Orca chat home
   } finally { fs.rmSync(data, { recursive: true, force: true }); }
 });
 
-test('ask-batch-guard: the final gate of the plan whose open questions were just answered passes', () => {
+test('ask-batch-guard: the final gate of a draft plan whose open questions were just answered passes; asks during its run do not', () => {
   const { spacedAsk } = require('../claude/hooks/ask-batch-guard.cjs');
   const user = (content) => ({ type: 'user', message: { role: 'user', content } });
   const ask = (id, question) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'AskUserQuestion', input: { questions: [{ question }] } }] } });
   const answer = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'Your questions have been answered: "x"="Claude tạo qua API". You can now continue with these answers in mind.' }]);
   const tool = (id, name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
   const result = (id) => user([{ type: 'tool_result', tool_use_id: id, content: 'ok' }]);
-  const plan = '~/.claude/plans/-Users-x/261125-header-auth.md';
-  // The plan's answers written with Bash or Edit, its prerequisites read again, then its gate.
-  const block = [user('làm plan Header Auth'), ask('q1', `Plan ${plan}: ai tạo credential?`), answer('q1'),
-    tool('t1', 'Bash', { command: `python3 edit_plan.py ${plan}` }), result('t1'), tool('t2', 'Bash', { command: 'gh auth status' }), result('t2')];
-  assert.equal(spacedAsk(block, { questions: [{ question: `Chạy plan ${plan} trên autopilot?` }] }), null, 'the gate of the same plan');
-  assert.equal(spacedAsk(block, { questions: [{ question: 'Chạy plan /Users/x/.claude/plans/-Users-x/261125-header-auth.md?' }] }), null, 'the same plan by its absolute path');
-  assert.equal(spacedAsk(block, { questions: [{ question: 'Chạy plan C:\\Users\\x\\.claude\\plans\\-Users-x\\261125-header-auth.md?' }] }), null, 'the same plan by a Windows path');
-  assert.equal(spacedAsk(block, { questions: [{ question: 'Chạy plan ~/.claude/plans/-Users-x/261125-other.md?' }] }), 'q1', 'another plan stays held');
-  assert.equal(spacedAsk(block, { questions: [{ question: 'Đăng comment trả #489?' }] }), 'q1', 'an ask naming no plan stays held');
-  assert.equal(spacedAsk(block), 'q1', 'no next ask given: held as before');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abg-plans-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'plans', '-Users-x'), { recursive: true });
+    const plan = path.join(dir, 'plans', '-Users-x', '261125-header-auth.md');
+    const other = path.join(dir, 'plans', '-Users-x', '261125-other.md');
+    fs.writeFileSync(plan, '---\nstatus: draft\nsession: s\n---\n# Plan\n');
+    fs.writeFileSync(other, '---\nstatus: draft\n---\n');
+    // The plan's answers written with Bash, its prerequisites read again, then its gate.
+    const block = [user('làm plan Header Auth'), ask('q1', `Plan ${plan}: ai tạo credential?`), answer('q1'),
+      tool('t1', 'Bash', { command: `python3 edit_plan.py ${plan}` }), result('t1'), tool('t2', 'Bash', { command: 'gh auth status' }), result('t2')];
+    assert.equal(spacedAsk(block, { questions: [{ question: `Chạy plan ${plan} trên autopilot?` }] }), null, 'the gate of the same draft plan');
+    assert.equal(spacedAsk(block, { questions: [{ question: `Chạy plan ${other}?` }] }), 'q1', 'another plan stays held');
+    assert.equal(spacedAsk(block, { questions: [{ question: 'Đăng comment trả #489?' }] }), 'q1', 'an ask naming no plan stays held');
+    assert.equal(spacedAsk(block), 'q1', 'no next ask given: held as before');
+    // Approved and running: an ask naming the plan mid-run is held, as any.
+    fs.writeFileSync(plan, '---\nstatus: approved\nsession: s\n---\n# Plan\n');
+    assert.equal(spacedAsk(block, { questions: [{ question: `Plan ${plan}: merge PR #12 trước khi CI xanh?` }] }), 'q1', 'a running plan asks nothing');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('worker-stall: a worker that only reads, its last message recent, is running; silent past --idle-min, stale', () => {

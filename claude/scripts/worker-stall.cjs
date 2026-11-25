@@ -96,7 +96,7 @@ function newErrors(dispatch, read = (a) => orca(a), stateDir = path.join(os.tmpd
     const msgs = t.messages || [];
     if (counting) for (const m of msgs) if (API_ERROR.test(workerText(m))) count++;
     for (const m of msgs) {
-      if (m && m.role !== 'user') last = Math.max(last, Number(m.timestamp) || 0);
+      if (m && m.role !== 'user') last = Math.max(last, Number(m.timestamp) || Date.parse(m.timestamp) || 0);
       if (m && m.role === 'user') waiting = false;
       else if (ASK_SENT.test(workerText(m))) waiting = waiting || Number(m.timestamp) || Date.now();
     }

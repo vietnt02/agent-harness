@@ -167,7 +167,12 @@ function writesMainCheckout(command, cwd) {
     }
     return vars;
   };
-  const isMain = (dir) => dir === null || (!inScratchpad(dir) && isMainCheckout(dir));
+  const mains = new Map();
+  const isMain = (dir) => {
+    if (dir === null) return true;
+    if (!mains.has(dir)) mains.set(dir, !inScratchpad(dir) && isMainCheckout(dir));
+    return mains.get(dir);
+  };
   // One variable map per word of each `for` loop seen (`vars[X]` an array): [vars] when none.
   const variants = (vars) => {
     const k = Object.keys(vars).find((n) => Array.isArray(vars[n]));
@@ -200,8 +205,11 @@ function writesMainCheckout(command, cwd) {
     if (script !== null && (here === null ? /\bgit\b/.test(script) : writesMainCheckout(script, here))) return true;
     const git = gitWrite(raw, words);
     if (!git) continue;
-    const looped = Object.values(loopVars).some(Array.isArray);
-    if (variants(loopVars).some((each) => gitWrites(git, here, each, looped))) return true;
+    // Only the loop variables this git command names vary; any other loop is no concern of it.
+    const named = new Set([...raw.join(' ').matchAll(/\$\{?(\w+)/g)].map((m) => m[1]));
+    const own = Object.fromEntries(Object.entries(loopVars).filter(([k, v]) => !Array.isArray(v) || named.has(k)));
+    const looped = Object.values(own).some(Array.isArray);
+    if (variants(own).some((each) => gitWrites(git, here, each, looped))) return true;
   }
   return false;
 

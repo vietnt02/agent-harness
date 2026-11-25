@@ -58,6 +58,7 @@ const SIMPLE_PRINTERS = new Set([
 const KEY_NAME_PATTERN = /^\^(?:\[[\w-]+\]|\w)(?:\[[\w-]+\]|\w|[*+?])*=$/;
 const GREP_OPT_VAL = /^(--(max-count|after-context|before-context|context|label|include|exclude|exclude-dir|color|colour|directories|binary-files))$/;
 const REDIR = /(\d*<<<|\d*<<-?|\d*<>|&>>?|\d*>>?&?|\d*<&?)/;
+const ASK_ANSWER = /^(Your questions have been answered|The user answered|User has answered)/;
 const APPROVAL = /#\s*secret-ok:\s*"([^"\n]{8,})"/;
 const norm = (s) => String(s).normalize('NFC').replace(/\s+/g, ' ').trim();
 
@@ -316,12 +317,13 @@ function askAnswers(transcript) {
   try { raw = require('fs').readFileSync(transcript, 'utf8'); } catch { return []; }
   const out = [];
   for (const line of raw.split('\n')) {
-    if (!line.includes('tool_result') || !/answered your questions|User has answered/.test(line)) continue;
+    if (!line.includes('tool_result')) continue;
     let d;
     try { d = JSON.parse(line); } catch { continue; }
     for (const b of Array.isArray(d.message?.content) ? d.message.content : []) {
       if (b?.type !== 'tool_result') continue;
-      const text = typeof b.content === 'string' ? b.content : (b.content || []).map((x) => x?.text || '').join('');
+      const text = (typeof b.content === 'string' ? b.content : (b.content || []).map((x) => x?.text || '').join('')).trim();
+      if (!ASK_ANSWER.test(text)) continue;
       for (const m of text.matchAll(/"="((?:[^"\\]|\\.)*)"/g)) out.push(m[1]);
     }
   }

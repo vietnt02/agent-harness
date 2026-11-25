@@ -64,7 +64,7 @@ qua phiên, hay user nói "supervised" → worker Orca. Orca không chạy (`orc
 
 **Manifest — một mục của plan `ntv-autopilot`** (`CLAUDE.md` § Mutation gate): plan có giao
 worker thì chốt model, worktree ngay trong plan; duyệt plan là duyệt manifest, không hỏi lại.
-Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Ngoại lệ: reviewer chỉ đọc do câu của user mở (review PR/MR của bất kỳ ai) giao ngay, không plan; đăng gì lên PR/MR vẫn hỏi riêng. Mỗi worker
+Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Ngoại lệ: reviewer chỉ đọc do câu của user mở (review PR/MR của bất kỳ ai) giao ngay, không plan, không manifest; đăng gì lên PR/MR vẫn hỏi riêng. Mỗi worker
 một dòng:
 
     Manifest khối <X> — parallel <n> (cap <N>).
@@ -139,8 +139,8 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   lệ: review thay đổi của harness hay rule cho agent (`CLAUDE.md`, `AGENTS.md` của repo) là subagent Claude (`ntv-implement` § Verify), và chặng rà
   là subagent `ntv-scout` (Sonnet, § 1).
 - Worker luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Mọi model
-  Gemini trên `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác: hỏi user
-  model thay rồi mới giao.
+  Gemini trên `agy` chung một quota, nên hết quota thì không đổi sang model Gemini khác: đề xuất
+  một model thay kèm lý do, user duyệt rồi mới giao.
 - **Builder** chọn theo dấu hiệu đọc được trong spec lúc giao, không theo khó/dễ (lúc giao chưa biết):
   - `agy gemini-4-neon high` khi việc có một trong hai dấu hiệu: (1) code mới hay sửa có trạng thái
     lưu giữa các lần chạy (watermark, sổ ghi, bản ghi dở), thử lại, hay ghi ra ngoài repo (Lark,

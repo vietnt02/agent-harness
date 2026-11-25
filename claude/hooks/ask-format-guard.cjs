@@ -6,7 +6,7 @@
  * message just before the ask). Orca shows at most 4 lines of a question (2 when the chat pane is
  * short) and scrolls the rest inside the box, while the message before the ask stays in view.
  * A sentence ends at `.`, `?`, `!` or `;` before a space or the end; a colon does not count, so a
- * label ("Plan <path>: …?") stays one point. A short quoted phrase and a roman-numeral label ("II. …")
+ * label ("Plan <path>: …?") stays one point. Quoted text on the question's one line and a roman-numeral label ("II. …")
  * are no sentence of the ask, nor is a ';' inside a parenthesised aside with no sentence of its own;
  * an aside that runs sentences is context, and counts. Said once per question text
  * (lib/block-once.cjs): the same ask sent again passes. Fails open on any error.
