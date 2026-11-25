@@ -128,16 +128,21 @@ function shape(text, deep = true) {
   };
 }
 
-// The arguments of each place the command runs watch.sh, up to the next separator; quoted
-// strings are blanked first, so `--check "x --once"` does not count as --once.
+// The arguments of each command that runs watch.sh, itself or through `bash`/`sh`/`source`/`exec`.
+// Commands are read by shell-words, so a watch.sh path inside a quoted string (a spec, a message, a
+// test case) is text, not a run; a quoted argument holding a space is blanked, so
+// `--check "x --once"` does not count as --once. `bash -n watch.sh` only checks syntax.
 function watchRuns(text, cwd) {
-  const command = dropHeredocs(text);
   const runs = [];
-  for (const m of command.matchAll(/(["']?)([^\s'";|&()]*watch\.sh)\1(?=[\s;|&)]|$)/g)) {
-    if (!samePath(path.resolve(cwd, expand(m[2])), WATCH_PATH) || !isRun(command.slice(0, m.index))) continue;
-    const rest = command.slice(m.index + m[0].length).replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
-    const end = rest.search(/[;&|\n]/);
-    runs.push(end === -1 ? rest : rest.slice(0, end));
+  for (const w of commands(text)) {
+    const prog = program(w);
+    let i = 0;
+    while (i < prog.length - 1 && (/^(bash|sh|zsh|source|\.|exec|command)$/.test(prog[i]) || (i > 0 && prog[i].startsWith('-')))) i++;
+    if (!/(?:^|[\\/])watch\.sh$/.test(prog[i] || '')) continue;
+    if (/^(?:ba|z)?sh$/.test(prog[0]) && prog.slice(1, i).some((a) => /^-\w*n\w*$/.test(a))) continue;
+    const raw = i === 0 ? w[w.length - prog.length] : prog[i];
+    if (!samePath(path.resolve(cwd, expand(raw)), WATCH_PATH)) continue;
+    runs.push(prog.slice(i + 1).map((a) => (/\s/.test(a) ? '""' : a)).join(' '));
   }
   return runs;
 }
