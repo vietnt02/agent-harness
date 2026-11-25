@@ -160,10 +160,11 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
   park track, Report kèm findings hai vòng và đề xuất của coordinator (thường là sửa thiết kế hay
   spec). Carbon, argon làm builder hay reviewer chỉ khi user chỉ định.
 - **Reviewer** `agy gemini-4-neon high`: worker riêng, context mới, không nhận hội thoại hay báo cáo
-  của builder; độc lập là đủ, cùng model với builder cũng được. **Checker** (§ 4) `agy gemini-4-hydrogen high`.
+  của builder; độc lập là đủ, cùng model với builder cũng được. Reviewer ở mọi model, mọi vòng chạy
+  effort high, dù frontmatter của model ghi gì. **Checker** (§ 4) `agy gemini-4-hydrogen high`.
 - Không giao task dài cho model context ngắn (`gpt-luna`): chia task nhỏ, mỗi task một worker mới,
   commit + push mỗi nhóm việc ≤ 30 phút.
-- Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter. Slug: agy `agy models`;
+- Truyền `--agent`, `--model` (slug thật), `--effort` đúng frontmatter (reviewer: `high`). Slug: agy `agy models`;
   codex `~/.codex/models_cache.json`. Lỗi trích lại đúng chuỗi vừa gõ (`'luna'`) nghĩa là sai slug,
   không phải model thiếu năng lực. Orca không ghi model của worker agy (`launch.requested`,
   `launch.effective` đều null): model thật là banner trong terminal (`Gemini 4 Neon (High)`), lệnh
@@ -214,14 +215,16 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 ## 4. Cổng
 
 **Review.** Diff logic từ 30 dòng (trừ test, doc, lockfile), hoặc task chạm tiền, thư gửi khách, dữ
-liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-4-neon high`, worker riêng, § 2) trước khi
+liệu người khác đọc, UI hay BI → có reviewer (`agy gemini-4-neon high`, worker riêng, effort high ở mọi model, § 2) trước khi
 merge. Reviewer nhận diff, Scope, mục Nghiệm thu và hai câu hỏi cố định: lượt chạy xấu nhất (số
 item tối đa × thời gian đo trên lần chạy thật) có lọt trần thời gian của runtime không; và tiến trình
 nào khác (nút bấm, lịch, webhook) ghi hay gửi cho cùng bản ghi trong cùng khoảng thời gian. Spec reviewer đòi dán nguyên findings kèm output
 thô và `file:dòng`; finding coordinator tự gửi worker cũng dẫn `file:dòng` cả nơi sinh lẫn nơi đọc
 giá trị, hoặc kèm một ca chạy thật. Phạm vi reviewer cố định (user chốt): diff, hai câu hỏi trên và
-bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo một lượt chạy thật trên bản sao state (`ntv-test` § 2); vòng 2 chỉ kiểm
-các finding đã sửa. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
+bằng chứng; mutation chỉ kiểm lại một module worker đã báo, đo một lượt chạy thật trên bản sao state (`ntv-test` § 2); vòng 2 chỉ đọc
+bản sửa (diff từ SHA vòng 1 tới SHA mới, cộng chỗ đọc hay ghi giá trị mà bản sửa đổi), trả lời mỗi
+finding đã sửa đúng chưa và bản sửa có làm sai chỗ nó chạm không (hai câu hỏi cố định chỉ hỏi lại khi
+bản sửa chạm tới chúng), chỉ liệt kê lỗi chặn merge; vòng 1 là lượt duy nhất đọc cả diff. Coordinator quyết từng finding và đối chiếu ít nhất một bằng chứng với nguồn
 thật; PASS của reviewer chỉ là đầu vào. **Tiêu chí dừng:** chỉ finding làm sai output thật khi dùng
 bình thường mới chặn merge; còn lại ghi "giới hạn đã biết" vào PR. Sau khi thiết kế ổn định tối đa
 2 vòng review; builder trượt cả hai thì theo **Chọn model** (§ 2).

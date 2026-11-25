@@ -909,6 +909,36 @@ test('worktree-after-release: a refused release keeps its worktree; dirty file n
 
 
 
+test('worker-start-receipt: a codex worker whose AGENTS.md is longer than project_doc_max_bytes is named', () => {
+  const { codexDocCap, codexDocLines } = require('../claude/hooks/worker-start-receipt.cjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wsr-codex-'));
+  try {
+    const cfg = path.join(tmp, 'config.toml');
+    assert.equal(codexDocCap(path.join(tmp, 'missing.toml')), 32768, 'no config: the Codex default');
+    fs.writeFileSync(cfg, 'model = "x"\nproject_doc_max_bytes = 65536\n[profiles.a]\nproject_doc_max_bytes = 10\n');
+    assert.equal(codexDocCap(cfg), 65536, 'the top-level key, not a profile');
+    fs.writeFileSync(cfg, '[profiles.a]\nproject_doc_max_bytes = 10\n');
+    assert.equal(codexDocCap(cfg), 32768, 'only a profile sets it: the default');
+    fs.writeFileSync(cfg, 'project_doc_max_bytes = 65_536\n');
+    assert.equal(codexDocCap(cfg), 65536, 'a TOML integer with underscores');
+    const long = path.join(tmp, 'long');
+    const short = path.join(tmp, 'short');
+    const over = path.join(tmp, 'over');
+    for (const d of [long, short, over, path.join(tmp, 'none')]) fs.mkdirSync(d);
+    fs.writeFileSync(path.join(long, 'AGENTS.md'), 'x'.repeat(40000));
+    fs.writeFileSync(path.join(short, 'AGENTS.md'), 'x'.repeat(1000));
+    fs.writeFileSync(path.join(over, 'AGENTS.md'), 'x'.repeat(40000));
+    fs.writeFileSync(path.join(over, 'AGENTS.override.md'), 'x'.repeat(100));
+    const lines = codexDocLines([long, short, over, path.join(tmp, 'none')], 32768);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /32768 byte .*long[\\/]AGENTS\.md` \(40000 byte\)/);
+    assert.deepEqual(codexDocLines([long], 65536), [], 'a cap above the file names nothing');
+    assert.match(codexDocLines([short], 0)[0], /không nạp/, 'a cap of 0 loads nothing');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('worker-start-receipt: only a dispatch the command runs is read back', () => {
   const receipt = require('../claude/hooks/worker-start-receipt.cjs');
   const ws = 'worker' + '-start';
@@ -1048,6 +1078,11 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     `orca orchestration ask --question "chỉ sửa x.sql, không đọc ${E}"`,
     `cat ${E} # secret-ok: "cho đọc file env nhé"`,
     'ls -la',
+    // A print that runs before the load cannot show the file's values, even after a `cd` to an unknown place.
+    `D=/x/y; printf "%s\\n" $u; cd $D && set -a && . ./${E} && set +a && python3 -I x.py`,
+    `printenv | wc -l; cd $D && . ./${E} && python3 x.py`,
+    `echo "$K"; source ${E}; node app.js`,
+    `cd $S; for u in a b; do curl -s -o p.html "https://x/$u"; printf "%s | n=%s\\n" "$u" $(grep -c X p.html); done; cat > $S/sp.py <<'EOF'\nprint(1)\nEOF\ncd $D && set -a && . ./${E} && set +a && python3 -I $S/sp.py`,
   ];
   for (const cmd of allowed) assert.equal(run('Bash', cmd), '', cmd);
 
@@ -1068,6 +1103,9 @@ test('secret-file-guard: closed blocklist blocks printing secret files or loaded
     `cat > a.md <<EOF\n$(cat ${E})\nEOF`, `cat > a.md <<EOF\n\`cat ${E}\`\nEOF`, `bash <<'EOF'\ncat ${E}\nEOF`,
     `cat ${E} # secret-ok: "không ai nói câu này"`, `cat ${E} # secret-ok: "ok"`,
     'cat server.pem', 'cat ~/.ssh/id_ed25519', 'head credentials.json',
+    // After the load, or in a loop around it (its next round runs after the load); trace in any order.
+    `cd $D && . ./${E} && printf '%s' "$K"`, `cd $D && . ./${E} && env`,
+    `for f in a b; do echo "$K"; . ./${E}; done`, `. ./${E}; set -x; curl -H "$K" https://x`,
   ];
   for (const cmd of blocked) assert.match(run('Bash', cmd), /secret-file-guard/, cmd);
   assert.match(run('Bash', `cat ${E}`), /set -a; \. \.\/\.env; set \+a;/);
@@ -1588,6 +1626,45 @@ test('main-checkout-guard: core.hooksPath counts only when git runs with it', ()
     assert.equal(hooksOff(c), true, c);
   for (const c of ['git commit -m "never run git -c core.hooksPath=/dev/null"', 'echo git -c core.hooksPath=x', 'git -c user.name=x commit'])
     assert.equal(hooksOff(c), false, c);
+});
+
+test('watch-guard: a background sleep waits only as the first work or inside a loop; a pipe after watch.sh is named', () => {
+  const { shape, pipedWatch } = require('../claude/hooks/watch-guard.cjs');
+  for (const t of ['S=1; export P=x; pg_ctl start >/dev/null; sleep 2; pg_isready; sh build.sh',
+    'make build; sleep 3; curl -s localhost:8080', 'python3 mutate.py'])
+    assert.equal(shape(t).waitSleeps, false, t);
+  for (const t of ['sleep 600; orca orchestration worker-show --dispatch x', 'cd /tmp && sleep 300 && gh run view 1',
+    '(sleep 600; gh run view 1)', 'for i in 1 2; do make; sleep 5; done', "sh -c 'sleep 600; gh pr checks 1'",
+    'export GH_TOKEN=$(gh auth token --user u); sleep 600; gh pr checks 78', 'cd "$(git rev-parse --show-toplevel)" && sleep 600 && gh run view 1',
+    'echo "waiting for CI"; sleep 900; gh run view 123', 'mkdir -p /tmp/x; now=$(date +%s); echo "chờ 60 s"; sleep 60; python3 run.py'])
+    assert.equal(shape(t).waitSleeps, true, t);
+  assert.equal(shape('echo "$(date)"; make build; sleep 3; curl -s localhost:8080').waitSleeps, false, 'a $(…) of a setup command is setup, the build is work');
+  const W = '~/.claude/scripts/watch.sh --check "node x" --ok done --wait running';
+  assert.equal(pipedWatch(`${W} 2>&1 | tail -5`, os.tmpdir()), true);
+  assert.equal(pipedWatch(`${W} | grep WATCH`, os.tmpdir()), true);
+  for (const t of [`set -o pipefail; ${W} 2>&1 | tail -5`, `${W} > /tmp/l 2>&1`, `${W} || echo failed`, 'other/watch.sh --check x | tail'])
+    assert.equal(pipedWatch(t, os.tmpdir()), false, t);
+});
+
+test('shell-words: `2>&1`, `>&2` and `&>file` stay inside their command', () => {
+  const { commands, pipedInto } = require('../claude/hooks/lib/shell-words.cjs');
+  const all = commands('a --x 2>&1 | tail -5');
+  assert.deepEqual(all.map((w) => [...w]), [['a', '--x', '2>&1'], ['tail', '-5']]);
+  assert.equal(pipedInto(all, 0).length, 1);
+  assert.deepEqual(commands('echo x >&2; b &> out.log').map((w) => [...w]), [['echo', 'x', '>&2'], ['b', '&>', 'out.log']]);
+  assert.deepEqual(commands('a & b').map((w) => [...w]), [['a'], ['b']], 'a lone & still ends a command');
+});
+
+test('watch-guard: a piped watch.sh whose first report outlives the timeout gets both reminders in its one hold', () => {
+  const s = `wg-both-${process.pid}-${Date.now()}`;
+  const run = (input) => spawnSync(process.execPath, [path.join(HOOKS_DIR, 'watch-guard.cjs')], { encoding: 'utf8',
+    input: JSON.stringify({ tool_name: 'Bash', session_id: s, cwd: os.tmpdir(), tool_input: input }) });
+  const w = { command: '~/.claude/scripts/watch.sh --check "x" --ok done --wait running --checkpoint 3600 2>&1 | tail -5', run_in_background: true };
+  const first = run(w);
+  assert.equal(first.status, 2);
+  assert.match(first.stderr, /pipe after watch\.sh/);
+  assert.match(first.stderr, /first reports after 3600 s/);
+  assert.equal(run(w).status, 0, 'said once');
 });
 
 test('watch-guard: no timeout advice when the call already has the longest timeout', () => {

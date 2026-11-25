@@ -9,7 +9,10 @@
  * label ("Plan <path>: …?") stays one point. Quoted text on the question's one line and a roman-numeral label ("II. …")
  * are no sentence of the ask, nor is a ';' inside a parenthesised aside with no sentence of its own;
  * an aside that runs sentences is context, and counts. Said once per question text
- * (lib/block-once.cjs): the same ask sent again passes. Fails open on any error.
+ * (lib/block-once.cjs): the same ask sent again passes. Also held once: an ask with no text of the
+ * reply between it and the last tool result or user message (a first ask with only thinking before
+ * it, an ask sent again after a hook held it): the user decides from the text just above the box,
+ * never from thinking, which Orca folds into "Thought for Ns". Fails open on any error.
  */
 'use strict';
 
@@ -38,7 +41,57 @@ const NOTE =
   'list and any draft in your message just before the ask (it stays in view while the ask waits), and keep ' +
   'the question to one line that names what it decides (communication-style.md § Format); then ask again.';
 
-module.exports = { runOnQuestions };
+// Whether the reply holds text of its own after the last tool result or user message, before the ask
+// `askId`: thinking and other tool calls of the same reply are skipped, and so are the results of those
+// calls (Claude Code runs a call of the reply before the next one streams in: text, Edit, its result,
+// the ask); true when the tail cannot tell.
+function hasContext(records, askId) {
+  const replyOf = new Map();
+  for (const r of records) {
+    if (r?.type !== 'assistant' || !Array.isArray(r?.message?.content)) continue;
+    for (const b of r.message.content) if (b?.type === 'tool_use' && b.id) replyOf.set(b.id, r.message.id);
+  }
+  const reply = askId ? replyOf.get(askId) : undefined;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i];
+    const content = r?.message?.content;
+    if (r?.type === 'assistant' && Array.isArray(content)) {
+      for (let j = content.length - 1; j >= 0; j--) {
+        const b = content[j];
+        if (b?.type === 'text' && String(b.text || '').trim()) return true;
+      }
+    } else if (r?.type === 'user' && !r.isMeta) {
+      if (typeof content === 'string') return false;
+      if (!Array.isArray(content)) continue;
+      const sibling = (b) => b?.type === 'tool_result' && reply !== undefined && replyOf.get(b.tool_use_id) === reply;
+      if (content.some((b) => (b?.type === 'tool_result' && !sibling(b)) || (b?.type === 'text' && String(b.text || '').trim()))) return false;
+    }
+  }
+  return true;
+}
+
+function tailRecords(file, bytes = 256 * 1024) {
+  const fs = require('fs');
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    const start = Math.max(0, size - bytes);
+    const buf = Buffer.alloc(size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
+    const lines = buf.toString('utf8').split('\n');
+    if (start > 0) lines.shift();
+    return lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+const NO_CONTEXT =
+  'ask-format-guard: no text of yours stands between the last tool result (or the user\'s message) and this ask, ' +
+  'so the box shows with nothing above it to decide from; thinking is not shown (Orca folds it into "Thought for Ns"). ' +
+  'Write the context (what you found, what each option changes) as text right before the ask, then ask again.';
+
+module.exports = { runOnQuestions, hasContext };
 if (require.main !== module) return;
 
 let raw = '';
@@ -47,12 +100,17 @@ process.stdin.on('end', () => {
   try {
     const input = JSON.parse(raw);
     if (input.tool_name !== 'AskUserQuestion') process.exit(0);
-    const runOn = runOnQuestions(input.tool_input);
-    if (!runOn.length) process.exit(0);
     const { firstTime } = require('./lib/block-once.cjs');
-    if (!firstTime(input.session_id, 'ask-format-guard', runOn.join('\n'))) process.exit(0);
-    process.stderr.write(`${NOTE}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
-    process.exit(2);
+    const runOn = runOnQuestions(input.tool_input);
+    if (runOn.length && firstTime(input.session_id, 'ask-format-guard', runOn.join('\n'))) {
+      process.stderr.write(`${NOTE}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
+      process.exit(2);
+    }
+    if (input.transcript_path && !hasContext(tailRecords(input.transcript_path), input.tool_use_id) &&
+      firstTime(input.session_id, 'ask-format-guard-context', JSON.stringify(input.tool_input?.questions || []))) {
+      process.stderr.write(`${NO_CONTEXT}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
+      process.exit(2);
+    }
   } catch (_) { /* fail-open */ }
   process.exit(0);
 });

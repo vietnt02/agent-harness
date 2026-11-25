@@ -678,6 +678,46 @@ test('ask-format-guard: a question longer than one line (sentences, a list, a dr
   assert.equal(hook('ask-format-guard.cjs', { ...call, tool_name: 'Bash' }).status, 0);
 });
 
+test('ask-format-guard: an ask with no text of the reply since the last tool result or user message is held once', () => {
+  const { hasContext } = require('../claude/hooks/ask-format-guard.cjs');
+  const typed = { type: 'user', message: { content: 'chốt plan nhé' } };
+  const text = { type: 'assistant', message: { content: [{ type: 'text', text: '# Bối cảnh\nĐã kiểm xong.' }] } };
+  const think = { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Phiếu đã khớp schema, tôi sẽ hỏi bước duyệt' }] } };
+  const edit = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: {} }] } };
+  const ask1 = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: {} }] } };
+  const held = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'q1', is_error: true, content: 'PreToolUse:AskUserQuestion hook error' }] } };
+  const meta = { type: 'user', isMeta: true, message: { content: [{ type: 'text', text: '<system-reminder>x</system-reminder>' }] } };
+  const other = { type: 'attachment' };
+  assert.equal(hasContext([typed, think, text, other]), true, 'text before the ask, thinking before it');
+  assert.equal(hasContext([typed, text, edit]), true, 'a parallel call of the same reply does not hide its text');
+  assert.equal(hasContext([typed, think]), false, 'only thinking since the user wrote');
+  assert.equal(hasContext([typed, think, think, edit, edit]), false, 'the report sat in thinking, then edits, then the ask');
+  assert.equal(hasContext([typed, text, ask1, held, think]), false, 'the ask sent again after a hook held it');
+  assert.equal(hasContext([typed, text, ask1, held, meta, think]), false, 'a system reminder is no message of the user');
+  assert.equal(hasContext([typed, text, ask1, held, text]), true, 'context written again before the second ask');
+  assert.equal(hasContext([think]), true, 'a tail that cannot tell fails open');
+  // A call of the same reply runs before the ask streams in: text, Edit, its result, then the ask.
+  const reply = (blocks) => ({ type: 'assistant', message: { id: 'm1', content: blocks } });
+  const textM = reply([{ type: 'text', text: 'Script parse sai, đã sửa.' }]);
+  const editM = reply([{ type: 'tool_use', id: 'e2', name: 'Edit', input: {} }]);
+  const editResult = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e2', content: 'ok' }] } };
+  const askM = reply([{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }]);
+  assert.equal(hasContext([typed, textM, editM, editResult, askM], 'q2'), true, 'the result of a call of the same reply is no boundary');
+  assert.equal(hasContext([typed, text, edit, editResult, askM], 'q2'), false, 'a result of an earlier reply still is');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'afg-'));
+  const transcript = path.join(tmp, 't.jsonl');
+  fs.writeFileSync(transcript, [typed, text, ask1, held, think].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const call = { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: sid('ask-context'), transcript_path: transcript,
+    tool_input: { questions: [{ question: 'Chạy plan ~/.claude/plans/x/261126-a.md bằng autopilot chứ?' }] } };
+  const first = hook('ask-format-guard.cjs', call);
+  assert.equal(first.status, 2);
+  assert.match(first.stderr, /text right before the ask/);
+  assert.equal(hook('ask-format-guard.cjs', call).status, 0, 'the same ask sent again passes');
+  fs.writeFileSync(transcript, [typed, text].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  assert.equal(hook('ask-format-guard.cjs', { ...call, session_id: sid('ask-context-2') }).status, 0, 'an ask after text passes');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('worker-stall: the checkout of a new worktree is no change; a file the worker writes later is', () => {
   const w = require('../claude/scripts/worker-stall.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-born-'));

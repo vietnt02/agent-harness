@@ -17,7 +17,9 @@
  *   `printenv`, bare `set`, `export -p`, `declare -p`, `echo`/`printf` naming a key the loaded file
  *   sets; `echo exit=$?`, `${KEY:+text}`, `${#KEY}`, a variable the file does not set, or one only passed to a `$(…)` inside
  *   the echo passes; a relative file after a `cd` resolves from its literal target; an unreadable
- *   file, or one loaded after a `cd` to an unknown place, counts every named variable).
+ *   file, or one loaded after a `cd` to an unknown place, counts every named variable). A print
+ *   counts only when it runs after the load: later in the command, or in a loop around the load;
+ *   one before it cannot show the file's values. Shell trace counts in any order.
  * Everything else naming a secret file (`set -a; . ./.env; set +a; <cmd>`, passing its path to a
  * `python3`/`node` script, `--env-file`, `ssh -i <key>`, `cp .env.example .env`, prose in heredocs
  * or quoted strings) passes.
@@ -270,11 +272,18 @@ function keysOf(file, cwd) {
   }
 }
 
+// A loop's header word: the first word that is no grouping or keyword (`do for …`, `then while …`).
+const loopHead = (w) => w.find((x) => !/^(\{|\(|!|time|do|then|else|elif)$/.test(x)) || '';
+
 function printedSecrets(command, isSecret, cwd) {
   const leaked = [];
   const sourced = [];
-  let printsAll = false;
-  const named = [];
+  // Shell trace prints each value as the file sets it or as a later command uses it, so it counts in
+  // any order; any other print counts only when it runs after the load: later in the command, or in a
+  // loop around the load (its next round runs after the load).
+  let trace = false;
+  const prints = [];
+  const loops = [];
   // The directory a command runs in: the last `cd`/`pushd` (`cdTarget`) in its own shell or one
   // enclosing it (a `cd` inside `(…)` or `$(…)` ends there); after `popd`, `env -C`/`sudo -D` or a
   // `cd` with no single target it is unknown (null), so a relative file loaded there cannot be read.
@@ -284,7 +293,12 @@ function printedSecrets(command, isSecret, cwd) {
   const dirIn = (scope) => cds.reduce((d, cd) => (inScope(scope, cd.scope) ? cd.dir : d), start);
   const aliases = {}; // `X=$A_KEY`: X carries A_KEY; `X=$(curl $A_KEY)` holds curl's output
   const refs = (w) => [...dropSubstitutions(String(w)).matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]);
-  for (const words of commands(command)) {
+  commands(command).forEach((words, k) => {
+    if (/^(for|while|until)$/.test(loopHead(words))) loops.push({ start: k, end: Infinity });
+    if (/^done(?:$|[<>|&;)])/.test(words[0] || '')) {
+      const last = [...loops].reverse().find((l) => l.end === Infinity);
+      if (last) last.end = k;
+    }
     const set = assignments(words);
     for (const [name, value] of set || []) aliases[name] = refs(value).flatMap((r) => [r, ...(aliases[r] || [])]);
     const { argv, stdinFiles } = splitRedirects(words);
@@ -293,19 +307,23 @@ function printedSecrets(command, isSecret, cwd) {
     const args = prog.slice(1);
     if (name === 'cd' || name === 'pushd') cds.push({ scope: words.scope, dir: cdTarget(dirIn(words.scope), args) });
     else if (name === 'popd' || prog.chdir !== undefined) cds.push({ scope: words.scope, dir: null });
-    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) sourced.push({ file: args[0], dir: dirIn(words.scope) });
+    if ((name === 'source' || name === '.') && args[0] && isSecret(args[0])) {
+      sourced.push({ file: args[0], dir: dirIn(words.scope), k, around: loops.filter((l) => l.end === Infinity) });
+    }
     const files = printerFiles(name, args);
     if (files !== null) {
       for (const f of [...files, ...stdinFiles]) if (isSecret(f)) leaked.push(f);
     }
     const vars = printsVars(argv, prog);
-    if ((name === 'set' && setsTrace(args)) || vars.all) printsAll = true;
-    named.push(...vars.names);
-  }
-  for (const { file, dir: from } of sourced) {
+    if (name === 'set' && setsTrace(args)) trace = true;
+    if (vars.all || vars.names.length) prints.push({ k, all: vars.all, names: vars.names });
+  });
+  for (const { file, dir: from, k, around } of sourced) {
+    const after = prints.filter((p) => p.k > k || around.some((l) => p.k >= l.start && p.k <= l.end));
+    const named = after.flatMap((p) => p.names);
     const keys = from === null && !path.isAbsolute(file.replace(/^~(?=\/)/, os.homedir())) ? null : keysOf(file, from || cwd);
     const carries = (n) => [n, ...(aliases[n] || [])];
-    if (printsAll || named.some((n) => keys === null || carries(n).some((k) => keys.has(k)))) leaked.push(file);
+    if (trace || after.some((p) => p.all) || named.some((n) => keys === null || carries(n).some((key) => keys.has(key)))) leaked.push(file);
   }
   return [...new Set(leaked)];
 }

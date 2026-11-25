@@ -1,7 +1,8 @@
 /**
  * shell-words.cjs - split a Bash command into simple commands, each a list of words, the way a
  * shell would read them closely enough for a guard: quotes (`'…'`, `"…"`, `$'…'`) kept together
- * (and removed), `\`+newline joined, separators outside quotes (`;` `&` `|` newline) end a command.
+ * (and removed), `\`+newline joined, separators outside quotes (`;` `&` `|` newline) end a command;
+ * an `&` of a redirection (`2>&1`, `>&2`, `<&3`, `&>file`) stays in its word.
  * A command substitution (`$(…)`, backticks, also inside `"…"`) or a subshell `(…)` is read up to
  * its own closing mark and yields its commands too; the outer word keeps the substitution's text.
  * Each command carries `.scope`, a dotted path of the subshells it runs in (`0`, `0.2`…), so a
@@ -139,6 +140,9 @@ function parse(cmd, scope, out, id) {
       const k = closeParen(cmd, i);
       sub(cmd.slice(i + 1, k));
       i = k;
+    } else if (c === '&' && ((word !== null && /[<>]$/.test(word)) || cmd[i + 1] === '>')) {
+      // `2>&1`, `>&2`, `<&3`, `&>file`: a redirection inside this command, not a separator.
+      word = (word || '') + c;
     } else if (/[;&|()\n]/.test(c)) {
       // A lone `|` (or `|&`) pipes this command's output into the next one of its scope (`pipedInto`).
       if (c === '|' && cmd[i + 1] !== '|' && cmd[i - 1] !== '|') { endWord(); words.pipe = true; }
