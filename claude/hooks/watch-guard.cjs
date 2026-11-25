@@ -220,7 +220,9 @@ process.stdin.on('end', () => {
           `Pass \`timeout: ${want}\` with run_in_background.`);
       }
       if (notes.length) once(notes.join(' Also: '));
-      process.exit(0);
+      // A `while/until … sleep` loop around a watch.sh run (`until watch.sh --once …; do sleep 30; done`)
+      // is a poll of its own: it goes on to the poll reminder below.
+      if (!shape(command).poll) process.exit(0);
     }
     const sources = [command, ...scriptsIn(command, cwd || process.cwd())];
     if (sources.some((s) => EXEMPT.test(s))) process.exit(0);

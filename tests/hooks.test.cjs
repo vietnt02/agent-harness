@@ -1675,6 +1675,10 @@ test('watch-guard: a watch.sh path inside a quoted string is text; a real run is
     `t "echo == pipe; ${W} --check x | tail -5"`, `bash -n ${W}`, `grep -n die ${W}`, `sed -n 1,9p ${W}`])
     assert.deepEqual(watchRuns(t, os.tmpdir()), [], t);
   assert.deepEqual(watchRuns(`${W} --check "x --once" --ok done`, os.tmpdir()), ['--check "" --ok done'], 'a quoted --once is no --once');
+  assert.deepEqual(watchRuns(`timeout 900 ${W} --check x --ok done --checkpoint 1200 --deadline 1h30m 2>&1 | tail -5`, os.tmpdir()),
+    ['--check x --ok done --checkpoint 1200 --deadline 1h30m 2>&1'], 'arguments read through a wrapper, up to the pipe');
+  assert.deepEqual(watchRuns(`${W} --check x \\\n  --once`, os.tmpdir()), ['--check x --once'], 'a continued line keeps its --once');
+  assert.deepEqual(watchRuns(`X=$(${W} --once --check x --ok done)`, os.tmpdir()), ['--once --check x --ok done'], 'a run inside $(…)');
   for (const t of [`${W} --once --check x --ok done`, `cd /tmp && ${W} --check x --ok done`, `bash ${W} --check x --ok done`,
     `"$HOME/.claude/scripts/watch.sh" --check x --ok done`, `nohup ${W} --check x --ok done > /tmp/l 2>&1`, `${W} --check x 2>&1 | tail -5`])
     assert.equal(watchRuns(t, os.tmpdir()).length, 1, t);
@@ -1683,6 +1687,9 @@ test('watch-guard: a watch.sh path inside a quoted string is text; a real run is
     input: JSON.stringify({ tool_name: 'Bash', session_id: s, cwd: os.tmpdir(), tool_input: input }) });
   assert.equal(run({ command: `node t.cjs "set -o pipefail; ${W} --check y --ok done"` }).status, 0, 'text in quotes runs nothing');
   assert.equal(run({ command: `${W} --check y --ok done --wait running` }).status, 2, 'the loop in the foreground is still held');
+  const poll = run({ command: `until ${W} --once --check x --ok done; do sleep 30; done` });
+  assert.equal(poll.status, 2, 'a poll loop around watch.sh --once is reminded');
+  assert.match(poll.stderr, /poll has no deadline/);
 });
 
 test('watch-guard: no timeout advice when the call already has the longest timeout', () => {
