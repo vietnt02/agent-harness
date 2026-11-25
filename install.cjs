@@ -3,28 +3,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const child_process = require('child_process');
+const { getNodeBin } = require('./tools/node-bin.cjs');
 
 function usage() {
   console.log(`Cách dùng: ${path.basename(process.argv[1] || 'install.cjs')} [--home <dir>] [--dry-run]`);
   console.log('  --home <dir>   Chỉ định thư mục home (mặc định: $HOME)');
   console.log('  --dry-run      Chỉ in các thao tác sẽ thực hiện, không thay đổi gì');
   process.exit(0);
-}
-
-function getNodeBin() {
-  if (process.platform === 'win32') {
-    return process.execPath;
-  }
-  const dirs = (process.env.PATH || '').split(path.delimiter);
-  for (const dir of dirs) {
-    const candidate = path.join(dir, 'node');
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        return candidate;
-      }
-    } catch (_) {}
-  }
-  return process.execPath;
 }
 
 function parseArgs() {
