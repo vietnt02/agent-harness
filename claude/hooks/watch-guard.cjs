@@ -20,7 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { expandHome, samePath } = require('./lib/platform.cjs');
-const { commands, program, innerScript } = require('./lib/shell-words.cjs');
+const { commands, program, innerScript, pipedInto } = require('./lib/shell-words.cjs');
 
 const EXEMPT = /#\s*watch-exempt:\s*\S/;
 const BG_TIMEOUT_MS = 1800000;
@@ -65,6 +65,11 @@ function shape(text, deep = true) {
   const loops = all.map(first).filter((w) => /^(for|while|until)$/.test(w || ''));
   const progs = all.map(program);
   const sleeps = progs.some((w) => w[0] === 'sleep');
+  // A `sleep` waits when it is the command's first work (`sleep 600; gh run view`) or sits in a loop;
+  // one after other work (`pg_ctl start; sleep 2; pg_isready`) is a pause inside a one-shot job.
+  const setup = /^(cd|pushd|popd|export|set|unset|source|\.|:|true|trap|umask|ulimit|shopt)$/;
+  const firstWork = progs.find((w) => w.length && !setup.test(w[0]));
+  let waitSleeps = !!firstWork && firstWork[0] === 'sleep';
   const isRemote = (w) => w[0] === 'ssh' || w[0] === 'airflow' ||
     (w[0] === 'docker' && w[1] === 'exec') || ((w[0] === 'gh' || w[0] === 'glab') && w[1] === 'api');
   const remote = progs.some(isRemote);
@@ -89,7 +94,7 @@ function shape(text, deep = true) {
       if (open.some((l) => l.kind !== 'for')) waitRemote = true;
       open.forEach((l) => { l.remote = true; });
     }
-    if (open.length && progs[k][0] === 'sleep') open.forEach((l) => { l.sleeps = true; });
+    if (open.length && progs[k][0] === 'sleep') { waitSleeps = true; open.forEach((l) => { l.sleeps = true; }); }
     // `done<file` or `done>out` stays one word; a loop left open (a form not seen here) is judged at the end.
     if (/^done(?:$|[<>|&;)])/.test(w[0]) && open.length) close(open.pop());
   });
@@ -101,6 +106,7 @@ function shape(text, deep = true) {
     wait,
     poll,
     sleeps: sleeps || inner.some((x) => x.sleeps) || own.some((x) => x.sleeps),
+    waitSleeps: waitSleeps || inner.some((x) => x.waitSleeps) || own.some((x) => x.waitSleeps),
     remote: remote || own.some((x) => x.remote),
     loopRemote: loopRemote || own.some((x) => x.loopRemote),
     longRemote: longRemote || own.some((x) => x.longRemote),
@@ -122,6 +128,18 @@ function watchRuns(text, cwd) {
   return runs;
 }
 
+// A watch.sh run piped into another command (`| tail -5`): the pipe's exit code is the last
+// command's, so REFUSED (5), TIMEOUT (4) or CHECKPOINT (6) reads as exit 0. `pipefail` keeps it.
+function pipedWatch(text, cwd) {
+  if (/\bpipefail\b/.test(text)) return false;
+  const all = commands(text);
+  return all.some((w, k) => {
+    if (program(w)[0] !== 'watch.sh') return false;
+    const raw = w.find((x) => /watch\.sh$/.test(x));
+    return !!raw && samePath(path.resolve(cwd, expand(raw)), WATCH_PATH) && pipedInto(all, k).length > 0;
+  });
+}
+
 // Script files the command runs, e.g. `bash /tmp/w.sh` or `./w.sh`.
 function scriptsIn(text, cwd) {
   const command = dropHeredocs(text);
@@ -133,7 +151,7 @@ function scriptsIn(text, cwd) {
     .map((p) => fs.readFileSync(p, 'utf8'));
 }
 
-module.exports = { watchRuns, scriptsIn, expand, shape };
+module.exports = { watchRuns, scriptsIn, expand, shape, pipedWatch };
 if (require.main !== module) return;
 
 let raw = '';
@@ -157,6 +175,10 @@ process.stdin.on('end', () => {
         process.stderr.write('watch-guard: the watch.sh loop runs with run_in_background, never in the ' +
           'foreground: report what is ready first, then wait in the background. Foreground is only for --once.\n');
         process.exit(2);
+      }
+      if (bg && pipedWatch(command, cwd || process.cwd())) {
+        once('watch-guard: a pipe after watch.sh (`| tail`) hides its exit code: REFUSED, TIMEOUT or CHECKPOINT ' +
+          'then reads as exit 0, as if the wait were done. Drop the pipe (its report is short) or put `set -o pipefail;` first.');
       }
       const limit = Number(input.timeout) || BG_TIMEOUT_MS;
       // A watcher reports at the sooner of its --deadline (TIMEOUT) and its --checkpoint (default 600 s).
@@ -192,7 +214,7 @@ process.stdin.on('end', () => {
         'A `for` over up to 5 items written out, with no `sleep`, passes.');
     }
     // In the background, a loop waits when it sleeps or calls out each round; `while read` over input does not.
-    if (!shapes.some((x) => (bg ? x.poll || x.waitRemote || x.sleeps : x.poll))) process.exit(0);
+    if (!shapes.some((x) => (bg ? x.poll || x.waitRemote || x.waitSleeps : x.poll))) process.exit(0);
     once(
       (bg ? 'watch-guard: background loops go through ~/.claude/scripts/watch.sh (see --help): '
         : 'watch-guard: a foreground `while/until … sleep` poll has no deadline of its own. ' +

@@ -52,7 +52,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
 - Before "done", name where Viet will see the change and look exactly there. A ratio names its
   denominator, exclusions and every miss by identifier.
 - Reviewing code: report everything you find, no severity filter unless Viet asks. After fixing
-  review findings, one last review round on the diff only, then stop. Orca review rounds follow the
+  review findings, one last review round on the fix only (the diff since the reviewed commit), then stop. Orca review rounds follow the
   stop rule Viet set: **Tiêu chí dừng** in `ntv-orca` § 4.
 - Reviewing someone's bug fix (its author's own check is this section's first bullet): reproduce the bug first
   with a free read on the runtime the PR/MR blames (a log, a run's output, whether a setting is set
@@ -64,7 +64,7 @@ description: "How Claude does execution work itself: before Claude itself edits 
 - The non-author review of your own change (`CLAUDE.md` § Delegation) goes, by default, to an
   Orca worker `agy gemini-4-neon high` reading the pushed PR/MR, spawned per `ntv-orca`; a Claude
   subagent only when Viet names one. A change to anything in `~/.claude`, the harness repo it installs
-  from, or a repo's `.claude/` or agent rules (`CLAUDE.md`, `AGENTS.md`), whoever wrote it, is reviewed by a Claude subagent: only an agent running this
+  from, or a repo's `.claude/` or agent rules (`CLAUDE.md`, `AGENTS.md`), whoever wrote it, is reviewed by a Claude subagent, called with `effort: high` like every reviewer: only an agent running this
   harness can judge a hook's contract or how a rule is read; never Codex or agy. Its brief names the
   commands agents actually write, never a hunt for routes around the hook (`ntv-kaizen`). In a doc, the
   account of what happened in an incident or investigation needs no reviewer; any part stating how a

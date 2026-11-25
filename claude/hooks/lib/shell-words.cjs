@@ -139,6 +139,9 @@ function parse(cmd, scope, out, id) {
       const k = closeParen(cmd, i);
       sub(cmd.slice(i + 1, k));
       i = k;
+    } else if (c === '&' && ((word !== null && /[<>]$/.test(word)) || cmd[i + 1] === '>')) {
+      // `2>&1`, `>&2`, `<&3`, `&>file`: a redirection inside this command, not a separator.
+      word = (word || '') + c;
     } else if (/[;&|()\n]/.test(c)) {
       // A lone `|` (or `|&`) pipes this command's output into the next one of its scope (`pipedInto`).
       if (c === '|' && cmd[i + 1] !== '|' && cmd[i - 1] !== '|') { endWord(); words.pipe = true; }
