@@ -272,6 +272,10 @@ test('ask-batch-guard: a plan\'s final gate answered with anything but its yes i
   const other = gate('g3', 'Chạy plan ~/.claude/plans/-x/261127-other.md ở chế độ autopilot?').message.content[0].input;
   assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Chưa chạy'), gate('g3')), other), null, 'another plan\'s gate passes');
   assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Có, chạy'), gate('g2')), next), null, 'a typed "có" in the box is a yes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'có'), gate('g2')), next), null, 'a bare "có" is a yes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'có vài vấn đề: 1. login trước đi đã'), gate('g2')), next), 'g1',
+    '"có …" that opens an objection is no yes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'chạy autopilot, nhưng đổi bước 3'), gate('g2')), next), null, 'a run word with a change is a yes');
   const timedOut = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'g1',
     content: 'No response after 300s — the user may be away.' }] } };
   assert.equal(repeatGate(recs(gate('g1'), timedOut, gate('g2')), next), null, 'a gate the user never answered in time was not seen');

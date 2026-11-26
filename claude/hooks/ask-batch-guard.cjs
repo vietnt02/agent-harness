@@ -92,7 +92,9 @@ function spacedAsk(records, next) {
 }
 
 const GATE = /autopilot/i;
-const YES = /^(chạy|run|yes|có|ok|duyệt|đồng ý|chốt|làm hết)(?=$|[^\p{L}])/iu;
+// A run word opens the answer ("Chạy autopilot, nhưng đổi …" approves with a change); a bare assent counts
+// only alone or before a run word ("có", "có, chạy"), since "có 2 phiếu cần đổi …" opens an objection.
+const YES = /^(?:(?:chạy|run|chốt|làm hết)(?=$|[^\p{L}])|(?:có|ok|yes|đồng ý|duyệt)[\s,.!]*(?:(?:chạy|run)(?=$|[^\p{L}]).*)?$)/iu;
 // An ask result the user never saw: timed out, interrupted, rejected by validation, or held by a hook.
 const UNSEEN = /^(PreToolUse:AskUserQuestion hook error|No response after|\[Tool call interrupted|<tool_use_error>)/;
 const gatePlans = (input) => {
