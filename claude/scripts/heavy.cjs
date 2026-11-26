@@ -272,7 +272,7 @@ async function main() {
     }
     logRun({
       at: new Date(t0).toISOString(), root: ROOT, cmd: commandName(cmd), waitedMs, slotsBusy: others, slots: SLOTS,
-      slot: Boolean(got && got.file), reason: reason || (child ? null : 'killed-waiting'),
+      slot: Boolean(got && got.file), reason,
       pressureArrive: arrive.pressure, pressureStart: started.pressure, pressureEnd: pressure(),
       freePctArrive: arrive.freePct, freePct: started.freePct, swapMb: started.swapMb, durationMs: Date.now() - ran, exit: code,
     });

@@ -229,10 +229,12 @@ test('the log keeps a build tool\'s subcommand words but never an argument', { t
   fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'p', version: '1.0.0', private: true, scripts: { build: 'node -e 0' } }));
   const slots = tmp('heavy-slots-');
   await done(run(tmp('heavy-wt-'), slots, 1, [process.execPath, 'secret-token-123'], { HEAVY_LOG: log }));
+  // A plain lowercase word after a program that is no build tool (a client name, a password) is an argument too.
+  await done(run(tmp('heavy-wt-'), slots, 1, [process.execPath, 'acmeclient'], { HEAVY_LOG: log }));
   await done(run(pkg, slots, 1, ['npm', 'run', 'build'], { HEAVY_LOG: log }));
   await done(run(pkg, slots, 1, ['npm', 'run', 'Ghp9secret'], { HEAVY_LOG: log }));
-  assert.deepEqual(readLog(log).map((x) => x.cmd), ['node', 'npm run build', 'npm run']);
-  assert.ok(!/secret/i.test(fs.readFileSync(log, 'utf8')), 'an argument reached the log');
+  assert.deepEqual(readLog(log).map((x) => x.cmd), ['node', 'node', 'npm run build', 'npm run']);
+  assert.ok(!/secret|acmeclient/i.test(fs.readFileSync(log, 'utf8')), 'an argument reached the log');
 });
 
 test('the log names a run that gave up waiting, and one killed while waiting', { timeout: 20000 }, async () => {
@@ -289,6 +291,15 @@ test('the log turns over past HEAVY_LOG_MAX_BYTES, keeping one old file', { time
     assert.ok(fs.readFileSync(`${log}.1`, 'utf8').startsWith(`${round}`), `round ${round}: the old file is not the latest`);
   }
   assert.deepEqual(fs.readdirSync(dir).sort(), ['heavy-log.jsonl', 'heavy-log.jsonl.1']);
+});
+
+test('a command that cannot even be spawned is logged with its exit, not as killed while waiting', { timeout: 20000 }, async () => {
+  const log = path.join(tmp('heavy-logdir-'), 'heavy-log.jsonl');
+  const r = await done(run(tmp('heavy-wt-'), tmp('heavy-slots-'), 1, [''], { HEAVY_LOG: log }));
+  assert.equal(r.code, 127);
+  const [x] = readLog(log);
+  assert.equal(x.exit, 127);
+  assert.equal(x.reason, null);
 });
 
 test('a missing command fails with 127 and frees its slot', { timeout: 20000 }, async () => {
