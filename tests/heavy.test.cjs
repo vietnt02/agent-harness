@@ -99,7 +99,8 @@ test('a slot whose holder was killed is taken back', { timeout: 20000 }, async (
   const aExit = new Promise((resolve) => a.on('exit', resolve));
   a.kill('SIGKILL');
   await aExit;
-  process.kill(childPid, 'SIGKILL');
+  // On Windows the command dies with its wrapper (libuv's job object); elsewhere it outlives it.
+  try { process.kill(childPid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; }
   assert.equal(slotFiles(slots).length, 1, 'the killed wrapper left its slot behind');
   const t0 = Date.now();
   const r = await done(run(tmp('heavy-wt-b-'), slots, 1, hold(log, 'b', 50)));
