@@ -195,17 +195,20 @@ async function main() {
       try { if (child) child.kill(sig); } catch (_) { /* already gone */ }
     });
   }
-  const start = (viaCmd) => {
+  const start = (shim) => {
+    const viaCmd = Boolean(shim);
     try {
-      child = viaCmd ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${cmdLine(cmd)}"`],
+      child = viaCmd ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${cmdLine([shim, ...cmd.slice(1)])}"`],
         { stdio: 'inherit', windowsVerbatimArguments: true }) : spawn(cmd[0], cmd.slice(1), { stdio: 'inherit' });
     } catch (e) {
-      if (!viaCmd && onCmdShim(e)) return start(true);
+      const found = viaCmd ? null : cmdShim(e);
+      if (found) return start(found);
       process.stderr.write(`heavy: cannot start ${cmd[0]}: ${e.message}\n`);
       return finish(127);
     }
     child.on('error', (e) => {
-      if (!viaCmd && onCmdShim(e)) return start(true);
+      const found = viaCmd ? null : cmdShim(e);
+      if (found) return start(found);
       process.stderr.write(`heavy: cannot start ${cmd[0]}: ${e.message}\n`);
       return finish(127);
     });
@@ -216,13 +219,22 @@ async function main() {
     });
     return undefined;
   };
-  start(false);
+  start(null);
 }
 
-// Windows starts only .exe files directly: a bare name that failed (npm is npm.cmd) is retried through
-// cmd.exe, which finds .cmd and .bat on PATH.
-function onCmdShim(e) {
-  return process.platform === 'win32' && (e.code === 'ENOENT' || e.code === 'EINVAL') && !/[\\/]/.test(cmd[0]);
+// Windows starts only .exe files directly: a command that failed to start and exists as a .cmd or .bat
+// (npm is npm.cmd) is retried through cmd.exe with that file's path; one that exists nowhere is not, so it
+// still ends as 127.
+function cmdShim(e) {
+  if (process.platform !== 'win32' || (e.code !== 'ENOENT' && e.code !== 'EINVAL')) return null;
+  const name = cmd[0];
+  const isShim = (f) => /\.(?:cmd|bat)$/i.test(f) && fs.existsSync(f);
+  if (/[\\/]/.test(name)) return isShim(name) ? name : null;
+  const names = /\.(?:cmd|bat)$/i.test(name) ? [name] : [`${name}.cmd`, `${name}.bat`];
+  for (const dir of (process.env.PATH || process.env.Path || '').split(path.delimiter).filter(Boolean)) {
+    for (const n of names) if (isShim(path.join(dir, n))) return path.join(dir, n);
+  }
+  return null;
 }
 // One cmd.exe command line; an argument holding spaces or cmd metacharacters is quoted.
 function cmdLine(words) {
