@@ -107,9 +107,10 @@ và yêu cầu:
   dài, và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo tin đó trước, tin đã làm
   theo thì bỏ qua khi thấy lại (`--peek` không đánh dấu đã đọc; worker Chat có nhận tin `send` giữa
   lượt hay không tuỳ bản Orca, xem `references/orca.md`);
-- lệnh nặng (build, cả bộ test, cài deps) chạy qua `node ~/.claude/scripts/heavy.cjs -- <lệnh>` (lệnh
-  ghép hay có biến môi trường: `-- sh -c '<lệnh>'`; Windows: `-- cmd /c <lệnh>`), để các worker chờ lượt
-  slot thay vì build cùng lúc; dev server không qua slot (`references/lessons.md`);
+- lệnh nặng (build, cả bộ test, typecheck, cài deps) chạy qua `node ~/.claude/scripts/heavy.cjs --
+  <lệnh>` (npm, pnpm, yarn chạy như viết trên mọi hệ; lệnh ghép hay có biến môi trường: `-- sh -c
+  '<lệnh>'`, Windows `-- cmd /c "<lệnh>"`), chạy nền khi có thể phải chờ slot, để các worker chờ lượt thay
+  vì build cùng lúc; dev server và lệnh watch không qua slot (`references/lessons.md`);
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;

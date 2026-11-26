@@ -25,9 +25,10 @@
  *   - Direct interactive session (non-Orca worker):
  *     6. `nap-context-repo-con` (when in an umbrella workspace with `.claude/hooks/nap-context-repo-con.cjs`, reminds once per sub-repo/worktree per session, on the first non-Read tool in `repos/*`, to read `AGENTS.md`; the reminder reaches agy before its next step)
  *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
+ *     5c. `heavy-reminder` (one reminder per conversation to run heavy commands through heavy.cjs;
+ *        workers too, delivered at their next step)
  *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill`, `trigger --conf` and a docker write over ssh when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
- *     5c. `heavy-reminder` (one reminder per conversation to run heavy commands through heavy.cjs; workers too)
  *     9. `main-checkout-guard` (git writes into a main checkout: blocked once; `git -c core.hooksPath=...`: always)
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
  *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md; session-note caps come back as a reminder)
@@ -303,7 +304,18 @@ function runClaudeHook(scriptName, claudePayload, timeoutMs = 8000) {
 }
 
 function handlePreInvocation(payload) {
-  if (isDispatchedWorker(payload)) return;
+  if (isDispatchedWorker(payload)) {
+    // A worker gets only what its own tool calls queued (the heavy reminder, step 5c), none of the
+    // session's workflow reminders.
+    const state = loadState(payload);
+    if (state.pendingEphemeral) {
+      const text = state.pendingEphemeral;
+      delete state.pendingEphemeral;
+      saveState(payload, state);
+      process.stdout.write(JSON.stringify({ injectSteps: [{ ephemeralMessage: text }] }));
+    }
+    return;
+  }
 
   const cwd = payload.cwd || (payload.workspacePaths && payload.workspacePaths[0]) || process.cwd();
   const state = loadState(payload);

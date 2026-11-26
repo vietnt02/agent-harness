@@ -825,13 +825,18 @@ test('heavy-reminder: a heavy command gets one reminder a session; wrapped, ligh
     assert.equal(bash(light, s2), '', `reminded on: ${light}`);
   }
   for (const heavy of ['bash -c "npm ci"']) assert.match(bash(heavy, s2), /npm ci/);
+  assert.match(bash('cat heavy.cjs && npm test', sid('heavy')), /npm test/, 'a file named heavy.cjs turned the reminder off');
 });
 
 test('heavy-reminder: each common heavy shape is recognised, each light one is not', () => {
   const { findHeavy } = require(path.join(HOOKS, 'heavy-reminder.cjs'));
   for (const c of ['npm run build', 'npm run test:unit', 'npm test', 'pnpm build', 'npm ci', 'npm install', 'npm i', 'yarn',
-    'yarn install', 'bun install', 'npx vitest run', 'pnpm exec jest', 'pytest -q', 'python3 -m pytest tests', 'next build',
-    'npx playwright test', 'FOO=1 npm test']) assert.ok(findHeavy(c), `missed: ${c}`);
-  for (const c of ['npm run lint', 'npm run dev', 'yarn dev', 'pnpm add lodash', 'npm --version', 'git status', 'ls -la'])
-    assert.equal(findHeavy(c), null, `took a light command for heavy: ${c}`);
+    'yarn install', 'bun install', 'npx vitest run', 'vitest --run', 'pnpm exec jest', 'pytest -q', 'python3 -m pytest tests',
+    'next build', 'npx playwright test', 'FOO=1 npm test', 'pnpm -C app build', 'pnpm --filter web build', 'pnpm -w install',
+    'npm --prefix app run build', 'npm -w web run build', 'yarn workspace web build', 'uv run pytest', 'npx tsc --noEmit',
+    'npm run typecheck']) assert.ok(findHeavy(c), `missed: ${c}`);
+  // Light commands, and watchers or servers, which would hold a slot for the whole task.
+  for (const c of ['npm run lint', 'npm run dev', 'yarn dev', 'npm run start', 'pnpm add lodash', 'npm --version', 'git status',
+    'ls -la', 'bun', 'tsc --version', 'npm run build:watch', 'npm test -- --watch', 'npx jest --watch', 'npx vitest', 'vitest'])
+    assert.equal(findHeavy(c), null, `took a light or long-running command for heavy: ${c}`);
 });
