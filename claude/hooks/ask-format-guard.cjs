@@ -41,6 +41,13 @@ const NOTE =
   'list and any draft in your message just before the ask (it stays in view while the ask waits), and keep ' +
   'the question to one line that names what it decides (communication-style.md § Format); then ask again.';
 
+// Text Claude writes right before a tool call is stored as a thinking block whose signature decodes to
+// hold "narration": the user sees it, so it is text here; other thinking stays hidden.
+function isNarration(b) {
+  if (b?.type !== 'thinking' || !b.signature) return false;
+  try { return Buffer.from(String(b.signature), 'base64').includes('narration'); } catch { return false; }
+}
+
 // Whether the reply holds text of its own after the last tool result or user message, before the ask
 // `askId`: thinking and other tool calls of the same reply are skipped, and so are the results of those
 // calls (Claude Code runs a call of the reply before the next one streams in: text, Edit, its result,
@@ -58,7 +65,7 @@ function hasContext(records, askId) {
     if (r?.type === 'assistant' && Array.isArray(content)) {
       for (let j = content.length - 1; j >= 0; j--) {
         const b = content[j];
-        if (b?.type === 'text' && String(b.text || '').trim()) return true;
+        if ((b?.type === 'text' && String(b.text || '').trim()) || isNarration(b)) return true;
       }
     } else if (r?.type === 'user' && !r.isMeta) {
       if (typeof content === 'string') return false;
@@ -86,6 +93,23 @@ function tailRecords(file, bytes = 256 * 1024) {
   }
 }
 
+// The transcript can lag behind the ask: until the ask's own record shows, read it again every POLL_MS,
+// for up to WAIT_MS; never shown, the tail cannot tell, so the ask passes.
+const WAIT_MS = Math.max(0, Number(process.env.ASK_GUARD_WAIT_MS) || 1000);
+const POLL_MS = Math.max(10, Number(process.env.ASK_GUARD_POLL_MS) || 100);
+const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const holdsCall = (records, id) => records.some((r) => r?.type === 'assistant' && Array.isArray(r?.message?.content) &&
+  r.message.content.some((b) => b?.type === 'tool_use' && b.id === id));
+function contextOf(file, askId) {
+  const until = Date.now() + WAIT_MS;
+  for (;;) {
+    const records = tailRecords(file);
+    if (!askId || holdsCall(records, askId)) return hasContext(records, askId);
+    if (Date.now() >= until) return true;
+    sleepMs(POLL_MS);
+  }
+}
+
 const NO_CONTEXT =
   'ask-format-guard: no text of yours stands between the last tool result (or the user\'s message) and this ask, ' +
   'so the box shows with nothing above it to decide from; thinking is not shown (Orca folds it into "Thought for Ns"). ' +
@@ -106,7 +130,7 @@ process.stdin.on('end', () => {
       process.stderr.write(`${NOTE}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
       process.exit(2);
     }
-    if (input.transcript_path && !hasContext(tailRecords(input.transcript_path), input.tool_use_id) &&
+    if (input.transcript_path && !contextOf(input.transcript_path, input.tool_use_id) &&
       firstTime(input.session_id, 'ask-format-guard-context', JSON.stringify(input.tool_input?.questions || []))) {
       process.stderr.write(`${NO_CONTEXT}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
       process.exit(2);
