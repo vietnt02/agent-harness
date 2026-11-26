@@ -171,11 +171,13 @@ function receipts(output, max = MAX_IDS) {
     } catch (_) { /* not a receipt */ }
   }
   // A filtered receipt: `"dispatch":"ctx_…"` fields, bare `ctx_…` lines (`jq -r .result.dispatchId`),
-  // or the text receipt (`Worker ctx_… [ready] for task_…`).
+  // the text receipt (`Worker ctx_… [ready] for task_…`), or the one-line concise one
+  // (`dispatchId=ctx_… taskId=… state=ready …`).
   if (!ids.length && !/"workers"\s*:/.test(output)) {
     for (const m of output.matchAll(/"dispatch(?:Id)?"\s*:\s*"(ctx_[0-9a-f]+)"/g)) ids.push(m[1]);
     for (const m of output.matchAll(/^(ctx_[0-9a-f]+)\s*$/gm)) ids.push(m[1]);
     for (const m of output.matchAll(/^Worker (ctx_[0-9a-f]+) \[/gm)) ids.push(m[1]);
+    for (const m of output.matchAll(/\bdispatchId=(ctx_[0-9a-f]+)/g)) ids.push(m[1]);
   }
   if (/^\s*(error:?\s*)?selector_not_found\b/im.test(output)) codes.push('selector_not_found');
   return { ids: [...new Set(ids)].slice(0, max), errors: [...new Set(errors)], codes: [...new Set(codes)] };

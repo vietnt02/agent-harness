@@ -965,6 +965,8 @@ test('worker-start-receipt: a text receipt gives its dispatch; selector_not_foun
     'Worker ctx_aff668246327 [ready] for task_1\nWorker ctx_c7112062884c [ready] for task_2\n';
   assert.deepEqual(receipts(out).ids, ['ctx_1ad8a46f5dff', 'ctx_aff668246327', 'ctx_c7112062884c']);
   assert.deepEqual(receipts('Started. See Worker ctx_1ad8a46f5dff [ready]').ids, [], 'only a receipt line');
+  assert.deepEqual(receipts('dispatchId=ctx_f3333b084285 taskId=task_d3ffdbb94a2e runId=run_e33a605fccd8 runCreated=true state=ready agent=codex model=gpt-6.2-sol').ids,
+    ['ctx_f3333b084285'], 'the one-line concise receipt');
   const err = '{"ok":false,"error":{"code":"selector_not_found","message":"No Orca workspace matched the worktree selector path:/x"}}';
   assert.deepEqual(receipts(err).errors, ['No Orca workspace matched the worktree selector path:/x'], 'the message alone, as the guide is searched');
   assert.deepEqual(receipts(err).codes, ['selector_not_found']);
