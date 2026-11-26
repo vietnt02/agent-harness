@@ -41,17 +41,12 @@ const NOTE =
   'list and any draft in your message just before the ask (it stays in view while the ask waits), and keep ' +
   'the question to one line that names what it decides (communication-style.md § Format); then ask again.';
 
-// Text Claude writes right before a tool call is stored as a thinking block whose signature decodes to
-// hold "narration": the user sees it, so it is text here; other thinking stays hidden.
-function isNarration(b) {
-  if (b?.type !== 'thinking' || !b.signature) return false;
-  try { return Buffer.from(String(b.signature), 'base64').includes('narration'); } catch { return false; }
-}
-
 // Whether the reply holds text of its own after the last tool result or user message, before the ask
 // `askId`: thinking and other tool calls of the same reply are skipped, and so are the results of those
 // calls (Claude Code runs a call of the reply before the next one streams in: text, Edit, its result,
-// the ask); true when the tail cannot tell.
+// the ask); true when the tail cannot tell. Thinking is never text here, narration included: the server
+// may store text written before a tool call as a thinking block whose signature marks it narration, and
+// Orca folds that block like any thinking.
 function hasContext(records, askId) {
   const replyOf = new Map();
   for (const r of records) {
@@ -65,7 +60,7 @@ function hasContext(records, askId) {
     if (r?.type === 'assistant' && Array.isArray(content)) {
       for (let j = content.length - 1; j >= 0; j--) {
         const b = content[j];
-        if ((b?.type === 'text' && String(b.text || '').trim()) || isNarration(b)) return true;
+        if (b?.type === 'text' && String(b.text || '').trim()) return true;
       }
     } else if (r?.type === 'user' && !r.isMeta) {
       if (typeof content === 'string') return false;
@@ -94,9 +89,12 @@ function tailRecords(file, bytes = 256 * 1024) {
 }
 
 // The transcript can lag behind the ask: until the ask's own record shows, read it again every POLL_MS,
-// for up to WAIT_MS; never shown, the tail cannot tell, so the ask passes.
-const WAIT_MS = Math.max(0, Number(process.env.ASK_GUARD_WAIT_MS) || 1000);
-const POLL_MS = Math.max(10, Number(process.env.ASK_GUARD_POLL_MS) || 100);
+// for up to WAIT_MS; never shown, the tail cannot tell, so the ask passes. Unset, empty or not a number
+// keeps the default; 0 is a value (no wait).
+const envMs = (v, fallback, min) =>
+  (v === undefined || String(v).trim() === '' || !Number.isFinite(Number(v)) ? fallback : Math.max(min, Number(v)));
+const WAIT_MS = envMs(process.env.ASK_GUARD_WAIT_MS, 1000, 0);
+const POLL_MS = envMs(process.env.ASK_GUARD_POLL_MS, 100, 10);
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const holdsCall = (records, id) => records.some((r) => r?.type === 'assistant' && Array.isArray(r?.message?.content) &&
   r.message.content.some((b) => b?.type === 'tool_use' && b.id === id));
@@ -115,7 +113,7 @@ const NO_CONTEXT =
   'so the box shows with nothing above it to decide from; thinking is not shown (Orca folds it into "Thought for Ns"). ' +
   'Write the context (what you found, what each option changes) as text right before the ask, then ask again.';
 
-module.exports = { runOnQuestions, hasContext };
+module.exports = { runOnQuestions, hasContext, envMs };
 if (require.main !== module) return;
 
 let raw = '';

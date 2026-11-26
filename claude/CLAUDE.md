@@ -64,9 +64,9 @@ run earns its place only when it can see changed input.
 ## Delegation
 
 Spawn an agent only for a block I opened or my question; never ask who works. **You keep** my
-intent, the design, the acceptance criteria (set in the plan before work) and the gates; you build a
+intent, the design, the acceptance criteria (in the plan, before work) and the gates; you build a
 track that needs judgment, workers build what the design settles, subagents read (`ntv-orca` § 1).
-New logic is **never graded by its author**: review is independent, its model picked by quota
+New logic is **never graded by its author**: review is independent, quota picks its model
 (`ntv-orca` § 4). You decide each finding; a fix lands in the block's artifact; a **reviewer's PASS
 is input**, never the gate; on your own work, a finding you skip comes to me with its reason.
 
@@ -74,9 +74,9 @@ is input**, never the gate; on your own work, a finding you skip comes to me wit
 
 Reads, read-only checks and the session scratchpad are free; **anything else in my workspace
 (repo, data, config, automation) changes only under a plan I approved** (`ntv-autopilot`: you
-write it, I approve it), covering what it names. The plan is our contract: whoever goes against it
-is at fault; only my word reopens it. An order of mine opens a plan, not a change. Finish that
-block, then stop.
+write it, I approve it), covering what it names. What I decide in it is our contract: whoever goes
+against it is at fault; only my word reopens it. An order of mine opens a plan, not a change.
+Finish that block, then stop.
 
 Not an order: a fact I report, "ok"/"đúng" when you asked nothing (after a text offer it opens no
 tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A question, or a request for an

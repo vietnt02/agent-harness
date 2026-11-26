@@ -718,14 +718,28 @@ test('ask-format-guard: an ask with no text of the reply since the last tool res
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('ask-format-guard: text shown before a tool call counts though stored as narration thinking', () => {
+test('ask-format-guard: thinking is no context, even a block whose signature marks it narration', () => {
   const { hasContext } = require('../claude/hooks/ask-format-guard.cjs');
   const typed = { type: 'user', message: { content: 'chốt plan nhé' } };
-  const sig = (s) => Buffer.from(`\x12\x08${s}\x1a\x04`).toString('base64');
-  const narr = { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Claude đang chờ CI.', signature: sig('narration') }] } };
-  const hidden = { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'reasoning', signature: sig('reasoning') }] } };
-  assert.equal(hasContext([typed, narr]), true, 'narration is shown to the user');
-  assert.equal(hasContext([typed, hidden]), false, 'thinking that is not narration stays hidden');
+  // The signature header as Claude Code 2.1.332 transcripts carry it (field 2 > field 1 > field 8 names the
+  // block kind), then a nonce; the encrypted body is left out. Orca folds both kinds into "Thought for Ns".
+  const sig = (kind) => {
+    const inner = Buffer.concat([Buffer.from([0x08, 0x14, 0x18, 0x02, 0x38, 0x01, 0x42, kind.length]), Buffer.from(kind)]);
+    const body = Buffer.concat([Buffer.from([0x0a, inner.length]), inner, Buffer.from([0x12, 0x0c]), Buffer.alloc(12, 0x5a)]);
+    return Buffer.concat([Buffer.from([0x08, 0x04, 0x12, body.length]), body]).toString('base64');
+  };
+  const block = (kind) => ({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Claude đang chờ CI.', signature: sig(kind) }] } });
+  assert.equal(hasContext([typed, block('narration')]), false, 'narration shows folded, so the ask has nothing above it');
+  assert.equal(hasContext([typed, block('thinking')]), false);
+});
+
+test('ask-format-guard: a wait set to 0 is no wait; unset, empty or not a number keeps the default', () => {
+  const { envMs } = require('../claude/hooks/ask-format-guard.cjs');
+  assert.equal(envMs('0', 1000, 0), 0);
+  assert.equal(envMs(undefined, 1000, 0), 1000);
+  assert.equal(envMs('', 1000, 0), 1000);
+  assert.equal(envMs('soon', 1000, 0), 1000);
+  assert.equal(envMs('5', 100, 10), 10, 'the poll keeps its floor');
 });
 
 test('ask-format-guard: a transcript that lags behind the ask is read again before holding it', async () => {

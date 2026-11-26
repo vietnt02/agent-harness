@@ -197,7 +197,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 
 ## 4. Cổng
 
-**Review.** Logic mới coordinator tự viết, ở mọi cỡ; diff logic của worker từ 30 dòng (trừ test, doc,
+**Review.** Logic coordinator tự viết hay sửa, ở mọi cỡ; diff logic của worker từ 30 dòng (trừ test, doc,
 lockfile), dưới mức đó coordinator chấm vì không phải tác giả; hoặc task chạm tiền, thư gửi khách, dữ
 liệu người khác đọc, UI hay BI → có reviewer trước khi merge (`CLAUDE.md` § Delegation: logic mới không do
 tác giả chấm).
