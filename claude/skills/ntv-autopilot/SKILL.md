@@ -39,7 +39,9 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
      with its reason; the user may override any at the gate. An irreversible or user-visible
      choice (a name others will read, a send time) is an open question, not a default, unless the
      user agreed to it (by name, or to the whole proposal that recommended it): then `chốt làm`, with
-     the user's words.
+     the user's words. A technical detail inside a proposal the user agreed to stays Claude's choice,
+     not the user's decision, unless it is irreversible or changing it alters what the user or users
+     see, the cost, or work done by hand.
    - **Out of scope**.
    - **Open questions**.
    Every action carries `chốt làm` or `chốt hoãn`; anything else, including a content review
@@ -88,9 +90,11 @@ again; the one exception is an action the user approves by name in the Report's 
 ## Report
 
 One report: `**Claude đã làm:**` with what was checked, and what was not, per action, then `**Quyết định thay
-bạn:**`, each technical choice inside a listed action that the plan did not state and that
-changes nothing the user feels, one line with its reason (a choice needing intent was parked,
-never listed here), then `**Đã park:**`, each item with why and the exact command or decision
+bạn:**`, each technical choice inside a listed action that the plan did not state, or a technical
+detail the plan or an agreed proposal named that the run changed for a reason it found, when the
+change can be undone and changes nothing the user feels (what users see, the cost, work by hand), one
+line with its reason (a choice needing intent, one that cannot be undone or one that changes what the
+user feels was parked, never listed here), then `**Đã park:**`, each item with why and the exact command or decision
 it needs. Every listed action done → `status: done`.
 
 Anything parked or surfaced: in the same turn, the report as text, then one AskUserQuestion

@@ -44,7 +44,9 @@ const NOTE =
 // Whether the reply holds text of its own after the last tool result or user message, before the ask
 // `askId`: thinking and other tool calls of the same reply are skipped, and so are the results of those
 // calls (Claude Code runs a call of the reply before the next one streams in: text, Edit, its result,
-// the ask); true when the tail cannot tell.
+// the ask); true when the tail cannot tell. Thinking is never text here, narration included: the server
+// may store text written before a tool call as a thinking block whose signature marks it narration, and
+// Orca folds that block like any thinking.
 function hasContext(records, askId) {
   const replyOf = new Map();
   for (const r of records) {
@@ -86,12 +88,32 @@ function tailRecords(file, bytes = 256 * 1024) {
   }
 }
 
+// The transcript can lag behind the ask: until the ask's own record shows, read it again every POLL_MS,
+// for up to WAIT_MS; never shown, the tail cannot tell, so the ask passes. Unset, empty or not a number
+// keeps the default; 0 is a value (no wait).
+const envMs = (v, fallback, min) =>
+  (v === undefined || String(v).trim() === '' || !Number.isFinite(Number(v)) ? fallback : Math.max(min, Number(v)));
+const WAIT_MS = envMs(process.env.ASK_GUARD_WAIT_MS, 1000, 0);
+const POLL_MS = envMs(process.env.ASK_GUARD_POLL_MS, 100, 10);
+const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const holdsCall = (records, id) => records.some((r) => r?.type === 'assistant' && Array.isArray(r?.message?.content) &&
+  r.message.content.some((b) => b?.type === 'tool_use' && b.id === id));
+function contextOf(file, askId) {
+  const until = Date.now() + WAIT_MS;
+  for (;;) {
+    const records = tailRecords(file);
+    if (!askId || holdsCall(records, askId)) return hasContext(records, askId);
+    if (Date.now() >= until) return true;
+    sleepMs(POLL_MS);
+  }
+}
+
 const NO_CONTEXT =
   'ask-format-guard: no text of yours stands between the last tool result (or the user\'s message) and this ask, ' +
   'so the box shows with nothing above it to decide from; thinking is not shown (Orca folds it into "Thought for Ns"). ' +
   'Write the context (what you found, what each option changes) as text right before the ask, then ask again.';
 
-module.exports = { runOnQuestions, hasContext };
+module.exports = { runOnQuestions, hasContext, envMs };
 if (require.main !== module) return;
 
 let raw = '';
@@ -106,7 +128,7 @@ process.stdin.on('end', () => {
       process.stderr.write(`${NOTE}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
       process.exit(2);
     }
-    if (input.transcript_path && !hasContext(tailRecords(input.transcript_path), input.tool_use_id) &&
+    if (input.transcript_path && !contextOf(input.transcript_path, input.tool_use_id) &&
       firstTime(input.session_id, 'ask-format-guard-context', JSON.stringify(input.tool_input?.questions || []))) {
       process.stderr.write(`${NO_CONTEXT}${input.session_id ? ' Said once: the same ask sent again passes.' : ''}\n`);
       process.exit(2);

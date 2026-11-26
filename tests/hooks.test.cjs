@@ -965,6 +965,13 @@ test('worker-start-receipt: a text receipt gives its dispatch; selector_not_foun
     'Worker ctx_aff668246327 [ready] for task_1\nWorker ctx_c7112062884c [ready] for task_2\n';
   assert.deepEqual(receipts(out).ids, ['ctx_1ad8a46f5dff', 'ctx_aff668246327', 'ctx_c7112062884c']);
   assert.deepEqual(receipts('Started. See Worker ctx_1ad8a46f5dff [ready]').ids, [], 'only a receipt line');
+  const concise = 'dispatchId=ctx_f3333b084285 taskId=task_d3ffdbb94a2e runId=run_e33a605fccd8 runCreated=true state=ready agent=codex model=gpt-6.2-sol';
+  assert.deepEqual(receipts(concise).ids, ['ctx_f3333b084285'], 'the one-line concise receipt');
+  // Rows in the field order Orca 1.4.277 prints for `worker-list` and `worker-show`.
+  const listed = 'dispatchId=ctx_9a1b2c3d4e5f taskId=task_9a1b2c3d4e5f state=succeeded liveness=exited terminal=term_1 terminalState=released workspace=w1 host=local\n' +
+    'dispatchId=ctx_0f1e2d3c4b5a taskId=task_0f1e2d3c4b5a runId=run_0f1e2d3c4b5a state=running stage=working liveness=alive terminal=term_2 terminalState=open workspace=w2 waitingOnHuman=false';
+  assert.deepEqual(receipts(`${concise}\n${listed}`).ids, ['ctx_f3333b084285'], 'rows of a chained worker-list or worker-show are not the new dispatch');
+  assert.deepEqual(receipts('error: worktree busy, dispatchId=ctx_dd09aa11bb22 taskId=task_1 holds it').ids, [], 'an id an error names is not it');
   const err = '{"ok":false,"error":{"code":"selector_not_found","message":"No Orca workspace matched the worktree selector path:/x"}}';
   assert.deepEqual(receipts(err).errors, ['No Orca workspace matched the worktree selector path:/x'], 'the message alone, as the guide is searched');
   assert.deepEqual(receipts(err).codes, ['selector_not_found']);

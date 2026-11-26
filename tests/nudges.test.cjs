@@ -718,6 +718,67 @@ test('ask-format-guard: an ask with no text of the reply since the last tool res
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test('ask-format-guard: thinking is no context, even a block whose signature marks it narration', () => {
+  const { hasContext } = require('../claude/hooks/ask-format-guard.cjs');
+  const typed = { type: 'user', message: { content: 'chốt plan nhé' } };
+  // The signature header as Claude Code 2.1.332 transcripts carry it (field 2 > field 1 > field 8 names the
+  // block kind), then a nonce; the encrypted body is left out. Orca folds both kinds into "Thought for Ns".
+  const sig = (kind) => {
+    const inner = Buffer.concat([Buffer.from([0x08, 0x14, 0x18, 0x02, 0x38, 0x01, 0x42, kind.length]), Buffer.from(kind)]);
+    const body = Buffer.concat([Buffer.from([0x0a, inner.length]), inner, Buffer.from([0x12, 0x0c]), Buffer.alloc(12, 0x5a)]);
+    return Buffer.concat([Buffer.from([0x08, 0x04, 0x12, body.length]), body]).toString('base64');
+  };
+  const block = (kind) => ({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Claude đang chờ CI.', signature: sig(kind) }] } });
+  assert.equal(hasContext([typed, block('narration')]), false, 'narration shows folded, so the ask has nothing above it');
+  assert.equal(hasContext([typed, block('thinking')]), false);
+});
+
+test('ask-format-guard: a wait set to 0 is no wait; unset, empty or not a number keeps the default', () => {
+  const { envMs } = require('../claude/hooks/ask-format-guard.cjs');
+  assert.equal(envMs('0', 1000, 0), 0);
+  assert.equal(envMs(undefined, 1000, 0), 1000);
+  assert.equal(envMs('', 1000, 0), 1000);
+  assert.equal(envMs('soon', 1000, 0), 1000);
+  assert.equal(envMs('5', 100, 10), 10, 'the poll keeps its floor');
+});
+
+test('ask-format-guard: a transcript that lags behind the ask is read again before holding it', async () => {
+  const { spawn } = require('child_process');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'afg-lag-'));
+  const transcript = path.join(tmp, 't.jsonl');
+  const line = (r) => `${JSON.stringify(r)}\n`;
+  const result = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'ok' }] } };
+  const reply = (blocks) => ({ type: 'assistant', message: { id: 'm9', content: blocks } });
+  const run = (session, env) => new Promise((resolve) => {
+    const c = spawn(process.execPath, [path.join(HOOKS, 'ask-format-guard.cjs')], { env: { ...process.env, ...env } });
+    let err = '';
+    c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (code) => resolve({ status: code, stderr: err }));
+    c.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', session_id: session, transcript_path: transcript,
+      tool_use_id: 'q9', tool_input: { questions: [{ question: 'Chạy plan này chứ?' }] } }));
+  });
+  try {
+    // The ask's own record never shows within the wait: the tail cannot tell, so the ask passes.
+    fs.writeFileSync(transcript, line(result));
+    assert.equal((await run(sid('afg-lag-a'), { ASK_GUARD_WAIT_MS: '300', ASK_GUARD_POLL_MS: '50' })).status, 0);
+    // Text and the ask land during the wait: read again, they pass.
+    fs.writeFileSync(transcript, line(result));
+    const late = run(sid('afg-lag-b'), { ASK_GUARD_WAIT_MS: '3000', ASK_GUARD_POLL_MS: '50' });
+    setTimeout(() => fs.appendFileSync(transcript, line(reply([{ type: 'text', text: 'Bối cảnh ở đây.' }])) +
+      line(reply([{ type: 'tool_use', id: 'q9', name: 'AskUserQuestion', input: {} }]))), 200);
+    assert.equal((await late).status, 0, 'text that landed during the wait was missed');
+    // The ask lands with no text before it: still held.
+    fs.writeFileSync(transcript, line(result));
+    const bare = run(sid('afg-lag-c'), { ASK_GUARD_WAIT_MS: '3000', ASK_GUARD_POLL_MS: '50' });
+    setTimeout(() => fs.appendFileSync(transcript, line(reply([{ type: 'tool_use', id: 'q9', name: 'AskUserQuestion', input: {} }]))), 200);
+    const held = await bare;
+    assert.equal(held.status, 2);
+    assert.match(held.stderr, /text right before the ask/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('worker-stall: the checkout of a new worktree is no change; a file the worker writes later is', () => {
   const w = require('../claude/scripts/worker-stall.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-born-'));
