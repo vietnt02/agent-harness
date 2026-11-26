@@ -93,7 +93,8 @@ function main(raw) {
   if (!hit || !firstInSession(payload.session_id)) return;
   const text = `heavy-reminder: \`${hit.slice(0, 80)}\` is a heavy command (a build, a full test suite, a typecheck, ` +
     'a dependency install). Run such commands through `node ~/.claude/scripts/heavy.cjs -- <command>` (a compound ' +
-    'one: `-- sh -c \'<command>\'`, on Windows `-- cmd /c "<command>"`), in the background when it may wait for a ' +
+    'one: `-- sh -c \'<command>\'`, also in Git Bash on Windows; from PowerShell `-- cmd /c "<command>"`), in the ' +
+    'background when it may wait for a ' +
     'slot, so the agents on this machine take turns instead of building at once (ntv-orca § 2). A dev server or a ' +
     'watcher takes no slot. Said once this session.';
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } }));

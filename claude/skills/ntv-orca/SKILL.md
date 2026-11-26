@@ -109,7 +109,8 @@ và yêu cầu:
   lượt hay không tuỳ bản Orca, xem `references/orca.md`);
 - lệnh nặng (build, cả bộ test, typecheck, cài deps) chạy qua `node ~/.claude/scripts/heavy.cjs --
   <lệnh>` (npm, pnpm, yarn chạy như viết trên mọi hệ; lệnh ghép hay có biến môi trường: `-- sh -c
-  '<lệnh>'`, Windows `-- cmd /c "<lệnh>"`), chạy nền khi có thể phải chờ slot, để các worker chờ lượt thay
+  '<lệnh>'`, cả trong Git Bash trên Windows; từ PowerShell `-- cmd /c "<lệnh>"`), chạy nền khi có thể phải
+  chờ slot, để các worker chờ lượt thay
   vì build cùng lúc; dev server và lệnh watch không qua slot (`references/lessons.md`);
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
