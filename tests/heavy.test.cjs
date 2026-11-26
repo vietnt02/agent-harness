@@ -198,6 +198,58 @@ test('npm runs through it as named, on every platform', { timeout: 60000 }, asyn
   assert.deepEqual(slotFiles(slots), []);
 });
 
+const readLog = (file) => fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+test('each heavy command leaves one log line with its numbers, never its arguments', { timeout: 20000 }, async () => {
+  const slots = tmp('heavy-slots-');
+  const log = path.join(tmp('heavy-logdir-'), 'heavy-log.jsonl');
+  const r = await done(run(tmp('heavy-wt-'), slots, 1, [process.execPath, '-e', 'setTimeout(function(){}, 300)', 'secret-token-123'],
+    { HEAVY_LOG: log }));
+  assert.equal(r.code, 0);
+  const lines = readLog(log);
+  assert.equal(lines.length, 1);
+  const x = lines[0];
+  assert.equal(x.cmd, 'node');
+  assert.equal(x.slot, true);
+  assert.equal(x.reason, null);
+  assert.equal(x.exit, 0);
+  assert.ok(x.durationMs >= 250, `durationMs ${x.durationMs}`);
+  assert.equal(typeof x.waitedMs, 'number');
+  assert.equal(typeof x.freePct, 'number');
+  assert.ok(typeof x.at === 'string' && !Number.isNaN(Date.parse(x.at)));
+  if (process.platform === 'darwin') assert.equal(typeof x.pressureStart, 'number');
+  assert.ok(!fs.readFileSync(log, 'utf8').includes('secret-token-123'), 'an argument reached the log');
+});
+
+test('the log says why a command ran without a slot', { timeout: 20000 }, async () => {
+  const file = path.join(tmp('heavy-ro-'), 'not-a-dir');
+  fs.writeFileSync(file, '');
+  const log = path.join(tmp('heavy-logdir-'), 'heavy-log.jsonl');
+  const r = await done(run(tmp('heavy-wt-'), path.join(file, 'slots'), 1, [process.execPath, '-e', '0'], { HEAVY_LOG: log }));
+  assert.equal(r.code, 0);
+  const [x] = readLog(log);
+  assert.equal(x.slot, false);
+  assert.equal(x.reason, 'no-dir');
+});
+
+test('a log that cannot be written changes nothing for the command', { timeout: 20000 }, async () => {
+  const file = path.join(tmp('heavy-ro-'), 'not-a-dir');
+  fs.writeFileSync(file, '');
+  const r = await done(run(tmp('heavy-wt-'), tmp('heavy-slots-'), 1, [process.execPath, '-e', 'process.exit(3)'],
+    { HEAVY_LOG: path.join(file, 'heavy-log.jsonl') }));
+  assert.equal(r.code, 3);
+});
+
+test('the log turns over past HEAVY_LOG_MAX_BYTES, keeping one old file', { timeout: 20000 }, async () => {
+  const log = path.join(tmp('heavy-logdir-'), 'heavy-log.jsonl');
+  fs.writeFileSync(log, 'x'.repeat(2000) + '\n');
+  const r = await done(run(tmp('heavy-wt-'), tmp('heavy-slots-'), 1, [process.execPath, '-e', '0'],
+    { HEAVY_LOG: log, HEAVY_LOG_MAX_BYTES: '1000' }));
+  assert.equal(r.code, 0);
+  assert.ok(fs.existsSync(`${log}.1`), 'no old file kept');
+  assert.equal(readLog(log).length, 1);
+});
+
 test('a missing command fails with 127 and frees its slot', { timeout: 20000 }, async () => {
   const slots = tmp('heavy-slots-');
   const r = await done(run(tmp('heavy-wt-'), slots, 1, ['heavy-no-such-command-x']));

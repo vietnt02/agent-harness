@@ -22,9 +22,17 @@
  * command runs without a slot, with a warning naming who holds them. While it waits, a line every
  * HEAVY_NOTE_EVERY seconds says so, so a waiting command is not taken for a hung one.
  *
+ * Each run appends one line to HEAVY_LOG: when it started, its worktree, the command's program and
+ * subcommand (never its arguments, which can hold a token), how long it waited, how many slots were
+ * busy, whether it ran without a slot and why, memory pressure at start and end (macOS), free RAM %,
+ * swap in use (macOS), how long it ran, its exit code. A log that cannot be written is skipped; past
+ * HEAVY_LOG_MAX_BYTES it turns over to <log>.1. The numbers decide later whether slots should count
+ * RAM rather than commands.
+ *
  * Env: HEAVY_SLOTS (default 2), HEAVY_SLOTS_DIR (default ~/.cache/agent-harness/heavy-slots),
  *      HEAVY_POLL_MS (default 2000), HEAVY_MAX_WAIT (seconds, default 1200),
- *      HEAVY_NOTE_EVERY (seconds, default 60).
+ *      HEAVY_NOTE_EVERY (seconds, default 60),
+ *      HEAVY_LOG (default ~/.cache/agent-harness/heavy-log.jsonl), HEAVY_LOG_MAX_BYTES (default 5242880).
  * State: <dir>/slot-<i>.json = { key, root, holders: [{ pid, since }] }; <dir>/.lock, a short mutex.
  */
 const fs = require('fs');
@@ -46,6 +54,8 @@ const DIR = process.env.HEAVY_SLOTS_DIR || path.join(os.homedir(), '.cache', 'ag
 const POLL_MS = Math.max(10, parseInt(process.env.HEAVY_POLL_MS || '', 10) || 2000);
 const MAX_WAIT_MS = Math.max(1, Number(process.env.HEAVY_MAX_WAIT) || 1200) * 1000;
 const NOTE_MS = Math.max(1, Number(process.env.HEAVY_NOTE_EVERY) || 60) * 1000;
+const LOG = process.env.HEAVY_LOG || path.join(os.homedir(), '.cache', 'agent-harness', 'heavy-log.jsonl');
+const LOG_MAX = Math.max(1, Number(process.env.HEAVY_LOG_MAX_BYTES) || 5 * 1024 * 1024);
 const LOCK = path.join(DIR, '.lock');
 const LOCK_STALE_MS = 30000;
 
@@ -125,22 +135,57 @@ function inUse() {
   return out;
 }
 
-// Joins this worktree's slot, or takes a free one; else returns the roots of the busy slots.
+// Joins this worktree's slot, or takes a free one; else returns the roots of the busy slots. `others`:
+// the slots other worktrees held at that moment.
 function take() {
   const slots = inUse();
   const me = { pid: process.pid, since: Date.now() };
   const own = slots.find((s) => s.slot.key === KEY);
+  const others = slots.filter((s) => s.slot.key !== KEY).length;
   if (own) {
     write(own.file, { ...own.slot, holders: [...own.slot.holders, me] });
-    return { file: own.file };
+    return { file: own.file, others };
   }
-  if (slots.length >= SLOTS) return { busy: slots.map((s) => s.slot.root) };
+  if (slots.length >= SLOTS) return { busy: slots.map((s) => s.slot.root), others };
   const used = new Set(slots.map((s) => s.index));
   let index = 0;
   while (used.has(index)) index += 1;
   const file = path.join(DIR, `slot-${index}.json`);
   write(file, { key: KEY, root: ROOT, holders: [me] });
-  return { file };
+  return { file, others };
+}
+
+// The program and its subcommand words, never an argument: words stop at an option, a path, an
+// assignment or a long word.
+function commandName(words) {
+  const out = [path.basename(String(words[0] || '')).replace(/\.(?:exe|cmd|bat)$/i, '')];
+  for (const w of words.slice(1, 3)) {
+    if (!/^[A-Za-z][\w:.-]{0,39}$/.test(w) || w.includes('/')) break;
+    out.push(w);
+  }
+  return out.join(' ');
+}
+function pressure() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const n = Number(execFileSync('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], { encoding: 'utf8', timeout: 2000 }).trim());
+    return Number.isFinite(n) ? n : null;
+  } catch (_) { return null; }
+}
+function swapUsedMb() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const m = /used\s*=\s*([\d.]+)M/.exec(execFileSync('sysctl', ['-n', 'vm.swapusage'], { encoding: 'utf8', timeout: 2000 }));
+    return m ? Math.round(Number(m[1])) : null;
+  } catch (_) { return null; }
+}
+const freePct = () => Math.round((os.freemem() / os.totalmem()) * 1000) / 10;
+function logRun(entry) {
+  try {
+    fs.mkdirSync(path.dirname(LOG), { recursive: true });
+    try { if (fs.statSync(LOG).size > LOG_MAX) fs.renameSync(LOG, `${LOG}.1`); } catch (_) { /* no log yet */ }
+    fs.appendFileSync(LOG, `${JSON.stringify(entry)}\n`);
+  } catch (_) { /* a log never changes the command's outcome */ }
 }
 
 function give(file) {
@@ -155,16 +200,21 @@ async function main() {
   let got = null;
   const t0 = Date.now();
   let noted = 0;
+  let reason = null;
+  let others = null;
+  const before = { pressure: pressure(), freePct: freePct(), swapMb: swapUsedMb() };
   try {
     fs.mkdirSync(DIR, { recursive: true });
     for (;;) {
       got = await locked(take);
+      others = got.others;
       if (got.file) break;
       const waited = Date.now() - t0;
       const held = `${got.busy.length}/${SLOTS} held by: ${got.busy.join(', ')}`;
       if (waited >= MAX_WAIT_MS) {
         process.stderr.write(`heavy: waited ${Math.round(waited / 1000)}s for a slot (${held}); running without a slot\n`);
         got = null;
+        reason = 'max-wait';
         break;
       }
       if (!noted) {
@@ -179,7 +229,10 @@ async function main() {
   } catch (e) {
     process.stderr.write(`heavy: no usable slot dir ${DIR} (${e.code || e.message}); running without a slot\n`);
     got = null;
+    reason = 'no-dir';
   }
+  const waitedMs = Date.now() - t0;
+  const ran = Date.now();
   let finished = false;
   const finish = async (code) => {
     if (finished) return;
@@ -187,6 +240,11 @@ async function main() {
     if (got && got.file) {
       try { await locked(() => give(got.file)); } catch (_) { /* the next look drops a dead holder */ }
     }
+    logRun({
+      at: new Date(t0).toISOString(), root: ROOT, cmd: commandName(cmd), waitedMs, slotsBusy: others, slots: SLOTS,
+      slot: Boolean(got && got.file), reason, pressureStart: before.pressure, pressureEnd: pressure(),
+      freePct: before.freePct, swapMb: before.swapMb, durationMs: Date.now() - ran, exit: code,
+    });
     process.exit(code);
   };
   let child = null;
