@@ -197,8 +197,10 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 
 ## 4. Cổng
 
-**Review.** Diff logic từ 30 dòng (trừ test, doc, lockfile), hoặc task chạm tiền, thư gửi khách, dữ
-liệu người khác đọc, UI hay BI → có reviewer trước khi merge, dù tác giả là worker hay coordinator.
+**Review.** Logic mới coordinator tự viết, ở mọi cỡ; diff logic của worker từ 30 dòng (trừ test, doc,
+lockfile), dưới mức đó coordinator chấm vì không phải tác giả; hoặc task chạm tiền, thư gửi khách, dữ
+liệu người khác đọc, UI hay BI → có reviewer trước khi merge (`CLAUDE.md` § Delegation: logic mới không do
+tác giả chấm).
 
 - **Độc lập là bắt buộc:** context mới, không phải phiên của tác giả hay fork của nó; nhận diff, Scope,
   mục Nghiệm thu và các câu hỏi cố định, không nhận hội thoại, lập luận hay báo cáo của tác giả; brief
