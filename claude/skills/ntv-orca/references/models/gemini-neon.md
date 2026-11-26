@@ -10,7 +10,7 @@ source: 1 phiên (4 lượt builder job có trạng thái, cùng phiên với 5 
 
 # gemini-neon
 
-Làm **builder** khi spec khớp dòng neon ở `SKILL.md` § 2 **Chọn model** (cả việc không khớp dòng nào), và làm **reviewer** (`SKILL.md` § 2, § 4). Spawn: `--agent antigravity --model gemini-4-neon --effort high` (`../antigravity.md`).
+Làm **builder** khi spec khớp dòng neon ở `SKILL.md` § 2 **Chọn model** (cả việc không khớp dòng nào), và làm **reviewer** khi chọn agy theo quota (`SKILL.md` § 4). Spawn: `--agent antigravity --model gemini-4-neon --effort high` (`../antigravity.md`).
 
 ## Giao gì / Không giao gì
 

@@ -10,7 +10,7 @@ source: 1 phiên (2 worker, 5 commit) + kinh nghiệm user
 
 # gpt-sol
 
-Chỉ dùng khi user duyệt ở manifest (`SKILL.md` § 2). Spawn: `--agent codex --model <slug> --effort high` (`~/.codex/models_cache.json`).
+Builder chỉ khi user duyệt ở manifest (`SKILL.md` § 2); reviewer, checker khi chọn theo quota (`SKILL.md` § 4). Spawn: `--agent codex --model <slug> --effort high` (`~/.codex/models_cache.json`).
 
 ## Giao gì / Không giao gì
 

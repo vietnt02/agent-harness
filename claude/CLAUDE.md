@@ -63,12 +63,12 @@ run earns its place only when it can see changed input.
 
 ## Delegation
 
-**Agents cost real money**: spawn one only for a block I opened or my question; subagents
-only for reads (`ntv-orca` § 1) or a harness change's review (`ntv-implement` § Verify); any other review, a PR of anyone's
-included, is an Orca worker (`ntv-orca` § 4). **Execution goes to Orca workers** (`ntv-orca`),
-never subagents; you do it only where `ntv-implement` allows; never ask who. New logic is **never
-graded by its author**. A worker drafts a design; you approve it. You decide each reviewer finding;
-a fix lands in the block's artifact; a **reviewer's PASS is input**, never the gate.
+Spawn an agent only for a block I opened or my question; never ask who works. **You keep** my
+intent, the design, the acceptance criteria (set in the plan before work) and the gates; you build a
+track that needs judgment, workers build what the design settles, subagents read (`ntv-orca` § 1).
+New logic is **never graded by its author**: review is independent, its model picked by quota
+(`ntv-orca` § 4). You decide each finding; a fix lands in the block's artifact; a **reviewer's PASS
+is input**, never the gate; on your own work, a finding you skip comes to me with its reason.
 
 ## Mutation gate
 

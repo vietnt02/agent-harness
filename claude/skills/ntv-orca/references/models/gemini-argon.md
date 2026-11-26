@@ -10,7 +10,7 @@ source: 2 phiên (3 PR repo Python, worker và reviewer cùng model; 4 lượt r
 
 # gemini-argon
 
-Làm **Coordinator** khi user mở `agy` trực tiếp (`../antigravity.md`); làm worker hay reviewer chỉ khi user chỉ định. Builder chọn theo `SKILL.md` § 2, reviewer mặc định là `gemini-neon` (`gemini-neon.md`).
+Làm **Coordinator** khi user mở `agy` trực tiếp (`../antigravity.md`); làm worker hay reviewer chỉ khi user chỉ định. Builder chọn theo `SKILL.md` § 2, reviewer khi chọn agy theo quota (`SKILL.md` § 4) là `gemini-neon` (`gemini-neon.md`).
 
 ## Giao gì / Không giao gì
 

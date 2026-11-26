@@ -15,7 +15,7 @@
  * without `--effort` (`--retry-of` included: agy then runs Medium, not the High ntv-orca § 2 (Chọn
  * model) requires; `--terminal` reuses a running agy), and a claude worker whose `--model` is not a
  * bare alias (opus, sonnet, fable, haiku): a full id outside Orca's catalog drops the worker's
- * `Approve for me` permission mode (ntv-orca § 2, Chọn model).
+ * `Approve for me` permission mode (ntv-orca references/orca.md).
  * A new spec (a dispatch's `--spec`/`--spec-file`, or a `task-create`) that never asks the worker to run
  * `orca orchestration check --peek` (a negated mention does not count) gets a nudge: before Orca 1.4.249
  * a Chat worker saw a coordinator's `send` only after its turn ended, and on another agent or version
@@ -25,7 +25,7 @@
  * `worker-start --help` is not a dispatch.
  * A spec or message the coordinator hands a worker (`worker-start`, `task-create`, `send`, `reply`,
  * `dispatch`) that holds a Lark or n8n production write is blocked: a worker only scouts, builds the
- * command and dry-runs it; the coordinator runs it (ntv-implement § Who works). A write is a
+ * command and dry-runs it; the coordinator runs it (ntv-orca § 1). A write is a
  * `lark-cli <domain> +<shortcut>` whose name holds no read verb (get, list, search…), a bare
  * `+<object>-<write verb>`, `lark-cli api POST|PUT|PATCH|DELETE`, or an n8n tool that changes or
  * runs a workflow (`n8n_create_*`, `n8n_update_*`, `n8n_delete_*`, `n8n_test_*`, `n8n_autofix_*`).
@@ -420,14 +420,14 @@ process.stdin.on('end', () => {
     if (writes.length && !workerSession(head) && !prodWriteAllowed(command, lines)) {
       process.stderr.write(`dispatch-split-guard: this hands a worker a production write (\`${writes[0].slice(0, 160)}\`). ` +
         'A worker only scouts, builds the command and runs it with `--dry-run`, then reports the output; the coordinator ' +
-        'runs it for real and reads it back (ntv-implement § Who works). Mark each such line `--dry-run`, or say the ' +
+        'runs it for real and reads it back (ntv-orca § 1). Mark each such line `--dry-run`, or say the ' +
         'worker must not run it. The user asked for this worker to write: add a `# Prod-write: "<their sentence>"` line.\n');
       process.exit(2);
     }
     const starts = workerStarts(command);
     if (newSpecs(command, cwd).some((spec) => spec !== null && !readsInbox(spec))) {
       notes.push('the spec never asks the worker to read its inbox mid-turn, so a correction may land only after its ' +
-        'turn (ntv-orca § 2, § 3). If you need to steer it, `send` the line: "chạy `orca orchestration check --peek` ' +
+        'turn (ntv-orca § 2, references/orca.md). If you need to steer it, `send` the line: "chạy `orca orchestration check --peek` ' +
         'trước mỗi commit, trước lệnh dài và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo trước".');
     }
     if (!starts.segs.length) say();
@@ -436,13 +436,13 @@ process.stdin.on('end', () => {
     const model = unpinnedClaudeModel(command, starts);
     if (model && firstTime(sessionId, 'dispatch-split-guard-model', command)) {
       process.stderr.write(`dispatch-split-guard: a claude worker takes a bare alias (\`--model opus\`, sonnet, ` +
-        `fable, haiku), not \`${model}\` (ntv-orca § 2, Chọn model): an id outside Orca's catalog drops the worker's ` +
+        `fable, haiku), not \`${model}\` (ntv-orca references/orca.md): an id outside Orca's catalog drops the worker's ` +
         `\`Approve for me\` mode.${again(sessionId)}\n`);
       process.exit(2);
     }
     if (missingEffort(starts) && firstTime(sessionId, 'dispatch-split-guard-effort', command)) {
       process.stderr.write('dispatch-split-guard: an antigravity worker needs a bare slug plus `--effort`, ' +
-        'its `agy models` row minus the `-low|-medium|-high|-xhigh` suffix (ntv-orca § 2, Chọn model); without it agy ' +
+        'its `agy models` row minus the `-low|-medium|-high|-xhigh` suffix (ntv-orca references/orca.md); without it agy ' +
         `runs Medium. A model with one level gets exactly that level (\`agy models\`).${again(sessionId)}\n`);
       process.exit(2);
     }

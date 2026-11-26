@@ -11,7 +11,7 @@
 ## Chọn model và Spawn Worker
 
 - **Phân vai (`SKILL.md` § 2, § 4):**
-  - Builder: `gemini-4-neon` hay `gemini-4-hydrogen` (`--effort high`) theo dấu hiệu trong spec (`SKILL.md` § 2 **Chọn model**); Checker: `gemini-4-hydrogen`; Reviewer: `gemini-4-neon`. `gemini-4-carbon`, `gemini-4-argon` làm builder hay reviewer chỉ khi user chỉ định. Mọi model Gemini chung một quota (`agy -p "/usage"`).
+  - Builder: `gemini-4-neon` hay `gemini-4-hydrogen` (`--effort high`) theo dấu hiệu trong spec (`SKILL.md` § 2 **Chọn model**); Checker, reviewer khi chọn agy theo quota (`SKILL.md` § 4): checker `gemini-4-hydrogen`, reviewer `gemini-4-neon`. `gemini-4-carbon`, `gemini-4-argon` làm builder hay reviewer chỉ khi user chỉ định. Mọi model Gemini chung một quota (`agy -p "/usage"`).
   - Coordinator (khi user mở trực tiếp): `gemini-4-argon` (`--effort high`).
   - Không dùng model Claude qua `agy`. Luôn ghi kèm tên agent (`agy gemini-4-hydrogen high`) trong manifest, spec và báo cáo để tránh nhầm quota với agent khác.
 - **Truyền đủ `--model` và `--effort`:** bỏ trống `--model` sẽ lấy model của Coordinator trong settings:

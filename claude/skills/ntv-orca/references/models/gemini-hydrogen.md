@@ -10,7 +10,7 @@ source: 2 phiên (3 PR một repo Python, cùng spec với carbon; 5 lượt bui
 
 # gemini-hydrogen
 
-Làm **builder** khi spec khớp dòng hydrogen ở `SKILL.md` § 2 **Chọn model**, và làm **checker** (`SKILL.md` § 4). Reviewer là `gemini-neon` (`gemini-neon.md`). Spawn: `--agent antigravity --model gemini-4-hydrogen --effort high` (`../antigravity.md`).
+Làm **builder** khi spec khớp dòng hydrogen ở `SKILL.md` § 2 **Chọn model**, và làm **checker** khi chọn agy theo quota (`SKILL.md` § 4). Reviewer khi chọn agy là `gemini-neon` (`gemini-neon.md`). Spawn: `--agent antigravity --model gemini-4-hydrogen --effort high` (`../antigravity.md`).
 
 ## Giao gì / Không giao gì
 
