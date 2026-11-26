@@ -4,8 +4,10 @@
  * no reply text yet. The harness records it as a `queued_command` attachment with
  * `origin.kind: "human"`; any assistant text block after it counts as the reply.
  * Never blocks; what it says comes back as additionalContext, so the reply can still put it right:
- * - A question or a request for an answer with no reply text yet (CLAUDE.md § Mutation gate: it is
- *   only answered, and nothing else runs, reads aside, until the user says go on): answer it now in
+ * - A question or a request for an answer with no reply text yet (CLAUDE.md § Mutation gate: with no
+ *   approved plan it is only answered, and nothing else runs, reads aside, until the user says go on;
+ *   under this session's approved plan it is answered and the run goes on, halting only when it disputes
+ *   what the plan decided or asks to stop, ntv-autopilot § Run): answer it now in
  *   one line, and again where communication-style.md § Format
  *   puts the answer: the turn's last text, after the last tool call, or just before the
  *   AskUserQuestion when the turn asks. A chat client may fold the line written now, before more
@@ -16,6 +18,7 @@
  */
 const fs = require('fs');
 const { isQuestion, promptText } = require('./lib/user-intent.cjs');
+const { approvedPlan } = require('./lib/approved-plan.cjs');
 
 const TAIL_BYTES = 512 * 1024;
 
@@ -62,7 +65,7 @@ process.stdin.on('data', (c) => (raw += c));
 
 process.stdin.on('end', () => {
   try {
-    const { transcript_path: transcript, agent_id: agentId } = JSON.parse(raw);
+    const { transcript_path: transcript, agent_id: agentId, session_id: sessionId, cwd } = JSON.parse(raw);
     if (!transcript || agentId) process.exit(0);
     const notes = [];
     const pending = pendingMessage(tailLines(transcript));
@@ -72,7 +75,10 @@ process.stdin.on('end', () => {
         ? `answer-first: the user asked mid-turn ("${quote}") and no reply text followed. ` +
           'Answer it now in one line, and again in the turn\'s last text: after your last tool call, or just before ' +
           'the AskUserQuestion if this turn asks (communication-style.md). The first line may be folded out of sight. ' +
-          'Until the user says go on, run nothing but reads that answer it: no write, plan or ask (CLAUDE.md § Mutation gate).'
+          (approvedPlan(sessionId, cwd, transcript)
+            ? 'This session runs an approved plan: answer, then go on with it; halt after the step under way only if ' +
+              'the message disputes what the plan decided or asks to stop (ntv-autopilot § Run).'
+            : 'Until the user says go on, run nothing but reads that answer it: no write, plan or ask (CLAUDE.md § Mutation gate).')
         : `answer-first: the user wrote mid-turn ("${quote}"). Not a question, so work goes on: ` +
           'follow it if it is an instruction, and acknowledge it in your next text.');
     }

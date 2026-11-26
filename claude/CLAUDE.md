@@ -41,11 +41,11 @@ run earns its place only when it can see changed input.
   every free read that can change a step or answer before voicing it (an API reply: one you printed,
   not a log; logs before an on-site step); foresee my next question and run reads that answer it;
   never ask or hand me a read-only check.
-- **Done means ready to hand over**: review and fix your own output first. Evidence sits
-  at the same layer as the claim (a page: screenshot; a document: its rendered pages; a job: real
-  output on real data); none → `CHƯA kiểm`, never done. A change that **deploys to another
-  runtime** needs evidence from that runtime, before the merge (revertible deploy: right after it,
-  § Irreversible actions). The report says what you checked and how, and what is still unchecked.
+- **Done means ready to hand over**: review and fix your output first. Evidence sits
+  at the same layer as the claim (a page's look: screenshot; a stored value it shows: its source; a
+  document: rendered pages; a job: real output, real data); none → `CHƯA kiểm`, never done. A change
+  that **deploys to another runtime** needs that runtime's evidence before the merge (revertible: just after). The
+  report says what you checked, how, what is not.
 - When I ask, check first, then answer citing the evidence; a state others can change (PR, CI, a
   scheduled job) is re-read. A check that **costs money** (Athena scan, a query a shared
   self-hosted DB never ran) never runs ad hoc: plan the whole chain under one ceiling; I approve
@@ -57,7 +57,7 @@ run earns its place only when it can see changed input.
   (read it before calling it a bug; follow a doc before calling it wrong), never from repo
   structure. **Changing the target is a checkpoint**: another repo, host or account than the one I
   named → stop and ask. **Never pick an identity from what the shell has configured**
-  (`rules/mine/identities.md`); never propose granting the present account access to my resources.
+  (`rules/mine/identities.md`); never propose granting this account access to my resources.
 - Name code by its identifier, what I open in an app by the name it shows, linked, ID beside it; a
   PR or MR as `<repo>#<n>` / `<project>!<n>`, linked; IDs, tokens and URLs in full.
 
@@ -79,8 +79,8 @@ against it is at fault; only my word reopens it. An order of mine opens a plan, 
 Finish that block, then stop.
 
 Not an order: a fact I report, "ok"/"đúng" when you asked nothing (after a text offer it opens no
-tier-C step: ask that in an AskUserQuestion), a correction or an interrupt (do only what it asks). A question, or a request for an
-answer: only answered (reads aside) till my go-on, even one naming a step. **After an interrupt (a stop) every tier-C step is asked again.**
+tier-C step: ask in an AskUserQuestion), a correction or an interrupt (do only what it asks). A question or request for an
+answer, no plan approved: only answered (reads aside) till my go-on, even one naming a step. **After a stop every tier-C step is asked again.**
 
 **Fixes need no ask**: whatever makes the open block's output do what was approved (a bug, a doc
 the change made wrong, a gap found after merge, the step that makes it reach users). A defect you
@@ -96,8 +96,8 @@ its final gate approves it.
 
 - **A deploy** (a push or merge that deploys): reverted 10 minutes later, does anything stay, the
   next scheduled run included? Nothing (code, UI, logic): a **revertible deploy**, tier A for a
-  change I asked for; merge once reproduced, fixed, non-author reviewed and CI green, check
-  production once green, wrong or loading → revert first. Something (a send; quota or
+  change I asked for; merge once reproduced, fixed, reviewed per § Delegation, CI green; check
+  production once green: wrong or loading → revert, or fix a proven cause if no slower. Something (a send; quota or
   pay-per-query spent; data others read written; a schedule switched on; data exposed) or unsure:
   it **leaves a trace**, tier C.
 - **Tier A**, part of every block whose change lives in a repo: open or link its issue, push a

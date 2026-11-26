@@ -64,5 +64,8 @@ the notes it cannot know alone.
 - Once a deploy is green, read what now runs on production (the deployed code, workflow or config)
   and open both the changed page and one outside the change that shares its platform (a report beside
   the new one) before reporting done. Either page still off from what it should show once the deploy
-  reports green, a "loading"/"updating" state included → revert first and debug on the reverted
-  state; never wait one out on a revertible deploy.
+  reports green, a "loading"/"updating" state included → take the faster way back to right: cause not
+  yet proven on that runtime's logs, or the fix ships slower than a revert → revert first and debug on
+  the reverted state; cause proven and the fix ships as fast (a revert that goes through the same
+  pipeline is no faster) → fix forward, checked as § Verify asks. Never wait one out on a revertible
+  deploy.

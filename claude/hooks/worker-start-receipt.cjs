@@ -324,9 +324,25 @@ function launchArgs(command) {
   return model ? ` --model ${model}${effort ? ` --effort ${effort}` : ''}` : '';
 }
 
+// One command may start several workers (`worker-start … && worker-start …`): each segment keeps its
+// own flags, and the i-th receipt id belongs to the i-th segment, since the segments run in order.
+// When the ids do not line up with the segments (one failed, or the output was filtered), a launch
+// that every segment shares still applies; otherwise none, so no worker is checked against another's
+// model.
+// Segments as dispatch-split-guard reads them (heredoc bodies, comments and quoted text left out). A
+// segment whose flags come from a variable (`worker-start $ARGS`) is judged on the whole command.
+const segments = (command) => workerStarts(command).segs;
+
+function launchesFor(command, ids) {
+  const per = segments(command).map((seg) => launchArgs(/\$/.test(seg) && !/--agent\b/.test(seg) ? command : seg));
+  if (per.length === ids.length) return per;
+  const shared = per.length && per.every((l) => l === per[0]) ? per[0] : '';
+  return ids.map(() => shared);
+}
+
 function watchLines(ids, launch = '') {
-  return ids.map((d) => {
-    const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}${launch}`;
+  return ids.map((d, i) => {
+    const w = `node ~/.claude/scripts/worker-stall.cjs --dispatch ${d}${Array.isArray(launch) ? launch[i] || '' : launch}`;
     return `Theo dõi treo cho ${d}: \`~/.claude/scripts/watch.sh --once --check "${w}" --ok done --wait running\`, rồi ` +
       'cùng lệnh bỏ `--once`, thêm `--deadline <thời lượng tới giờ đã hẹn user + biên, vd 2h30m> --every 120 --checkpoint 3000 --why-wait ' +
       '"worker đang làm, coordinator không làm thay"`, chạy background với `timeout: 3300000` (mặc định 30 phút ngắn hơn checkpoint 50 phút). `stale` là tín hiệu để đọc `worker-read` ' +
@@ -334,7 +350,7 @@ function watchLines(ids, launch = '') {
   });
 }
 
-module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, watchLines, launchArgs, acpHomes, codexDocCap, codexDocLines };
+module.exports = { dispatches, DISPATCH, HELP, SEND, sendTargets, sendLines, receipts, agyConfigLines, agyVersionLines, watchLines, launchArgs, launchesFor, segments, acpHomes, codexDocCap, codexDocLines };
 if (require.main !== module) return;
 
 let raw = '';
@@ -365,7 +381,7 @@ process.stdin.on('end', () => {
       const trees = ids.map((d) => { try { return worktreeOf(d); } catch (_) { return null; } }).filter(Boolean);
       lines.push(...codexDocLines(trees));
     }
-    lines.push(...watchLines(ids, launchArgs(command)));
+    lines.push(...watchLines(ids, launchesFor(command, ids)));
     if (codes.includes('selector_not_found')) {
       lines.push('selector_not_found: `--worktree path:` chỉ nhận worktree của repo đã có trong Orca (`orca worktree ps --json` thấy nó); ' +
         'repo chưa có thì `orca repo add --path <repo>` trước, hoặc đặt worker ở worktree của repo đã có và đọc repo kia bằng `git -C`.');

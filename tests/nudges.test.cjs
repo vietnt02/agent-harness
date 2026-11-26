@@ -220,6 +220,83 @@ test('answer-first: a mid-turn question is answered now and again in the last te
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('answer-first: under an approved plan of this session a mid-turn question is answered and the run goes on', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-plan-'));
+  try {
+    const t = path.join(dir, 't.jsonl');
+    fs.writeFileSync(t, [JSON.stringify({ type: 'user', message: { content: 'chạy plan đi' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: {} }] } }),
+      JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command', prompt: 'sao lại dùng opus để review nhỉ', origin: { kind: 'human' } } })].join('\n'));
+    const home = path.join(dir, 'home');
+    const payload = { hook_event_name: 'PreToolUse', transcript_path: t, session_id: 'af-s1', cwd: dir };
+    assert.match(context(hook('answer-first.cjs', payload, home)), /Until the user says go on/, 'no plan: only answered');
+    const plans = path.join(home, '.claude', 'plans', dir.replace(/[^A-Za-z0-9]/g, '-'));
+    fs.mkdirSync(plans, { recursive: true });
+    fs.writeFileSync(path.join(plans, 'p.md'), '---\nstatus: draft\nsession: af-s1\n---\n');
+    assert.match(context(hook('answer-first.cjs', payload, home)), /Until the user says go on/, 'a draft plan approves nothing');
+    fs.writeFileSync(path.join(plans, 'p.md'), '---\nstatus: approved\nsession: af-s1\n---\n');
+    const out = context(hook('answer-first.cjs', payload, home));
+    assert.match(out, /answer, then go on with it/);
+    assert.doesNotMatch(out, /Until the user says go on/);
+    assert.match(context(hook('answer-first.cjs', { ...payload, session_id: 'other' }, home)), /Until the user says go on/,
+      'another session\'s plan does not count');
+    // The shell moved into a repo: the plan is still found by the transcript's launch-dir folder.
+    const launch = path.join(home, '.claude', 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+    fs.mkdirSync(launch, { recursive: true });
+    const moved = path.join(launch, 't.jsonl');
+    fs.copyFileSync(t, moved);
+    assert.match(context(hook('answer-first.cjs', { ...payload, transcript_path: moved, cwd: path.join(dir, 'repos', 'app') }, home)),
+      /answer, then go on with it/, 'a moved cwd still finds the approved plan');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('ask-batch-guard: a plan\'s final gate answered with anything but its yes is not asked again', () => {
+  const { repeatGate } = require('../claude/hooks/ask-batch-guard.cjs');
+  const plan = '~/.claude/plans/-x/261127-p.md';
+  const gate = (id, q = `Chạy plan ${plan} ở chế độ autopilot?`) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'AskUserQuestion',
+    input: { questions: [{ question: q, options: [{ label: 'Chạy autopilot (Recommended)' }, { label: 'Chưa chạy' }] }] } }] } });
+  const answer = (id, label, q = `Chạy plan ${plan} ở chế độ autopilot?`) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id,
+    content: `Your questions have been answered: "${q}"="${label}". You can now continue with these answers in mind.` }] } });
+  const typed = (text) => ({ type: 'user', message: { content: text } });
+  const recs = (...r) => Object.assign(r, { whole: true });
+  const next = gate('g2').message.content[0].input;
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Chưa chạy'), typed('thế còn phần 2 thì sao'), gate('g2')), next), 'g1', 'a "not yet" holds the second gate');
+  assert.equal(repeatGate(recs(gate('g1'), { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'g1',
+    content: 'The user doesn\'t want to proceed with this tool use.' }] } }, typed('thế còn cái delay xử lí ntn'), gate('g2')), next), 'g1',
+  'a gate dismissed with a question in words holds too');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Chạy autopilot (Recommended)'), gate('g2')), next), null, 'a gate that got its yes may be asked again after a scope change');
+  assert.equal(repeatGate(recs(gate('g2')), next), null, 'the first gate of a plan passes');
+  const held = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'g1', is_error: true,
+    content: 'PreToolUse:AskUserQuestion hook error: [node ask-format-guard.cjs]: held once' }] } };
+  assert.equal(repeatGate(recs(gate('g1'), held, gate('g2')), next), null, 'a gate a hook held before the user saw it was never asked');
+  const other = gate('g3', 'Chạy plan ~/.claude/plans/-x/261127-other.md ở chế độ autopilot?').message.content[0].input;
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Chưa chạy'), gate('g3')), other), null, 'another plan\'s gate passes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Có, chạy'), gate('g2')), next), null, 'a typed "có" in the box is a yes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'có'), gate('g2')), next), null, 'a bare "có" is a yes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'có vài vấn đề: 1. login trước đi đã'), gate('g2')), next), 'g1',
+    '"có …" that opens an objection is no yes');
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'chạy autopilot, nhưng đổi bước 3'), gate('g2')), next), null, 'a run word with a change is a yes');
+  const timedOut = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'g1',
+    content: 'No response after 300s — the user may be away.' }] } };
+  assert.equal(repeatGate(recs(gate('g1'), timedOut, gate('g2')), next), null, 'a gate the user never answered in time was not seen');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abg-'));
+  try {
+    const file = path.join(dir, 'plans', '-x', '261127-p.md');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const q2 = `Chạy plan ${file} ở chế độ autopilot?`;
+    const g = (id) => gate(id, q2);
+    const a1 = { ...answer('g1', 'Chưa chạy', q2), timestamp: '2026-11-27T13:00:30Z' };
+    const n2 = g('g2').message.content[0].input;
+    fs.writeFileSync(file, '---\nstatus: draft\napproved: "ok chạy" 2026-11-27 20:05 UTC+7\nsession: s\n---\n');
+    assert.equal(repeatGate(recs({ ...g('g1'), timestamp: '2026-11-27T13:00:00Z' }, a1, typed('ok chạy'), g('g2')), n2), null,
+      'approved in words after the gate, then sent back to draft: the new gate passes');
+    fs.writeFileSync(file, '---\nstatus: draft\nsession: s\n---\n');
+    assert.equal(repeatGate(recs({ ...g('g1'), timestamp: '2026-11-27T13:00:00Z' }, a1, g('g2')), n2), 'g1', 'never approved: held');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const q = gate('q1', `${plan} Phần 7: chờ bao lâu?`).message.content[0].input;
+  assert.equal(repeatGate(recs(gate('g1'), answer('g1', 'Chưa chạy'), gate('q1')), q), null, 'an open question about the plan is not a gate');
+});
+
 test('worker-start-receipt: each new dispatch gets its stall watch, ready to run', () => {
   const { watchLines } = require('../claude/hooks/worker-start-receipt.cjs');
   const [line] = watchLines(['ctx_0123abcd']);
@@ -232,6 +309,24 @@ test('worker-start-receipt: each new dispatch gets its stall watch, ready to run
   const agy = launchArgs('orca orchestration worker-start --agent antigravity --model gemini-4-neon --effort high --spec-file s.md');
   assert.match(watchLines(['ctx_0123abcd'], agy)[0], /worker-stall\.cjs --dispatch ctx_0123abcd --model gemini-4-neon --effort high"/);
   assert.equal(launchArgs('orca orchestration worker-start --agent codex --model gpt-sol'), '', 'only agy prints the Gemini banner');
+});
+
+test('worker-start-receipt: two worker-starts in one command each get their own model in the watch line', () => {
+  const { watchLines, launchesFor } = require('../claude/hooks/worker-start-receipt.cjs');
+  const cmd = 'orca orchestration worker-start --agent antigravity --model gemini-4-neon --effort high --full a && ' +
+    'orca orchestration worker-start --agent codex --model gpt-6.2-sol --effort high --full b';
+  const [agy, codex] = watchLines(['ctx_aa11', 'ctx_bb22'], launchesFor(cmd, ['ctx_aa11', 'ctx_bb22']));
+  assert.match(agy, /--dispatch ctx_aa11 --model gemini-4-neon --effort high"/);
+  assert.match(codex, /--dispatch ctx_bb22"/, 'the codex worker is not checked against the agy model');
+  const one = launchesFor(cmd, ['ctx_bb22']);
+  assert.deepEqual(one, [''], 'ids that do not line up with the segments get no model');
+  const twoAgy = cmd.replace('--agent codex --model gpt-6.2-sol', '--agent antigravity --model gemini-4-neon');
+  assert.deepEqual(launchesFor(twoAgy, ['ctx_cc33']), [' --model gemini-4-neon --effort high'], 'a launch every segment shares still applies');
+  const viaVar = 'A="--agent antigravity --model gemini-4-neon --effort high"; orca orchestration worker-start $A --full x';
+  assert.deepEqual(launchesFor(viaVar, ['ctx_dd44']), [' --model gemini-4-neon --effort high'], 'flags held in a variable are read from the command');
+  const heredoc = "cat > s.md <<'EOF'\norca orchestration worker-start --agent codex\nEOF\n" +
+    'orca orchestration worker-start --agent antigravity --model gemini-4-neon --effort high --spec-file s.md';
+  assert.deepEqual(launchesFor(heredoc, ['ctx_ee55']), [' --model gemini-4-neon --effort high'], 'a heredoc spec line is not a worker-start');
 });
 
 test('worker-stall: an agy worker whose banner shows another model than the one given ends the watch; a match is read once', () => {

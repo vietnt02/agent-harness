@@ -28,6 +28,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DECISION_RE, isQuestion, promptText, dispatchedWorker } = require('./lib/user-intent.cjs');
+const { approvedPlan } = require('./lib/approved-plan.cjs');
 const { commands, program, innerScript, assignments, scriptsRun } = require('./lib/shell-words.cjs');
 
 const TAIL_BYTES = 1024 * 1024;
@@ -215,21 +216,6 @@ function latestHuman(records) {
   return { prompt, askAnswered, sinceInterrupt: Infinity };
 }
 
-function approvedPlan(sessionId, cwd) {
-  if (!sessionId) return false;
-  const dirs = new Set([cwd, process.cwd()].filter(Boolean).map((p) => p.replace(/[^A-Za-z0-9]/g, '-')));
-  for (const d of dirs) {
-    const dir = path.join(os.homedir(), '.claude', 'plans', d);
-    let files = [];
-    try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { continue; }
-    for (const f of files) {
-      const head = fs.readFileSync(path.join(dir, f), 'utf8').slice(0, 600);
-      if (/^status: approved$/m.test(head) && head.includes(sessionId)) return true;
-    }
-  }
-  return false;
-}
-
 module.exports = { chainedProdWrite, latestHuman, remoteDockerWrite, READ_INSTEAD, readHint };
 if (require.main !== module) return;
 
@@ -266,7 +252,7 @@ process.stdin.on('end', () => {
     if (data.permission_mode === 'bypassPermissions' || !data.transcript_path) process.exit(0);
     const { prompt, askAnswered, sinceInterrupt } = latestHuman(tailRecords(data.transcript_path));
     if (prompt === null || askAnswered || /<command-name>/.test(prompt)) process.exit(0);
-    if (approvedPlan(data.session_id, data.cwd)) process.exit(0);
+    if (approvedPlan(data.session_id, data.cwd, data.transcript_path)) process.exit(0);
     const approves = DECISION_RE.test(prompt);
     const asking = isQuestion(prompt);
     const afterInterrupt = sinceInterrupt < POST_INTERRUPT_PROMPTS && !approves;
