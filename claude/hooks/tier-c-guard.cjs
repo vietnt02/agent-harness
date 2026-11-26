@@ -252,7 +252,7 @@ process.stdin.on('end', () => {
     if (data.permission_mode === 'bypassPermissions' || !data.transcript_path) process.exit(0);
     const { prompt, askAnswered, sinceInterrupt } = latestHuman(tailRecords(data.transcript_path));
     if (prompt === null || askAnswered || /<command-name>/.test(prompt)) process.exit(0);
-    if (approvedPlan(data.session_id, data.cwd)) process.exit(0);
+    if (approvedPlan(data.session_id, data.cwd, data.transcript_path)) process.exit(0);
     const approves = DECISION_RE.test(prompt);
     const asking = isQuestion(prompt);
     const afterInterrupt = sinceInterrupt < POST_INTERRUPT_PROMPTS && !approves;

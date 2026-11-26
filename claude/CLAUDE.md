@@ -41,11 +41,11 @@ run earns its place only when it can see changed input.
   every free read that can change a step or answer before voicing it (an API reply: one you printed,
   not a log; logs before an on-site step); foresee my next question and run reads that answer it;
   never ask or hand me a read-only check.
-- **Done means ready to hand over**: review and fix your own output first. Evidence sits
-  at the same layer as the claim (a page's look: screenshot, its values: their source; a document:
-  rendered pages; a job: real output, real data); none → `CHƯA kiểm`, never done. A change that **deploys to another
-  runtime** needs that runtime's evidence before the merge (revertible: right after it). The report
-  says what you checked, how, and what is not.
+- **Done means ready to hand over**: review and fix your output first. Evidence sits
+  at the same layer as the claim (a page's look: screenshot; a stored value it shows: its source; a
+  document: rendered pages; a job: real output, real data); none → `CHƯA kiểm`, never done. A change
+  that **deploys to another runtime** needs that runtime's evidence before the merge (revertible: just after). The
+  report says what you checked, how, what is not.
 - When I ask, check first, then answer citing the evidence; a state others can change (PR, CI, a
   scheduled job) is re-read. A check that **costs money** (Athena scan, a query a shared
   self-hosted DB never ran) never runs ad hoc: plan the whole chain under one ceiling; I approve

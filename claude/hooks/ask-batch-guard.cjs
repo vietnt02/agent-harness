@@ -92,7 +92,9 @@ function spacedAsk(records, next) {
 }
 
 const GATE = /autopilot/i;
-const YES = /^(chạy|run|yes|có|ok)\b/i;
+const YES = /^(chạy|run|yes|có|ok|duyệt|đồng ý|chốt|làm hết)(?=$|[^\p{L}])/iu;
+// An ask result the user never saw: timed out, interrupted, rejected by validation, or held by a hook.
+const UNSEEN = /^(PreToolUse:AskUserQuestion hook error|No response after|\[Tool call interrupted|<tool_use_error>)/;
 const gatePlans = (input) => {
   const qs = (input?.questions || []).filter((q) => GATE.test(String(q?.question || '')));
   return new Set(qs.flatMap((q) => (String(q.question).match(PLAN_PATH) || []).map((p) => p.replace(/\\+/g, '/'))));
@@ -103,9 +105,26 @@ const picked = (text, question) => {
   return at < 0 ? null : (/^"([^"]*)"/.exec(text.slice(at + question.length + 3)) || [])[1] ?? null;
 };
 
+// True when the plan file named by a path ending in `rel` was approved (`approved: "…" yyyy-mm-dd HH:MM
+// UTC+7`, ntv-autopilot § Approve) at or after the minute of `iso`: the user ran it in words after that
+// gate, so a later gate (the plan sent back to draft) is a new one.
+const approvedSince = (question, rel, iso) => {
+  const word = question.split(/[\s"'`()]+/).find((w) => w.replace(/\\+/g, '/').replace(/[:?,.]+$/, '').endsWith(rel));
+  if (!word || !iso) return false;
+  const file = require('./lib/platform.cjs').expandHome(word.replace(/[:?,.]+$/, ''));
+  try {
+    const head = fs.readFileSync(file, 'utf8').split(/^---\s*$/m)[1] || '';
+    const m = /^approved:.*?(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/m.exec(head);
+    if (!m) return false;
+    const at = Date.parse(`${m[1]}T${m[2]}:00+07:00`);
+    return at >= Math.floor(Date.parse(iso) / 60000) * 60000;
+  } catch { return false; }
+};
+
 // The tool_use_id of the latest earlier gate naming a plan `next` gates, when that gate was answered with
-// anything but its yes (its first option, or a run word); null when there is none or it got its yes;
-// undefined when `records` do not reach back to one (read further back).
+// anything but its yes (its first option, or a run word) and the plan was not approved in words since;
+// null when there is none or it got its yes; undefined when `records` do not reach back to one (read
+// further back).
 function repeatGate(records, next) {
   const want = gatePlans(next);
   if (!want.size) return null;
@@ -120,18 +139,20 @@ function repeatGate(records, next) {
         [...(String(x.question).match(PLAN_PATH) || [])].some((p) => want.has(p.replace(/\\+/g, '/'))));
       if (!q) continue;
       const text = results.get(b.id);
-      // The ask about to run, or one a hook held before the user saw it.
-      if (text === undefined || /^PreToolUse:AskUserQuestion hook error/.test(text)) continue;
-      if (!ASK_ANSWER.test(text)) return String(b.id); // dismissed or answered in words
-      const label = picked(text, q.question);
-      const first = q.options?.[0]?.label;
-      return label !== null && (label === first || YES.test(label)) ? null : String(b.id);
+      // The ask about to run, or one the user never saw.
+      if (text === undefined || UNSEEN.test(text)) continue;
+      const label = ASK_ANSWER.test(text) ? picked(text, q.question) : null; // null: dismissed, answered in words
+      if (label !== null && (label === q.options?.[0]?.label || YES.test(label))) return null;
+      const rel = [...want].find((p) => String(q.question).replace(/\\+/g, '/').includes(p));
+      return approvedSince(String(next.questions.find((x) => GATE.test(String(x?.question || ''))).question), rel,
+        records[i].timestamp) ? null : String(b.id);
     }
   }
   return records.whole === false ? undefined : null;
 }
 
 function repeatGateIn(file, next) {
+  if (!gatePlans(next).size) return null;
   for (let bytes = TAIL_BYTES; ; bytes *= 4) {
     const records = tailRecords(file, bytes);
     const found = repeatGate(records, next);
@@ -173,7 +194,7 @@ process.stdin.on('end', () => {
     const { firstTime } = require('./lib/block-once.cjs');
     const gate = repeatGateIn(input.transcript_path, input.tool_input);
     if (gate && firstTime(input.session_id, 'ask-batch-guard-gate', gate)) {
-      process.stderr.write(`${GATE_NOTE}${input.session_id ? ' Said once: the next ask passes.' : ''}\n`);
+      process.stderr.write(`${GATE_NOTE}\n`);
       process.exit(2);
     }
     const answered = spacedAskIn(input.transcript_path, input.tool_input);

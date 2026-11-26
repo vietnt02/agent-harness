@@ -75,7 +75,7 @@ process.stdin.on('end', () => {
         ? `answer-first: the user asked mid-turn ("${quote}") and no reply text followed. ` +
           'Answer it now in one line, and again in the turn\'s last text: after your last tool call, or just before ' +
           'the AskUserQuestion if this turn asks (communication-style.md). The first line may be folded out of sight. ' +
-          (approvedPlan(sessionId, cwd)
+          (approvedPlan(sessionId, cwd, transcript)
             ? 'This session runs an approved plan: answer, then go on with it; halt after the step under way only if ' +
               'the message disputes what the plan decided or asks to stop (ntv-autopilot § Run).'
             : 'Until the user says go on, run nothing but reads that answer it: no write, plan or ask (CLAUDE.md § Mutation gate).')

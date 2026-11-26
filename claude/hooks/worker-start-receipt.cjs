@@ -329,14 +329,12 @@ function launchArgs(command) {
 // When the ids do not line up with the segments (one failed, or the output was filtered), a launch
 // that every segment shares still applies; otherwise none, so no worker is checked against another's
 // model.
-function segments(command) {
-  const re = new RegExp(DISPATCH.source, 'g');
-  const starts = [...command.matchAll(re)].map((m) => m.index);
-  return starts.map((s, i) => command.slice(s, starts[i + 1]));
-}
+// Segments as dispatch-split-guard reads them (heredoc bodies, comments and quoted text left out). A
+// segment whose flags come from a variable (`worker-start $ARGS`) is judged on the whole command.
+const segments = (command) => workerStarts(command).segs;
 
 function launchesFor(command, ids) {
-  const per = segments(command).map(launchArgs);
+  const per = segments(command).map((seg) => launchArgs(/\$/.test(seg) && !/--agent\b/.test(seg) ? command : seg));
   if (per.length === ids.length) return per;
   const shared = per.length && per.every((l) => l === per[0]) ? per[0] : '';
   return ids.map(() => shared);

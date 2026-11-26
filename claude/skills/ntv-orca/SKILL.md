@@ -38,8 +38,8 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 Luôn là coordinator: sửa harness (`~/.claude` và repo nguồn cài ra nó, `.claude/` hay rule agent của
 một repo), chỉ trong phiên user mở cho harness/kaizen hoặc khối gọi tên nó (gặp lỗi harness lúc làm
 việc khác → ghi kaizen, `ntv-kaizen`: không sửa, không PR, không hỏi mở); việc cần công cụ chỉ phiên này
-có (MCP, login); việc user chỉ đích danh Claude ("tự làm" hay lời cùng nghĩa: Claude tự viết trong phiên, chỉ
-reviewer được giao); đổi một giá trị có sẵn, không logic mới; ghi không có cổng phía sau (Lark, n8n, DB, chạy job
+có (MCP, login); việc user chỉ đích danh Claude ("tự làm" hay lời cùng nghĩa: Claude tự viết trong phiên;
+rà chỉ đọc vẫn qua subagent, reviewer và checker vẫn giao theo § 4); đổi một giá trị có sẵn, không logic mới; ghi không có cổng phía sau (Lark, n8n, DB, chạy job
 thật, gửi tin, publish tay như Power BI): worker chỉ rà, dựng lệnh và chạy `--dry-run`, coordinator đọc
 output đó, chạy thật, đọc lại đích (hook `dispatch-split-guard` chặn spec hay tin giao worker một lệnh
 ghi Lark/n8n; nó không thấy SQL, curl hay lệnh kích job).
@@ -208,8 +208,9 @@ tác giả chấm).
   mục Nghiệm thu và các câu hỏi cố định, không nhận hội thoại, lập luận hay báo cáo của tác giả; brief
   không gợi kết luận.
 - **Model theo quota lúc giao:** còn quota ở model khác dòng với tác giả thì dùng (agy `gemini-4-neon
-  high`, Codex `sol high`; cả hai còn quota ngang nhau, chênh không quá 20 điểm phần trăm phần còn lại, hay
-  một bên không đọc được → neon); không thì model nào còn quota; hết cả thì một Claude context mới (subagent
+  high`, Codex `sol high`; agy và Codex đều khác dòng với tác giả và
+  còn quota ngang nhau: phần còn lại của agy `Gemini Models` và của cửa sổ Codex chặt hơn chênh không quá 20
+  điểm phần trăm, hay một bên không đọc được → neon); không thì model nào còn quota; hết cả thì một Claude context mới (subagent
   hay worker Claude). Đọc quota: agy `agy -p "/usage"` (dòng `Gemini Models`); Codex `rate_limits`
   (`primary` 5 giờ và `secondary` tuần: `used_percent`, `resets_at`) ở log phiên mới nhất dưới `~/.codex/sessions/`; không đọc được
   thì giao, gặp lỗi hết quota thì chuyển model kế. Đổi theo quota làm luôn, ghi vào report. Reviewer ở mọi model, mọi vòng chạy effort high, dù

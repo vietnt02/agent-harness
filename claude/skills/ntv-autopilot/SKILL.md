@@ -58,7 +58,7 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    prerequisites with their results, the defaults and out of scope; its question, one line, names
    the plan's path. Never ask it while a question
    is open. It is asked once a plan: answered with anything but its yes (skipped, a question, a
-   request), it is never asked again for that plan; the turn writes the answer into the plan, ends with
+   request), it is not asked again for that plan unless the user's words ask for it; the turn writes the answer into the plan, ends with
    the plan's full path, and the plan waits for the user's own words to run it (read for their intent:
    "ok chạy", "mở autopilot", "chốt plan"; unclear is no yes). A plan written on a yes to `ntv-architect`'s final gate is approved then: no second gate.
    Unless a yes starts the run (its Report ends the turn), end the turn with the plan's full path
@@ -80,7 +80,7 @@ again; the one exception is an action the user approves by name in the Report's 
   action that needs a parked action's result.
 - Every listed action runs without a new ask, tier C included, after the checks
   `CLAUDE.md` § Irreversible actions puts before a tier-C step.
-- Never stop the plan to wait for an answer, unless the user writes mid-run (below). A question the plan or the user's words already answer is no
+- Never stop the plan to wait for an answer, unless a mid-run message halts it (below). A question the plan or the user's words already answer is no
   question; reads, probes and checks never need a yes. Whatever surfaces: a fix that makes a
   listed action's output do what the plan approved (`CLAUDE.md` § Mutation gate, Fixes need no
   ask) → fix, check, one-line report; anything else → park it and continue with the rest. A run the plan depends on: wait in the background with
@@ -89,7 +89,8 @@ again; the one exception is an action the user approves by name in the Report's 
 - The user interrupts (stops the turn): stop; every tier-C step is asked again. A message sent mid-run
   without stopping is read by what it says: a question or request in it is answered and the run goes
   on, halting after the step under way only when it disputes what the plan decided (scope, a step, a
-  decision) or asks to stop, until the user says go on; any message asks every `Đã park` item at once.
+  decision) or asks to stop, until the user says go on; a message that halts the run asks every `Đã park`
+  item at once, else they wait for the Report.
 - A classifier or permission denial: never retry it in another form; park that step with its
   exact command (`rules/mine/user-profile.md`).
 
