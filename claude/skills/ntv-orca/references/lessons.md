@@ -30,8 +30,11 @@ cùng `SKILL.md` trước manifest hay spec đầu tiên của phiên.
 - **Đỉnh RAM đến từ các lệnh nặng chạy cùng lúc** (build, cả bộ test, cài deps), còn chờ theo ngưỡng
   tải thì không biết bao giờ tới lượt → lệnh nặng chờ lượt qua slot dùng chung
   (`~/.claude/scripts/heavy.cjs`), slot nhả ngay khi lệnh xong (`SKILL.md` § 2).
-- **Dev server chạy suốt task**, giữ slot thì chặn mọi lệnh nặng khác tới khi nó tắt → dev server không
-  qua slot; RAM của nó nằm trong cap worker (`SKILL.md` § 2).
+- **Dev server hay lệnh watch chạy suốt task**, giữ slot thì chặn mọi lệnh nặng khác tới khi nó tắt → dev
+  server và lệnh watch không qua slot; RAM của nó do chốt áp lực bộ nhớ chặn (`SKILL.md` § 2).
+- **RAM của máy phụ thuộc loại lệnh worker đang chạy hơn số worker**: nhiều worker chỉ chờ model thì
+  nhẹ, vài worker cùng build thì nặng → không cap cố định theo số worker; lệnh nặng qua slot, chỉ ngừng
+  giao thêm khi áp lực bộ nhớ ở mức 4 (`SKILL.md` § 2).
 - **Mỗi lần push lên nhánh deploy là một lần build production** → mỗi đợt một lần push, qua một PR tích
   hợp (`SKILL.md` § 4).
 - **Đợt cứ lớn thêm trong lúc check đang chạy**, nên kết quả check không còn khớp thứ được ship →

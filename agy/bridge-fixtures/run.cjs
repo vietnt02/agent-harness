@@ -344,6 +344,33 @@ if (NAP && fs.existsSync(NAP)) {
   console.log(`SKIP  umbrella guard (${NAP ? `${NAP} not found` : 'no napHook in local.json'})`);
 }
 
+{
+  // heavy-reminder through the bridge: a worker's first heavy command reminds once, before its next
+  // step; a command already through heavy.cjs and a later heavy one stay silent.
+  const name = "heavy-reminder: a worker's first heavy command reminds once; wrapped and later ones stay silent";
+  if (!fs.existsSync(path.join(os.homedir(), '.claude', 'hooks', 'heavy-reminder.cjs'))) {
+    console.log('SKIP  heavy-reminder (not installed in ~/.claude/hooks)');
+  } else {
+    const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
+    const convo = conversation('chat', true);
+    const step = (cmd) => {
+      const decision = bridge(payload('chat', convo, { name: 'run_command', args: { CommandLine: cmd, Cwd: ws } }), tmp);
+      const r = spawnSync(process.execPath, [BRIDGE, 'PreInvocation'], {
+        input: JSON.stringify(payload('chat', convo, undefined)), encoding: 'utf8', timeout: 20000,
+        env: { ...process.env, TMPDIR: tmp, BRIDGE_FIXTURE: '1' },
+      });
+      let note = '';
+      try { note = (JSON.parse(r.stdout || '{}').injectSteps || []).map((x) => x.ephemeralMessage || '').join('\n'); } catch (_) { /* none */ }
+      return { decision, reminded: /heavy-reminder/.test(note) };
+    };
+    const wrapped = step('node ~/.claude/scripts/heavy.cjs -- npm run build');
+    const first = step('npm run build');
+    const second = step('npm test');
+    const ok = [wrapped, first, second].every((t) => t.decision === 'allow') && !wrapped.reminded && first.reminded && !second.reminded;
+    report(ok, name, ok ? '' : `wrapped=${JSON.stringify(wrapped)}, first=${JSON.stringify(first)}, second=${JSON.stringify(second)}`);
+  }
+}
+
 for (const mode of ['cli', 'chat']) {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-'));
   const worker = conversation(mode, true);

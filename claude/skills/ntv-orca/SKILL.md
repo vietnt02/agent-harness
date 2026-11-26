@@ -20,7 +20,7 @@ thời gian (mạch song song) hay nâng chất lượng (review độc lập), 
   quy trình giám sát, nhắn tin, gỡ lỗi: `orca skills get orchestration` (gặp cổng nó nêu thì
   `--reference references/<file>.md`). Guide đi kèm đúng bản Orca đang chạy và thắng mọi câu về lệnh ở
   đây.
-- **Máy và cấu hình đang dùng** (RAM, cap worker, Settings của Orca, Setup Script, agy):
+- **Máy và cấu hình đang dùng** (máy, Settings của Orca, Setup Script, agy, host Orca khác):
   `~/.claude/knowledge/orca.md`.
 - **Từng dòng model:** `references/models/<dòng>.md`; agy: `references/antigravity.md`.
 
@@ -78,7 +78,7 @@ worker thì chốt model, worktree ngay trong plan; duyệt plan là duyệt man
 Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Ngoại lệ: reviewer chỉ đọc do câu của user mở (review PR/MR của bất kỳ ai) giao ngay, không plan, không manifest; đăng gì lên PR/MR vẫn hỏi riêng. Agent thiết kế độc lập của chặng 2 cũng giao ngay, không manifest: nó chỉ đọc và đề xuất. Mỗi worker
 một dòng:
 
-    Manifest khối <X> — parallel <n> (cap <N>).
+    Manifest khối <X> — parallel <n>.
       Kế hoạch: <k> phase · <n> worker · w1-<việc> (<agent> <slug> <effort> · <dấu hiệu>): phase 1, 2 · w2-<việc> (…): phase 3
       <repo> · <worktree> · <paths> · được: rà, đối chiếu thiết kế, edit, commit, push nhánh, mở PR
       KHÔNG (worker): merge, deploy, publish, ghi prod (Lark, n8n, DB), chạy job thật, gửi tin: chỉ dry-run
@@ -87,7 +87,7 @@ một dòng:
   cột trạng thái của plan. Worker không sửa bảng trạng thái trong file plan dùng chung (các nhánh
   conflict khi merge); coordinator cập nhật sau merge.
 - Worker tên `w<N>-<việc>`, N theo thứ tự dispatch, không cấp lại; dùng cho mọi báo cáo (cờ:
-  `references/orca.md`). Reviewer là một dòng `w<N>-review-w<M>`, tính vào cap.
+  `references/orca.md`). Reviewer là một dòng `w<N>-review-w<M>`.
 - Đổi phase, worker hay model sau khi plan duyệt → plan về `draft`, hỏi lại, không báo sau;
   ngoại lệ chạy luôn, báo trong report: giao lại neon theo **Chọn model** (dưới); đổi reviewer, checker
   theo quota (§ 4).
@@ -107,9 +107,11 @@ và yêu cầu:
   dài, và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo tin đó trước, tin đã làm
   theo thì bỏ qua khi thấy lại (`--peek` không đánh dấu đã đọc; worker Chat có nhận tin `send` giữa
   lượt hay không tuỳ bản Orca, xem `references/orca.md`);
-- lệnh nặng (build, cả bộ test, cài deps) chạy qua `node ~/.claude/scripts/heavy.cjs -- <lệnh>` (lệnh
-  ghép hay có biến môi trường: `-- sh -c '<lệnh>'`; Windows: `-- cmd /c <lệnh>`), để các worker chờ lượt
-  slot thay vì build cùng lúc; dev server không qua slot (`references/lessons.md`);
+- lệnh nặng (build, cả bộ test, typecheck, cài deps) chạy qua `node ~/.claude/scripts/heavy.cjs --
+  <lệnh>` (npm, pnpm, yarn chạy như viết trên mọi hệ; lệnh ghép hay có biến môi trường: `-- sh -c
+  '<lệnh>'`, cả trong Git Bash trên Windows; từ PowerShell `-- cmd /c "<lệnh>"`), chạy nền khi có thể phải
+  chờ slot, để các worker chờ lượt thay
+  vì build cùng lúc; dev server và lệnh watch không qua slot (`references/lessons.md`);
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;
@@ -128,15 +130,14 @@ và yêu cầu:
 không có thì `--worktree new-child`; worktree `path:`, Setup Script, port dev server:
 `references/orca.md`.
 
-**Song song và cap:** mặc định parallel tới cap (user chốt): mỗi track — nhóm việc chung file nguồn —
-một worker, một nhánh, dispatch cùng lúc. Serial chỉ khi user nói, hoặc áp lực bộ nhớ ≥ 2
+**Song song:** mọi việc đủ điều kiện giao cùng lúc: mỗi track — nhóm việc chung file nguồn — một
+worker, một nhánh, dispatch ngay, không chờ cả wave. Không cap cố định theo số worker: RAM phụ thuộc
+loại lệnh worker chạy hơn số worker (`references/lessons.md`); đỉnh RAM của lệnh nặng do slot của
+`heavy.cjs` chặn (spec, trên). Chỉ ngừng giao thêm khi áp lực bộ nhớ ở mức 4
 (`sysctl -n kern.memorystatus_vm_pressure_level`; Windows không có mức áp lực: RAM còn dùng được
-`(Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory).AvailableMBytes` (tính cả standby) dưới 20% tổng
-(`(Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize`, KB) coi như mức 2, dưới 5% coi như mức 4) mà user chưa cho vượt cap trong phiên (đã cho: chỉ
-ngừng giao thêm ở mức 4). Cap là ràng buộc RAM của máy
-(`knowledge/orca.md`); "max N" của user là N worker sống cùng lúc xuyên phiên. Đỉnh RAM của lệnh nặng
-do slot của `heavy.cjs` chặn (spec, trên). Còn slot và còn việc
-đủ điều kiện thì giao ngay, không chờ cả wave. Dòng `# Track:` liệt kê việc và file giúp hook
+`(Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory).AvailableMBytes` (tính cả standby) dưới 5% tổng
+(`(Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize`, KB) coi như mức 4), xuống dưới thì
+giao tiếp. Serial chỉ khi user nói; "max N" user nói là N worker sống cùng lúc xuyên phiên. Dòng `# Track:` liệt kê việc và file giúp hook
 `dispatch-split-guard` nhắc khi một worker ôm các việc không chung file. Các track phụ thuộc nhau mà repo có cổng chạy toàn bộ
 test: worker commit local, coordinator gộp vào nhánh tích hợp, mở PR từ đó. Không `--no-verify`. Các nhánh phải
 lên production cùng nhau, hoặc cùng kích hoạt một pipeline deploy/publish tính tiền, cũng gộp như

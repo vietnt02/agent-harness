@@ -81,7 +81,7 @@ Repo này chủ động loại trừ các thành phần mang tính nội bộ ho
 ## Giới hạn đã biết
 
 - **Bridge Antigravity:** Bridge dùng 3 thư viện của AgentKit (`privacy-checker.cjs`, `scout-checker.cjs`, `secret-keywords.cjs`) cho các guard bảo vệ privacy, scout và secret. Nếu thiếu các file này trong `~/.claude/hooks/lib/`, các guard tương ứng sẽ không chạy.
-- **Tài liệu tham chiếu:** `CLAUDE.md` và một số skill có nhắc tới thư mục `~/.claude/knowledge/` (vd `knowledge/orca.md`: RAM, cap worker, Settings Orca, cấu hình agy của máy) mà repo không đính kèm; mỗi máy tự viết.
+- **Tài liệu tham chiếu:** `CLAUDE.md` và một số skill có nhắc tới thư mục `~/.claude/knowledge/` (vd `knowledge/orca.md`: RAM, số worker, Settings Orca, cấu hình agy của máy) mà repo không đính kèm; mỗi máy tự viết.
 - **Kiểm thử bridge fixtures:** Chạy fixture bridge bằng lệnh:
   ```bash
   node ~/.gemini/config/bridge-fixtures/run.cjs

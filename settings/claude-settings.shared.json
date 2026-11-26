@@ -102,6 +102,10 @@
           },
           {
             "type": "command",
+            "command": "\"{NODE}\" \"{HOME}/.claude/hooks/heavy-reminder.cjs\""
+          },
+          {
+            "type": "command",
             "command": "\"{NODE}\" \"{HOME}/.claude/hooks/tier-c-guard.cjs\""
           },
           {

@@ -6,10 +6,10 @@
  * its description, or in visible text of this turn) listing each task with the files it touches,
  * `Track: w17 ← sửa chốt [gui/chot.py, giao_dien.py] | tắt backend [app.py]`, whose tasks share no
  * source file, or whose one task spans ≥3 top-level roots: separate tracks for separate workers next
- * time (skills/ntv-orca/SKILL.md § 2, Song song và cap). Test, doc, plan and fixture files never link
+ * time (skills/ntv-orca/SKILL.md § 2, Song song). Test, doc, plan and fixture files never link
  * tasks. `(serial: <lý do>)` on the line silences it when one of the user's last 10 prompts asks for
  * serial work ("chạy serial", "làm tuần tự"; not a complaint, a negation, a question or "serial
- * number") or `kern.memorystatus_vm_pressure_level` is ≥2 (`DSG_PRESSURE` overrides it in tests). No
+ * number"); memory pressure is no reason (ntv-orca § 2: serial only when the user says). No
  * `Track:` line, or a command whose every worker-start is `--retry-of`: nothing said.
  * Said once (lib/block-once.cjs; the same command run again passes): an antigravity worker started
  * without `--effort` (`--retry-of` included: agy then runs Medium, not the High ntv-orca § 2 (Chọn
@@ -114,13 +114,8 @@ function userAskedSerial(lines) {
     return /^(serial|tuần tự)$/.test(clause) || /(chạy|làm|giao|dispatch|để)\s+(\S+\s+){0,3}(serial|tuần tự)/.test(clause);
   }));
 }
-function memoryPressure() {
-  if (process.env.DSG_PRESSURE) return Number(process.env.DSG_PRESSURE);
-  if (process.platform !== 'darwin') return 1;
-  try { return Number(execFileSync('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], { encoding: 'utf8', timeout: 2000 }).trim()) || 1; } catch (_) { return 1; }
-}
-// `(serial: …)` on the line, backed by the user's request or by memory pressure.
-const serialOk = (line, ctx) => /\(serial:\s*\S/.test(line) && (ctx.serial() || ctx.pressure() >= 2);
+// `(serial: …)` on the line, backed by the user's request (ntv-orca § 2: serial only when the user says).
+const serialOk = (line, ctx) => /\(serial:\s*\S/.test(line) && ctx.serial();
 
 // The command with heredoc bodies and comment lines dropped (they are not commands), and its
 // `worker-start` segments. Separators inside quotes do not split a segment: they become spaces, or
@@ -369,12 +364,12 @@ function verdict(lines, input, ctx, { advisory = false } = {}) {
   }
   for (const line of tracks) {
     const serialNote = /\(serial:\s*\S/.test(line) && !serialOk(line, ctx)
-      ? ' `(serial: …)` does not count: none of the user\'s latest prompts asks for serial work ("chạy serial", "làm tuần tự") and memory pressure is below 2.' : '';
+      ? ' `(serial: …)` does not count: none of the user\'s latest prompts asks for serial work ("chạy serial", "làm tuần tự").' : '';
     const roots = sprawlingTask(line);
     if (roots) {
       return `\`${line.trim()}\` gives a task files under ${roots.join(', ')}: name each file group as its own ` +
         'task (`| task [files]`), so unrelated groups go to separate workers, each on its own branch; the ' +
-        'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca § 2, Song song và cap). ' +
+        'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca § 2, Song song). ' +
         'Groups that truly edit one shared source file list that file in each group, and stay one track. ' +
         'A shared test, doc, plan or fixture file does not link groups. The worker starts as given; split the next ' +
         'dispatch if the groups are truly independent.';
@@ -382,8 +377,8 @@ function verdict(lines, input, ctx, { advisory = false } = {}) {
     const split = unrelatedTasks(line, ctx);
     if (split.length) {
       return `\`${line.trim()}\` bundles tasks that share no source file (${split.join(', ')}): give each its own ` +
-        'worker, dispatched now (ntv-orca § 2, Song song và cap); shared test, doc, plan or fixture files do not count. Only the ' +
-        'user\'s request for serial work or memory pressure ≥2 keeps them together, written on the line as ' +
+        'worker, dispatched now (ntv-orca § 2, Song song); shared test, doc, plan or fixture files do not count. Only the ' +
+        'user\'s request for serial work keeps them together, written on the line as ' +
         '`(serial: <lý do>)`. The worker starts as given; this is a hint for the next split.' + serialNote;
     }
   }
@@ -448,7 +443,7 @@ process.stdin.on('end', () => {
     }
     if (starts.segs.every((seg) => /\s--retry-of\b/.test(seg))) say();
     const once = (f) => { let v; return () => (v === undefined ? (v = f()) : v); };
-    const ctx = { serial: once(() => userAskedSerial(tailLines(transcript))), pressure: once(memoryPressure) };
+    const ctx = { serial: once(() => userAskedSerial(tailLines(transcript))) };
     const problem = verdict(tailLines(transcript), input, ctx, { advisory: true });
     if (problem) notes.push(problem);
     say();

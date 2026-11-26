@@ -15,12 +15,16 @@
  * never wait on each other. A slot is free again when its last holder exits; a holder whose process died
  * (killed, crashed) is dropped at the next look. The command's exit code comes back unchanged (127
  * when it cannot start); a signal sent to this wrapper goes on to the command.
- * On Windows the command starts without a shell: name an executable (`node`, `cmd /c npm ci`).
- * No usable slot dir (a sandbox that denies it, a read-only home): the command runs without a slot,
- * with a warning, since a slot only orders work and must never stop it.
+ * On Windows a command that exists only as a .cmd or .bat (npm, pnpm, yarn) runs through cmd.exe,
+ * so `-- npm ci` works there as it does elsewhere.
+ * A slot only orders work and never stops it: with no usable slot dir (a sandbox that denies it, a
+ * read-only home), or after waiting HEAVY_MAX_WAIT seconds (a holder stuck, a test that hangs), the
+ * command runs without a slot, with a warning naming who holds them. While it waits, a line every
+ * HEAVY_NOTE_EVERY seconds says so, so a waiting command is not taken for a hung one.
  *
  * Env: HEAVY_SLOTS (default 2), HEAVY_SLOTS_DIR (default ~/.cache/agent-harness/heavy-slots),
- *      HEAVY_POLL_MS (default 2000).
+ *      HEAVY_POLL_MS (default 2000), HEAVY_MAX_WAIT (seconds, default 1200),
+ *      HEAVY_NOTE_EVERY (seconds, default 60).
  * State: <dir>/slot-<i>.json = { key, root, holders: [{ pid, since }] }; <dir>/.lock, a short mutex.
  */
 const fs = require('fs');
@@ -40,6 +44,8 @@ if (!cmd.length) {
 const SLOTS = Math.max(1, parseInt(process.env.HEAVY_SLOTS || '', 10) || 2);
 const DIR = process.env.HEAVY_SLOTS_DIR || path.join(os.homedir(), '.cache', 'agent-harness', 'heavy-slots');
 const POLL_MS = Math.max(10, parseInt(process.env.HEAVY_POLL_MS || '', 10) || 2000);
+const MAX_WAIT_MS = Math.max(1, Number(process.env.HEAVY_MAX_WAIT) || 1200) * 1000;
+const NOTE_MS = Math.max(1, Number(process.env.HEAVY_NOTE_EVERY) || 60) * 1000;
 const LOCK = path.join(DIR, '.lock');
 const LOCK_STALE_MS = 30000;
 
@@ -147,15 +153,26 @@ function give(file) {
 
 async function main() {
   let got = null;
-  let said = false;
+  const t0 = Date.now();
+  let noted = 0;
   try {
     fs.mkdirSync(DIR, { recursive: true });
     for (;;) {
       got = await locked(take);
       if (got.file) break;
-      if (!said) {
-        process.stderr.write(`heavy: waiting for a slot (${got.busy.length}/${SLOTS} in use: ${got.busy.join(', ')})\n`);
-        said = true;
+      const waited = Date.now() - t0;
+      const held = `${got.busy.length}/${SLOTS} held by: ${got.busy.join(', ')}`;
+      if (waited >= MAX_WAIT_MS) {
+        process.stderr.write(`heavy: waited ${Math.round(waited / 1000)}s for a slot (${held}); running without a slot\n`);
+        got = null;
+        break;
+      }
+      if (!noted) {
+        process.stderr.write(`heavy: waiting for a slot (${held})\n`);
+        noted = Date.now();
+      } else if (Date.now() - noted >= NOTE_MS) {
+        process.stderr.write(`heavy: still waiting for a slot after ${Math.round(waited / 1000)}s (${held})\n`);
+        noted = Date.now();
       }
       await sleep(POLL_MS);
     }
@@ -172,19 +189,56 @@ async function main() {
     }
     process.exit(code);
   };
-  const child = spawn(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+  let child = null;
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
     process.on(sig, () => {
-      try { child.kill(sig); } catch (_) { /* already gone */ }
+      try { if (child) child.kill(sig); } catch (_) { /* already gone */ }
     });
   }
-  child.on('error', (e) => {
-    process.stderr.write(`heavy: cannot start ${cmd[0]}: ${e.message}\n`);
-    finish(127);
-  });
-  child.on('exit', (code, signal) => {
-    finish(code === null ? 128 + (os.constants.signals[signal] || 1) : code);
-  });
+  const start = (shim) => {
+    const viaCmd = Boolean(shim);
+    try {
+      child = viaCmd ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${cmdLine([shim, ...cmd.slice(1)])}"`],
+        { stdio: 'inherit', windowsVerbatimArguments: true }) : spawn(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+    } catch (e) {
+      const found = viaCmd ? null : cmdShim(e);
+      if (found) return start(found);
+      process.stderr.write(`heavy: cannot start ${cmd[0]}: ${e.message}\n`);
+      return finish(127);
+    }
+    child.on('error', (e) => {
+      const found = viaCmd ? null : cmdShim(e);
+      if (found) return start(found);
+      process.stderr.write(`heavy: cannot start ${cmd[0]}: ${e.message}\n`);
+      return finish(127);
+    });
+    child.on('exit', (code, signal) => {
+      // cmd.exe answers a name it cannot find with 9009: the same "cannot start" as 127 elsewhere.
+      if (viaCmd && code === 9009) return finish(127);
+      return finish(code === null ? 128 + (os.constants.signals[signal] || 1) : code);
+    });
+    return undefined;
+  };
+  start(null);
+}
+
+// Windows starts only .exe files directly: a command that failed to start and exists as a .cmd or .bat
+// (npm is npm.cmd) is retried through cmd.exe with that file's path; one that exists nowhere is not, so it
+// still ends as 127.
+function cmdShim(e) {
+  if (process.platform !== 'win32' || (e.code !== 'ENOENT' && e.code !== 'EINVAL')) return null;
+  const name = cmd[0];
+  const isShim = (f) => /\.(?:cmd|bat)$/i.test(f) && fs.existsSync(f);
+  if (/[\\/]/.test(name)) return isShim(name) ? name : null;
+  const names = /\.(?:cmd|bat)$/i.test(name) ? [name] : [`${name}.cmd`, `${name}.bat`];
+  for (const dir of (process.env.PATH || process.env.Path || '').split(path.delimiter).filter(Boolean)) {
+    for (const n of names) if (isShim(path.join(dir, n))) return path.join(dir, n);
+  }
+  return null;
+}
+// One cmd.exe command line; an argument holding spaces or cmd metacharacters is quoted.
+function cmdLine(words) {
+  return words.map((w) => (/^[\w.,:=@%+\/\\-]+$/.test(w) ? w : `"${String(w).replace(/"/g, '""')}"`)).join(' ');
 }
 
 main().catch((e) => {
