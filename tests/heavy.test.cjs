@@ -23,13 +23,18 @@ const hold = (log, name, ms) => [process.execPath, '-e',
 const linger = (file) => [process.execPath, '-e',
   `require('fs').writeFileSync(${JSON.stringify(file)},String(process.pid));setTimeout(function(){},60000)`];
 
-function run(cwd, slotsDir, slots, cmd) {
+function run(cwd, slotsDir, slots, cmd, env = {}) {
   return spawn(process.execPath, [SCRIPT, '--', ...cmd], {
     cwd,
-    env: { ...process.env, HEAVY_SLOTS_DIR: slotsDir, HEAVY_SLOTS: String(slots), HEAVY_POLL_MS: '50' },
+    env: { ...process.env, HEAVY_SLOTS_DIR: slotsDir, HEAVY_SLOTS: String(slots), HEAVY_POLL_MS: '50', ...env },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
 }
+const stderrOf = (child) => {
+  let err = '';
+  child.stderr.on('data', (d) => { err += d; });
+  return () => err;
+};
 const done = (child) => new Promise((resolve) => child.on('close', (code, signal) => resolve({ code, signal })));
 const span = (log, name) => JSON.parse(fs.readFileSync(path.join(log, `${name}.json`), 'utf8'));
 const overlap = (a, b) => a.s < b.e && b.s < a.e;
@@ -147,6 +152,50 @@ test('no usable slot dir: the command still runs, without a slot', { timeout: 20
   const r = await done(child);
   assert.equal(r.code, 4);
   assert.match(err, /running without a slot/);
+});
+
+test('a waiter gives up after HEAVY_MAX_WAIT and runs without a slot', { timeout: 20000 }, async () => {
+  const slots = tmp('heavy-slots-');
+  const log = tmp('heavy-log-');
+  const a = run(tmp('heavy-wt-a-'), slots, 1, hold(log, 'a', 4000));
+  await sleep(500);
+  const b = run(tmp('heavy-wt-b-'), slots, 1, hold(log, 'b', 50), { HEAVY_MAX_WAIT: '1' });
+  const err = stderrOf(b);
+  const rb = await done(b);
+  await done(a);
+  assert.equal(rb.code, 0);
+  assert.ok(span(log, 'b').s < span(log, 'a').e, 'it kept waiting past HEAVY_MAX_WAIT');
+  assert.match(err(), /running without a slot/);
+  assert.deepEqual(slotFiles(slots), []);
+});
+
+test('a waiter says it is still waiting every HEAVY_NOTE_EVERY seconds, naming the holder', { timeout: 20000 }, async () => {
+  const slots = tmp('heavy-slots-');
+  const log = tmp('heavy-log-');
+  const holder = tmp('heavy-wt-holder-');
+  const a = run(holder, slots, 1, hold(log, 'a', 2600));
+  await sleep(300);
+  const b = run(tmp('heavy-wt-b-'), slots, 1, hold(log, 'b', 50), { HEAVY_NOTE_EVERY: '1' });
+  const err = stderrOf(b);
+  await Promise.all([done(a), done(b)]);
+  const notes = err().split('\n').filter((l) => /still waiting/.test(l));
+  assert.ok(notes.length >= 1, `no "still waiting" line in:\n${err()}`);
+  assert.ok(notes.every((l) => l.includes(path.basename(holder))), 'a note does not name the holder');
+});
+
+test('npm runs through it as named, on every platform', { timeout: 60000 }, async () => {
+  const slots = tmp('heavy-slots-');
+  const child = spawn(process.execPath, [SCRIPT, '--', 'npm', '--version'], {
+    cwd: tmp('heavy-wt-'),
+    env: { ...process.env, HEAVY_SLOTS_DIR: slots, HEAVY_SLOTS: '1', HEAVY_POLL_MS: '50' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  const r = await done(child);
+  assert.equal(r.code, 0, `npm --version exited ${r.code}`);
+  assert.match(out.trim(), /^\d+\.\d+\.\d+/);
+  assert.deepEqual(slotFiles(slots), []);
 });
 
 test('a missing command fails with 127 and frees its slot', { timeout: 20000 }, async () => {
