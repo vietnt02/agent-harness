@@ -38,7 +38,8 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 Luôn là coordinator: sửa harness (`~/.claude` và repo nguồn cài ra nó, `.claude/` hay rule agent của
 một repo), chỉ trong phiên user mở cho harness/kaizen hoặc khối gọi tên nó (gặp lỗi harness lúc làm
 việc khác → ghi kaizen, `ntv-kaizen`: không sửa, không PR, không hỏi mở); việc cần công cụ chỉ phiên này
-có (MCP, login); việc user chỉ đích danh Claude; đổi một giá trị có sẵn, không logic mới; ghi không có cổng phía sau (Lark, n8n, DB, chạy job
+có (MCP, login); việc user chỉ đích danh Claude ("tự làm" hay lời cùng nghĩa: Claude tự viết trong phiên, chỉ
+reviewer được giao); đổi một giá trị có sẵn, không logic mới; ghi không có cổng phía sau (Lark, n8n, DB, chạy job
 thật, gửi tin, publish tay như Power BI): worker chỉ rà, dựng lệnh và chạy `--dry-run`, coordinator đọc
 output đó, chạy thật, đọc lại đích (hook `dispatch-split-guard` chặn spec hay tin giao worker một lệnh
 ghi Lark/n8n; nó không thấy SQL, curl hay lệnh kích job).
@@ -71,7 +72,8 @@ model theo **Chọn model** (§ 2). Lỗi do skill chỉ sai bước hoặc lu�
 
 **Orca hay subagent native:** việc chỉ đọc (rà, dò dữ liệu, tìm nguyên nhân gốc), ở repo nào cũng
 vậy → subagent `ntv-scout` chạy nền. Việc còn lại kết thúc bằng commit/PR, chạm repo khác, phải sống
-qua phiên, hay user nói "supervised" → worker Orca. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
+qua phiên, hay user nói "supervised" → worker Orca. Subagent chỉ đọc, không bao giờ sửa: "giao worker" là
+worker Orca, kể cả khi worker là Claude. Orca không chạy (`orca status --json`) mà việc cần Orca → báo user, không tự làm thay.
 
 **Manifest — một mục của plan `ntv-autopilot`** (`CLAUDE.md` § Mutation gate): plan có giao
 worker thì chốt model, worktree ngay trong plan; duyệt plan là duyệt manifest, không hỏi lại.
@@ -206,13 +208,14 @@ tác giả chấm).
   mục Nghiệm thu và các câu hỏi cố định, không nhận hội thoại, lập luận hay báo cáo của tác giả; brief
   không gợi kết luận.
 - **Model theo quota lúc giao:** còn quota ở model khác dòng với tác giả thì dùng (agy `gemini-4-neon
-  high`, Codex `sol high`); không thì model nào còn quota; hết cả thì một Claude context mới (subagent
+  high`, Codex `sol high`; cả hai còn quota ngang nhau, chênh không quá 20 điểm phần trăm phần còn lại, hay
+  một bên không đọc được → neon); không thì model nào còn quota; hết cả thì một Claude context mới (subagent
   hay worker Claude). Đọc quota: agy `agy -p "/usage"` (dòng `Gemini Models`); Codex `rate_limits`
   (`primary` 5 giờ và `secondary` tuần: `used_percent`, `resets_at`) ở log phiên mới nhất dưới `~/.codex/sessions/`; không đọc được
   thì giao, gặp lỗi hết quota thì chuyển model kế. Đổi theo quota làm luôn, ghi vào report. Reviewer ở mọi model, mọi vòng chạy effort high, dù
   frontmatter của model ghi gì. **Checker** theo cùng luật; khi là agy: `gemini-4-hydrogen high`.
 - **Thay đổi harness hay rule cho agent** (`~/.claude`, repo nguồn cài ra nó, `.claude/` hay
-  `CLAUDE.md`, `AGENTS.md` của một repo), dù ai viết: reviewer là một Claude subagent context mới, effort
+  `CLAUDE.md`, `AGENTS.md` của một repo), dù ai viết: reviewer là một Claude subagent `general-purpose` context mới, effort
   high — chỉ agent chạy harness này đọc được hợp đồng của hook và cách một luật được hiểu. Brief nêu
   các lệnh agent thật sự gõ, không săn đường vòng qua hook (`ntv-kaizen`).
 - **Đường nhạy cảm** (tiền, quyền truy cập, dữ liệu riêng tư, migration, tin gửi khách): hai reviewer

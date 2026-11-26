@@ -57,7 +57,10 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
    The message just before it lists the actions by group, each tier C step by name, the
    prerequisites with their results, the defaults and out of scope; its question, one line, names
    the plan's path. Never ask it while a question
-   is open. A plan written on a yes to `ntv-architect`'s final gate is approved then: no second gate.
+   is open. It is asked once a plan: answered with anything but its yes (skipped, a question, a
+   request), it is never asked again for that plan; the turn writes the answer into the plan, ends with
+   the plan's full path, and the plan waits for the user's own words to run it (read for their intent:
+   "ok chạy", "mở autopilot", "chốt plan"; unclear is no yes). A plan written on a yes to `ntv-architect`'s final gate is approved then: no second gate.
    Unless a yes starts the run (its Report ends the turn), end the turn with the plan's full path
    and a summary (the design settled, actions by group, each tier C step by name, Done when,
    prerequisites with their results, defaults, out of scope).
@@ -66,7 +69,9 @@ whole absence. Not this: the machine goes off → `/ntv-shutdown`.
 
 On a yes to the final gate (or "chốt plan"), with no question left open: set `status: approved`
 and add `approved: "<the user's exact reply>" <yyyy-mm-dd HH:MM> UTC+7`. The approval holds for
-this session only. Any change to the plan's scope afterwards: back to `status: draft`, and ask
+this session only. Words in the approval that change the plan (who builds: "tự làm" is Claude in
+this session, "giao worker" an Orca worker; scope) go into the plan and its `## Manifest` before the
+first step. Any change to the plan's scope afterwards: back to `status: draft`, and ask
 again; the one exception is an action the user approves by name in the Report's ask (below).
 
 ## Run
@@ -82,8 +87,9 @@ again; the one exception is an action the user approves by name in the Report's 
   `~/.claude/scripts/watch.sh`, never on the user.
 - An action the plan does not list, or one needing intent the plan does not state: park it.
 - The user interrupts (stops the turn): stop; every tier-C step is asked again. A message sent mid-run
-  without stopping is read by what it says: a question or request in it is answered, the run halting
-  after the step under way until the user says go on; any message asks every `Đã park` item at once.
+  without stopping is read by what it says: a question or request in it is answered and the run goes
+  on, halting after the step under way only when it disputes what the plan decided (scope, a step, a
+  decision) or asks to stop, until the user says go on; any message asks every `Đã park` item at once.
 - A classifier or permission denial: never retry it in another form; park that step with its
   exact command (`rules/mine/user-profile.md`).
 
