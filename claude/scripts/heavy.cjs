@@ -11,8 +11,8 @@
  *   node ~/.claude/scripts/heavy.cjs -- sh -c '<command> && <command>'   (a compound command, env vars)
  *
  * A slot belongs to a worktree (the git top level of the cwd, else the cwd): a second heavy command
- * from the same worktree joins the slot its first one holds, so a worker running a dev server never
- * waits on itself. A slot is free again when its last holder exits; a holder whose process died
+ * from the same worktree joins the slot its first one holds, so a worker's own install and build
+ * never wait on each other. A slot is free again when its last holder exits; a holder whose process died
  * (killed, crashed) is dropped at the next look. The command's exit code comes back unchanged (127
  * when it cannot start); a signal sent to this wrapper goes on to the command.
  * On Windows the command starts without a shell: name an executable (`node`, `cmd /c npm ci`).
