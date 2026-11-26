@@ -6,7 +6,7 @@
  * its description, or in visible text of this turn) listing each task with the files it touches,
  * `Track: w17 ← sửa chốt [gui/chot.py, giao_dien.py] | tắt backend [app.py]`, whose tasks share no
  * source file, or whose one task spans ≥3 top-level roots: separate tracks for separate workers next
- * time (skills/ntv-orca/SKILL.md § 2, Song song và cap). Test, doc, plan and fixture files never link
+ * time (skills/ntv-orca/SKILL.md § 2, Song song). Test, doc, plan and fixture files never link
  * tasks. `(serial: <lý do>)` on the line silences it when one of the user's last 10 prompts asks for
  * serial work ("chạy serial", "làm tuần tự"; not a complaint, a negation, a question or "serial
  * number") or `kern.memorystatus_vm_pressure_level` is ≥2 (`DSG_PRESSURE` overrides it in tests). No
@@ -374,7 +374,7 @@ function verdict(lines, input, ctx, { advisory = false } = {}) {
     if (roots) {
       return `\`${line.trim()}\` gives a task files under ${roots.join(', ')}: name each file group as its own ` +
         'task (`| task [files]`), so unrelated groups go to separate workers, each on its own branch; the ' +
-        'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca § 2, Song song và cap). ' +
+        'coordinator merges them into an integration branch and runs the shared tests there (ntv-orca § 2, Song song). ' +
         'Groups that truly edit one shared source file list that file in each group, and stay one track. ' +
         'A shared test, doc, plan or fixture file does not link groups. The worker starts as given; split the next ' +
         'dispatch if the groups are truly independent.';
@@ -382,7 +382,7 @@ function verdict(lines, input, ctx, { advisory = false } = {}) {
     const split = unrelatedTasks(line, ctx);
     if (split.length) {
       return `\`${line.trim()}\` bundles tasks that share no source file (${split.join(', ')}): give each its own ` +
-        'worker, dispatched now (ntv-orca § 2, Song song và cap); shared test, doc, plan or fixture files do not count. Only the ' +
+        'worker, dispatched now (ntv-orca § 2, Song song); shared test, doc, plan or fixture files do not count. Only the ' +
         'user\'s request for serial work or memory pressure ≥2 keeps them together, written on the line as ' +
         '`(serial: <lý do>)`. The worker starts as given; this is a hint for the next split.' + serialNote;
     }

@@ -4,4 +4,4 @@ Facts needed only in some situations: one file per topic in `~/.claude/knowledge
 trigger matches.
 
 - <topic> — khi: <trigger> → knowledge/<file>.md
-- cap worker, Orca Settings, agy paths — khi: spawning Orca workers → knowledge/orca.md
+- số worker và RAM, Orca Settings, agy paths, host Orca khác — khi: spawning Orca workers → knowledge/orca.md
