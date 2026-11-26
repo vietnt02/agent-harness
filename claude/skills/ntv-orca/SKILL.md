@@ -38,7 +38,7 @@ Chỉ coordinator nói chuyện với user; worker chỉ hỏi coordinator (`ask
 Luôn là coordinator: sửa harness (`~/.claude` và repo nguồn cài ra nó, `.claude/` hay rule agent của
 một repo), chỉ trong phiên user mở cho harness/kaizen hoặc khối gọi tên nó (gặp lỗi harness lúc làm
 việc khác → ghi kaizen, `ntv-kaizen`: không sửa, không PR, không hỏi mở); việc cần công cụ chỉ phiên này
-có (MCP, login); việc user chỉ đích danh Claude; ghi không có cổng phía sau (Lark, n8n, DB, chạy job
+có (MCP, login); việc user chỉ đích danh Claude; đổi một giá trị có sẵn, không logic mới; ghi không có cổng phía sau (Lark, n8n, DB, chạy job
 thật, gửi tin, publish tay như Power BI): worker chỉ rà, dựng lệnh và chạy `--dry-run`, coordinator đọc
 output đó, chạy thật, đọc lại đích (hook `dispatch-split-guard` chặn spec hay tin giao worker một lệnh
 ghi Lark/n8n; nó không thấy SQL, curl hay lệnh kích job).
@@ -48,10 +48,10 @@ ghi Lark/n8n; nó không thấy SQL, curl hay lệnh kích job).
 | 1. Nhận việc | Hiểu ý user, chốt phạm vi và tiêu chí nghiệm thu (thứ user sẽ thấy) trong plan `ntv-autopilot` trước khi làm. Ý chưa rõ thì hỏi user. | — |
 | 2. Rà, thiết kế | Đích chưa rõ thì giao subagent rà (dưới); bản đồ nó trả về đi vào thiết kế. Coordinator thiết kế: hướng làm, hàm, luồng, ca biên, test phải chứng minh gì. Việc khó đảo ngược (schema, migration, contract công khai, dữ liệu người khác đọc): song song, một agent context mới (model theo § 4) nhận câu của user, dữ kiện và ràng buộc, không nhận thiết kế của coordinator, rồi đề xuất; coordinator so hai bản, ghi chỗ nhận, chỗ bỏ vào plan. | — |
 | 3. Giao | Manifest là một mục của plan `ntv-autopilot`; plan duyệt xong mới viết spec (§ 2), spawn. | — |
-| 4. Đối chiếu | Trả lời mâu thuẫn worker báo: sửa đúng phần thiết kế đó hay giữ, kèm lý do; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Lựa chọn đổi thứ user hay người dùng thấy mà plan chưa ghi → park, hỏi gộp sau lượt (`ntv-autopilot` § Report). | Đọc đúng chỗ thiết kế nêu, query dữ liệu thật trên toàn bộ dữ liệu khi thiết kế dựa vào dữ liệu; gửi qua `ask` chỗ code hay dữ liệu mâu thuẫn thiết kế, kèm output thô và `file:dòng`, hoặc báo không mâu thuẫn. Không lập kế hoạch lại. |
+| 4. Đối chiếu | Trả lời mâu thuẫn worker báo: sửa đúng phần thiết kế đó hay giữ, kèm lý do; nghi chỗ nào thì tự chạy **một** lệnh đọc đúng chỗ đó. Worker `gpt-luna` không tự phản biện spec: đối chiếu từng con số nó báo với output thô. Lựa chọn đổi thứ user hay người dùng thấy mà plan chưa ghi → park, hỏi gộp sau lượt (`ntv-autopilot` § Report). | Đọc đúng chỗ thiết kế nêu, query dữ liệu thật trên toàn bộ dữ liệu khi thiết kế dựa vào dữ liệu; chỗ code hay dữ liệu mâu thuẫn thiết kế thì gửi qua `ask`, kèm output thô và `file:dòng`, rồi chờ trả lời; không mâu thuẫn thì làm luôn, ghi điều đó vào báo cáo. Không lập kế hoạch lại. |
 | 5. Làm | Trả lời `ask` nhanh — worker đang đứng chờ. | Code, test, commit, push nhánh, mở PR/MR. Lệnh ghi production chỉ dựng lệnh và chạy `--dry-run`, báo output. |
 | 6. Review | Giao review độc lập (§ 4); quyết từng finding sửa hay bỏ. | Reviewer tìm lỗi, dán bằng chứng; người làm sửa theo finding đã quyết. |
-| 7. Cổng, chạy thật | Đọc toàn bộ diff tới đúng SHA sẽ merge, chạy check của repo trên SHA đó, merge. Tự chạy lệnh ghi production thật, đọc lại đích. Sau deploy đọc thứ đang chạy trên production. | — |
+| 7. Cổng, chạy thật | Theo dõi CI. Đọc toàn bộ diff tới đúng SHA sẽ merge, chạy check của repo trên SHA đó, merge. Tự chạy lệnh ghi production thật, đọc lại đích. Sau deploy đọc thứ đang chạy trên production. | — |
 | 8. Báo cáo | Báo user đã kiểm gì, chưa kiểm gì, một lần cho cả khối (§ 3); worker đã release thì gỡ worktree (`references/orca.md`). | `worker_done`: đã kiểm gì, chưa kiểm gì. |
 
 **Câu hỏi của user về hệ thống** ("bảng này đã có bên PG chưa", "còn job nào chạy không"):
@@ -75,7 +75,7 @@ qua phiên, hay user nói "supervised" → worker Orca. Orca không chạy (`orc
 
 **Manifest — một mục của plan `ntv-autopilot`** (`CLAUDE.md` § Mutation gate): plan có giao
 worker thì chốt model, worktree ngay trong plan; duyệt plan là duyệt manifest, không hỏi lại.
-Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Ngoại lệ: reviewer chỉ đọc do câu của user mở (review PR/MR của bất kỳ ai) giao ngay, không plan, không manifest; đăng gì lên PR/MR vẫn hỏi riêng. Mỗi worker
+Không có plan đã duyệt thì không spawn worker; manifest trích plan, không thay plan. Ngoại lệ: reviewer chỉ đọc do câu của user mở (review PR/MR của bất kỳ ai) giao ngay, không plan, không manifest; đăng gì lên PR/MR vẫn hỏi riêng. Agent thiết kế độc lập của chặng 2 cũng giao ngay, không manifest: nó chỉ đọc và đề xuất. Mỗi worker
 một dòng:
 
     Manifest khối <X> — parallel <n> (cap <N>).
@@ -101,14 +101,15 @@ mục **Nghiệm thu** (kết quả user thấy, chuẩn đối chiếu trỏ đ
 và yêu cầu:
 
 - trước khi sửa: đọc đúng chỗ thiết kế nêu, query dữ liệu thật trên toàn bộ dữ liệu khi thiết kế dựa
-  vào dữ liệu, rồi gửi qua `ask` chỗ code hay dữ liệu mâu thuẫn thiết kế (output thô, `file:dòng`), hoặc
-  báo không mâu thuẫn; làm đúng thiết kế, không lập kế hoạch lại;
+  vào dữ liệu; chỗ code hay dữ liệu mâu thuẫn thiết kế thì gửi qua `ask` (output thô, `file:dòng`) và chờ
+  trả lời, không mâu thuẫn thì làm luôn; làm đúng thiết kế, không lập kế hoạch lại;
 - kiểm hộp thư giữa lượt: chạy `orca orchestration check --peek` trước mỗi commit, trước một lệnh
   dài, và sau khoảng mỗi 10 lệnh; có tin mới của coordinator thì làm theo tin đó trước, tin đã làm
   theo thì bỏ qua khi thấy lại (`--peek` không đánh dấu đã đọc; worker Chat có nhận tin `send` giữa
   lượt hay không tuỳ bản Orca, xem `references/orca.md`);
-- lệnh nặng (build, cả bộ test, cài deps, dev server) chạy qua `node ~/.claude/scripts/heavy.cjs --
-  <lệnh>`, để các worker chờ lượt slot thay vì build cùng lúc;
+- lệnh nặng (build, cả bộ test, cài deps) chạy qua `node ~/.claude/scripts/heavy.cjs -- <lệnh>` (lệnh
+  ghép hay có biến môi trường: `-- sh -c '<lệnh>'`; Windows: `-- cmd /c <lệnh>`), để các worker chờ lượt
+  slot thay vì build cùng lúc; dev server không qua slot (`references/lessons.md`);
 - chép mọi cổng "trước khi mark ready" mà `AGENTS.md`/`CLAUDE.md` của repo đòi;
 - mọi path, con số, phản hồi giả lập của API ngoài trỏ được tới nguồn đã đọc, không có thì ghi
   "giả định" tại chỗ; fixture không chứa đường dẫn máy, stack trace hay thời điểm chạy;
@@ -143,7 +144,7 @@ vậy thành một PR/MR để pipeline chạy một lần: gộp nhánh, không
 
 **Chọn model** (user chốt; mỗi dòng một file trong `references/models/`):
 
-- Builder không dùng model Claude, trừ khi user chỉ định. Reviewer, checker chọn theo quota (§ 4), có
+- Worker builder không dùng model Claude, trừ khi user chỉ định. Reviewer, checker chọn theo quota (§ 4), có
   thể là Claude; review thay đổi của harness hay rule cho agent luôn là Claude (§ 4); chặng rà là
   subagent `ntv-scout` (Sonnet, § 1).
 - Builder luôn là Gemini qua Antigravity; codex (GPT) hay Claude chỉ khi user chỉ định. Mọi model
@@ -204,7 +205,7 @@ liệu người khác đọc, UI hay BI → có reviewer trước khi merge, dù
 - **Model theo quota lúc giao:** còn quota ở model khác dòng với tác giả thì dùng (agy `gemini-4-neon
   high`, Codex `sol high`); không thì model nào còn quota; hết cả thì một Claude context mới (subagent
   hay worker Claude). Đọc quota: agy `agy -p "/usage"` (dòng `Gemini Models`); Codex `rate_limits`
-  (`primary.used_percent`, `resets_at`) ở log phiên mới nhất dưới `~/.codex/sessions/`; không đọc được
+  (`primary` 5 giờ và `secondary` tuần: `used_percent`, `resets_at`) ở log phiên mới nhất dưới `~/.codex/sessions/`; không đọc được
   thì giao, gặp lỗi hết quota thì chuyển model kế. Đổi theo quota làm luôn, ghi vào report. Reviewer ở mọi model, mọi vòng chạy effort high, dù
   frontmatter của model ghi gì. **Checker** theo cùng luật; khi là agy: `gemini-4-hydrogen high`.
 - **Thay đổi harness hay rule cho agent** (`~/.claude`, repo nguồn cài ra nó, `.claude/` hay

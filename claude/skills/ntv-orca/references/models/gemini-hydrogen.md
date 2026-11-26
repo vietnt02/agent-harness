@@ -24,5 +24,5 @@ Chỉ câu lệnh bị chặn ở `../antigravity.md`.
 
 ## Review gì
 
-- Duyệt kế hoạch và nghiệm thu như mọi dòng model (`SKILL.md` § 1, § 4).
+- Đối chiếu thiết kế và nghiệm thu như mọi dòng model (`SKILL.md` § 1, § 4).
 - Spec luôn kèm câu chặn side effect trong test (`SKILL.md` § 2).

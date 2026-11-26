@@ -29,7 +29,7 @@ Chỉ dùng khi user chỉ định (`SKILL.md` § 2). Spawn: `--agent codex --mo
 
 ## Review gì
 
-- Đối chiếu con số kế hoạch với output thô (`SKILL.md` § 1).
+- Đối chiếu từng con số nó báo với output thô (`SKILL.md` § 1).
 - Soát lỗi DRY, side effect mode chỉ-đọc, hai nhánh cùng đầu ra.
 - DDL/SQL: dựng `probe_*` chạy thật, soát `CREATE TABLE IF NOT EXISTS` trên bảng đã có (`SKILL.md` § 4).
 - Kiểm thân commit (không dính `\n` literal) và `git status` khi im lặng cuối lượt (`SKILL.md` § 6).

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * heavy.cjs - run a heavy command (a build, a full test suite, a dependency install, a dev server) in
- * one of N slots shared by every agent on this machine, so parallel workers take turns instead of
- * piling their builds into memory at once. A slot, not a load threshold: a wait on "load below X"
- * can stall a lane for hours, a slot frees the moment its command ends.
+ * heavy.cjs - run a heavy command (a build, a full test suite, a dependency install) in one of N
+ * slots shared by every agent on this machine, so parallel workers take turns instead of piling
+ * their builds into memory at once. A slot, not a load threshold: a wait on "load below X" can stall
+ * a lane for hours, a slot frees the moment its command ends. A dev server takes no slot: it runs for
+ * the whole task and would hold one until it stops.
  *
  *   node ~/.claude/scripts/heavy.cjs -- <command> [args...]
+ *   node ~/.claude/scripts/heavy.cjs -- sh -c '<command> && <command>'   (a compound command, env vars)
  *
  * A slot belongs to a worktree (the git top level of the cwd, else the cwd): a second heavy command
  * from the same worktree joins the slot its first one holds, so a worker running a dev server never
@@ -14,6 +16,8 @@
  * (killed, crashed) is dropped at the next look. The command's exit code comes back unchanged (127
  * when it cannot start); a signal sent to this wrapper goes on to the command.
  * On Windows the command starts without a shell: name an executable (`node`, `cmd /c npm ci`).
+ * No usable slot dir (a sandbox that denies it, a read-only home): the command runs without a slot,
+ * with a warning, since a slot only orders work and must never stop it.
  *
  * Env: HEAVY_SLOTS (default 2), HEAVY_SLOTS_DIR (default ~/.cache/agent-harness/heavy-slots),
  *      HEAVY_POLL_MS (default 2000).
@@ -83,7 +87,13 @@ async function locked(fn) {
   }
 }
 
-const write = (file, slot) => fs.writeFileSync(file, JSON.stringify(slot));
+// Written to a temp file then renamed, so a writer killed mid-write never leaves a half file that
+// would drop every live holder in it.
+function write(file, slot) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(slot));
+  fs.renameSync(tmp, file);
+}
 function drop(file) {
   try { fs.unlinkSync(file); } catch (_) { /* already gone */ }
 }
@@ -136,23 +146,30 @@ function give(file) {
 }
 
 async function main() {
-  fs.mkdirSync(DIR, { recursive: true });
-  let got;
+  let got = null;
   let said = false;
-  for (;;) {
-    got = await locked(take);
-    if (got.file) break;
-    if (!said) {
-      process.stderr.write(`heavy: waiting for a slot (${got.busy.length}/${SLOTS} in use: ${got.busy.join(', ')})\n`);
-      said = true;
+  try {
+    fs.mkdirSync(DIR, { recursive: true });
+    for (;;) {
+      got = await locked(take);
+      if (got.file) break;
+      if (!said) {
+        process.stderr.write(`heavy: waiting for a slot (${got.busy.length}/${SLOTS} in use: ${got.busy.join(', ')})\n`);
+        said = true;
+      }
+      await sleep(POLL_MS);
     }
-    await sleep(POLL_MS);
+  } catch (e) {
+    process.stderr.write(`heavy: no usable slot dir ${DIR} (${e.code || e.message}); running without a slot\n`);
+    got = null;
   }
   let finished = false;
   const finish = async (code) => {
     if (finished) return;
     finished = true;
-    await locked(() => give(got.file));
+    if (got && got.file) {
+      try { await locked(() => give(got.file)); } catch (_) { /* the next look drops a dead holder */ }
+    }
     process.exit(code);
   };
   const child = spawn(cmd[0], cmd.slice(1), { stdio: 'inherit' });

@@ -23,6 +23,8 @@ the notes it cannot know alone.
   runs again; kept only when Viet asked. Any other stops before its worktree or session ends.
 - A test run of a local app still runs on Viet's machine: it never triggers (click or API call) an
   action that reaches the OS (`open`, Finder, a browser launch) unless the app stubs it on that run.
+- A heavy command (a build, a full test suite, a dependency install) goes through
+  `node ~/.claude/scripts/heavy.cjs -- <command>`, so it takes turns with the workers' (`ntv-orca` § 2).
 - Unmerged code runs only where the repo's docs allow (a local runner, a test deploy); never
   hand-copied to a server.
 

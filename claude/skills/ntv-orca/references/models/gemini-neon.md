@@ -27,5 +27,5 @@ Khi làm builder (kèm câu lệnh bị chặn ở `../antigravity.md`):
 
 ## Review gì
 
-- Duyệt kế hoạch và nghiệm thu như mọi dòng model (`SKILL.md` § 1, § 4).
+- Đối chiếu thiết kế và nghiệm thu như mọi dòng model (`SKILL.md` § 1, § 4).
 - Soát từng nhánh xử lý lỗi nó tự thêm: điều kiện có hẹp đúng nguồn không, có ghi đè bản ghi dở không.

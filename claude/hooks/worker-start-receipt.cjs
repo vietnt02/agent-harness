@@ -81,7 +81,7 @@ function describe(dispatch) {
   }
   const head = `${dispatch}: state=${w.state}, stage=${w.stage}, lastError="${w.lastError || ''}". ` +
     `Trước hết đọc ${read} (agent đã nhận spec? đang chạy?).`;
-  if (!w.lastError) return `${head} Không có lastError: đọc ${read} và bảng § 6 của ntv-orca trước khi kết luận.`;
+  if (!w.lastError) return `${head} Không có lastError: đọc ${read} và bảng Khi có sự cố trong references/orca.md của ntv-orca trước khi kết luận.`;
   const refs = guideLines(w.lastError);
   return refs.length
     ? `${head} Guide nhắc tới lỗi này, đọc các dòng sau trước mọi bước khác (kể cả trước khi hỏi user):\n${refs.map((r) => `    ${r}`).join('\n')}`

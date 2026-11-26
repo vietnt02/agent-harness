@@ -134,6 +134,21 @@ test("the command's exit code comes back and its slot is freed", { timeout: 2000
   assert.deepEqual(slotFiles(slots), []);
 });
 
+test('no usable slot dir: the command still runs, without a slot', { timeout: 20000 }, async () => {
+  const file = path.join(tmp('heavy-ro-'), 'not-a-dir');
+  fs.writeFileSync(file, '');
+  const child = spawn(process.execPath, [SCRIPT, '--', process.execPath, '-e', 'process.exit(4)'], {
+    cwd: tmp('heavy-wt-'),
+    env: { ...process.env, HEAVY_SLOTS_DIR: path.join(file, 'slots'), HEAVY_SLOTS: '1', HEAVY_POLL_MS: '50' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let err = '';
+  child.stderr.on('data', (d) => { err += d; });
+  const r = await done(child);
+  assert.equal(r.code, 4);
+  assert.match(err, /running without a slot/);
+});
+
 test('a missing command fails with 127 and frees its slot', { timeout: 20000 }, async () => {
   const slots = tmp('heavy-slots-');
   const r = await done(run(tmp('heavy-wt-'), slots, 1, ['heavy-no-such-command-x']));
