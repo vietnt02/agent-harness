@@ -22,10 +22,11 @@
  * command runs without a slot, with a warning naming who holds them. While it waits, a line every
  * HEAVY_NOTE_EVERY seconds says so, so a waiting command is not taken for a hung one.
  *
- * Each run appends one line to HEAVY_LOG: when it started, its worktree, the command's program and
- * subcommand (never its arguments, which can hold a token), how long it waited, how many slots were
- * busy, whether it ran without a slot and why, memory pressure at start and end (macOS), free RAM %,
- * swap in use (macOS), how long it ran, its exit code. A log that cannot be written is skipped; past
+ * Each run appends one line to HEAVY_LOG: when it arrived, its worktree, the command's program (and
+ * the subcommand words of a known build tool, never an argument, which can hold a token), how long it
+ * waited, how many slots were busy, whether it ran without a slot and why (max-wait, no-dir,
+ * killed-waiting), memory pressure on arrival, at start and at end (macOS), free RAM % on arrival and at
+ * start, swap in use (macOS), how long it ran, its exit code. A log that cannot be written is skipped; past
  * HEAVY_LOG_MAX_BYTES it turns over to <log>.1. The numbers decide later whether slots should count
  * RAM rather than commands.
  *
@@ -155,12 +156,21 @@ function take() {
   return { file, others };
 }
 
-// The program and its subcommand words, never an argument: words stop at an option, a path, an
-// assignment or a long word.
+// Programs whose next words are subcommands or script names (`npm run build`, `cargo test`); any other
+// program logs its name alone, since its next word can be a password, a token or a client name.
+const SUBCOMMANDS = new Set(['npm', 'pnpm', 'yarn', 'bun', 'npx', 'pnpx', 'bunx', 'uv', 'cargo', 'go', 'make',
+  'mvn', 'gradle', 'gradlew', 'dotnet', 'poetry', 'pip', 'pip3', 'deno', 'turbo', 'nx', 'next', 'vitest',
+  'jest', 'playwright', 'tsc']);
+// The program and, for those above, up to two subcommand words: lowercase letters, `:`, `_` or `-`
+// only, so a word with a digit, a dot, a capital or `=` (most secrets) ends it. `python -m <module>` too.
 function commandName(words) {
-  const out = [path.basename(String(words[0] || '')).replace(/\.(?:exe|cmd|bat)$/i, '')];
+  const program = path.basename(String(words[0] || '')).replace(/\.(?:exe|cmd|bat)$/i, '');
+  const out = [program];
+  const plain = (w) => /^[a-z][a-z:_-]{0,30}$/.test(w);
+  if (/^python3?$/.test(program) && words[1] === '-m' && plain(words[2] || '')) return `${program} -m ${words[2]}`;
+  if (!SUBCOMMANDS.has(program)) return program;
   for (const w of words.slice(1, 3)) {
-    if (!/^[A-Za-z][\w:.-]{0,39}$/.test(w) || w.includes('/')) break;
+    if (!plain(w)) break;
     out.push(w);
   }
   return out.join(' ');
@@ -196,13 +206,32 @@ function give(file) {
   else drop(file);
 }
 
+let child = null;
+
 async function main() {
   let got = null;
   const t0 = Date.now();
   let noted = 0;
   let reason = null;
   let others = null;
-  const before = { pressure: pressure(), freePct: freePct(), swapMb: swapUsedMb() };
+  const arrive = { pressure: pressure(), freePct: freePct() };
+  let started = null;
+  let finish = null;
+  // A signal before the command starts (a waiter whose tool call timed out) still leaves a log line.
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(sig, () => {
+      if (child) {
+        try { child.kill(sig); } catch (_) { /* already gone */ }
+      } else if (finish) {
+        finish(128 + (os.constants.signals[sig] || 1));
+      } else {
+        reason = reason || 'killed-waiting';
+        logRun({ at: new Date(t0).toISOString(), root: ROOT, cmd: commandName(cmd), waitedMs: Date.now() - t0, slotsBusy: others,
+          slots: SLOTS, slot: false, reason, pressureArrive: arrive.pressure, freePctArrive: arrive.freePct, exit: 128 + (os.constants.signals[sig] || 1) });
+        process.exit(128 + (os.constants.signals[sig] || 1));
+      }
+    });
+  }
   try {
     fs.mkdirSync(DIR, { recursive: true });
     for (;;) {
@@ -232,9 +261,10 @@ async function main() {
     reason = 'no-dir';
   }
   const waitedMs = Date.now() - t0;
+  started = { pressure: pressure(), freePct: freePct(), swapMb: swapUsedMb() };
   const ran = Date.now();
   let finished = false;
-  const finish = async (code) => {
+  finish = async (code) => {
     if (finished) return;
     finished = true;
     if (got && got.file) {
@@ -242,17 +272,12 @@ async function main() {
     }
     logRun({
       at: new Date(t0).toISOString(), root: ROOT, cmd: commandName(cmd), waitedMs, slotsBusy: others, slots: SLOTS,
-      slot: Boolean(got && got.file), reason, pressureStart: before.pressure, pressureEnd: pressure(),
-      freePct: before.freePct, swapMb: before.swapMb, durationMs: Date.now() - ran, exit: code,
+      slot: Boolean(got && got.file), reason: reason || (child ? null : 'killed-waiting'),
+      pressureArrive: arrive.pressure, pressureStart: started.pressure, pressureEnd: pressure(),
+      freePctArrive: arrive.freePct, freePct: started.freePct, swapMb: started.swapMb, durationMs: Date.now() - ran, exit: code,
     });
     process.exit(code);
   };
-  let child = null;
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.on(sig, () => {
-      try { if (child) child.kill(sig); } catch (_) { /* already gone */ }
-    });
-  }
   const start = (shim) => {
     const viaCmd = Boolean(shim);
     try {
