@@ -78,7 +78,8 @@ the loop this stops.
   a serious break with the hook that stops it; an ambiguous sentence reworded within the
   `tools/rules-budget.cjs` caps; a decision file by every line a fresh `grep` of the changed concept
   prints (its `## Mọi chỗ phải sửa` is the writer's list, a lead), as decided (only its
-  `## Câu chưa chốt` is settled with Viet). No rule names an incident or its date; an example stays only when the
+  `## Câu chưa chốt` is settled with Viet). A rule born from what broke in `ntv-orca` goes to its
+  `references/lessons.md`, the mechanism that broke → the rule. No rule names an incident or its date; an example stays only when the
   rule is unclear without it.
 - The harness guides; the work's output is what counts, and every block costs the agent a read and
   a retry. A hook blocks only where a wrong step reaches someone else or cannot be undone (a merge, a

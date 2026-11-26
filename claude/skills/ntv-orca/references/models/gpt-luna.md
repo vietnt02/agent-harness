@@ -14,7 +14,7 @@ Chỉ dùng khi user chỉ định (`SKILL.md` § 2). Spawn: `--agent codex --mo
 
 ## Giao gì / Không giao gì
 
-- **Giao:** Backend, pipeline, SQL, schema gọn một lượt (lọc báo cáo, sửa text, pagination, chống race); giữ kỷ luật tầng C. Task nhạy cảm (thư, hoá đơn, công nợ) cần duyệt kế hoạch và reviewer (`SKILL.md` § 1, § 4).
+- **Giao:** Backend, pipeline, SQL, schema gọn một lượt (lọc báo cáo, sửa text, pagination, chống race); giữ kỷ luật tầng C. Task nhạy cảm (thư, hoá đơn, công nợ) cần thiết kế của coordinator và hai reviewer (`SKILL.md` § 1, § 4).
 - **Không giao:** UI/UX; task dài (chia ≤ 30 phút, `SKILL.md` § 2); việc chưa kiểm dữ liệu thật (không tự phản biện spec).
 
 ## Phải nói rõ trong spec
@@ -29,7 +29,7 @@ Chỉ dùng khi user chỉ định (`SKILL.md` § 2). Spawn: `--agent codex --mo
 
 ## Review gì
 
-- Đối chiếu con số kế hoạch với output thô (`SKILL.md` § 1).
+- Đối chiếu từng con số nó báo với output thô (`SKILL.md` § 1).
 - Soát lỗi DRY, side effect mode chỉ-đọc, hai nhánh cùng đầu ra.
 - DDL/SQL: dựng `probe_*` chạy thật, soát `CREATE TABLE IF NOT EXISTS` trên bảng đã có (`SKILL.md` § 4).
 - Kiểm thân commit (không dính `\n` literal) và `git status` khi im lặng cuối lượt (`SKILL.md` § 6).

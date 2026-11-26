@@ -4,7 +4,7 @@
  * CLAUDE_CODE_SESSION_ID=<this session> in its environment) and that a Bash call started itself
  * (`nohup … &`, a background command) that still listens on a TCP port when the turn ends is sent
  * back: stop it if it was only started to check, or say in the reply that Viet asked to keep it
- * (ntv-implement § Change; user-profile.md: nothing runs in the background without asking).
+ * (ntv-implement § This machine; user-profile.md: nothing runs in the background without asking).
  * Each server is sent back once, remembered by pid and start time in
  * $TMPDIR/session-servers-guard/<session>.json, so a kept server costs no further turns and another
  * Stop hook's send-back (`stop_hook_active`) does not hide a new one.

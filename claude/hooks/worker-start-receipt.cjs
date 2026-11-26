@@ -5,7 +5,7 @@
  * out of its own output. Registered on both events: a call that exits non-zero (`ok:false`, a
  * `jq -e` check) fires PostToolUseFailure, with the output in `error`.
  * - failed or a lastError: print it with the lines of ~/.claude/skills/ntv-orca/ that mention it, so
- *   the guide is read before any guess or `**Cần bạn:**` (ntv-orca § 6, Khi có sự cố).
+ *   the guide is read before any guess or `**Cần bạn:**` (ntv-orca references/orca.md, Khi có sự cố).
  * - otherwise: remind that a receipt is a claim; the worker's terminal shows whether it took the spec.
  * - no dispatch id, or Orca unreachable: say so, and how to read the run instead.
  * - an antigravity worker: every running Orca agy chat server (`agy_acp_server`) must find
@@ -23,7 +23,7 @@
  * never an ask to the user. A send to a worker whose terminal is released does not fail: Orca reopens
  * it as a new dispatch on the same worktree (`delivery=reopened`, its id in `dispatchId=`) launched
  * without `--model` or `--effort`, so the reminder, read from the send's own output, says to stop that
- * dispatch and start the task again with its model (ntv-orca § 3). Output with no delivery (filtered)
+ * dispatch and start the task again with its model (ntv-orca references/orca.md). Output with no delivery (filtered)
  * falls back to the addressed worker's state; a finished one whose terminal went to a follow-up shows no
  * release, so a dispatch now active on its worktree in another terminal (`worker-list`) is the reopened one.
  * The new dispatch is `.result.dispatchId` of the receipt: other ids in the output (a dispatch the
@@ -81,7 +81,7 @@ function describe(dispatch) {
   }
   const head = `${dispatch}: state=${w.state}, stage=${w.stage}, lastError="${w.lastError || ''}". ` +
     `Trước hết đọc ${read} (agent đã nhận spec? đang chạy?).`;
-  if (!w.lastError) return `${head} Không có lastError: đọc ${read} và bảng § 6 của ntv-orca trước khi kết luận.`;
+  if (!w.lastError) return `${head} Không có lastError: đọc ${read} và bảng Khi có sự cố trong references/orca.md của ntv-orca trước khi kết luận.`;
   const refs = guideLines(w.lastError);
   return refs.length
     ? `${head} Guide nhắc tới lỗi này, đọc các dòng sau trước mọi bước khác (kể cả trước khi hỏi user):\n${refs.map((r) => `    ${r}`).join('\n')}`
@@ -257,7 +257,7 @@ function worktreeArg(id) {
 }
 
 const restart = (worktree) => 'rồi giao lại bằng `worker-start --spec-file` (spec cũ, nội dung tin, câu kiểm hộp thư) kèm ' +
-  `${worktreeArg(worktree)}, \`--agent\`, \`--model\`, \`--effort\` chọn theo ntv-orca § 2, vì launch của dispatch mở lại là null (ntv-orca § 3).`;
+  `${worktreeArg(worktree)}, \`--agent\`, \`--model\`, \`--effort\` chọn theo ntv-orca § 2, vì launch của dispatch mở lại là null (ntv-orca references/orca.md).`;
 
 // The reminders for a send: one per dispatch its output says Orca reopened; then one per addressed worker
 // (`show` reads its state): released while the output shows no delivery at all (filtered), or not finished.

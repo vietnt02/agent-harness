@@ -18,8 +18,7 @@ PR/MR carries the results; the coordinator checks them at the gate (`ntv-orca`).
 - Before writing it, name in one line: the behaviour it protects, its authority (a requirement,
   an API's documented or recorded reply, an accepted decision) and the defect it would catch. No
   defect named → no test; a covered refactor adds none.
-- A bug fix: the test fails on the code before the fix, for the reason of the bug, then passes
-  (`ntv-implement` § Verify).
+- A bug fix: the test fails on the code before the fix, for the reason of the bug, then passes.
 - It asserts what a caller or a reader of the output observes. Never admitted: a test that reads
   the source text where it could observe behaviour, one that asserts the mock it set up, a snapshot
   of whatever the code returns now. A guard whose purpose is the text itself (a forbidden pattern,
