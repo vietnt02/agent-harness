@@ -811,3 +811,27 @@ test('watch.sh: a space-separated --ok/--wait list is refused at once; a comma-s
   const listed = run('--ok', 'SUCCESS', '--wait', 'IN_PROGRESS,QUEUED,PENDING');
   assert.doesNotMatch(listed.stderr + listed.stdout, /comma-separated|UNEXPECTED/);
 });
+
+test('heavy-reminder: a heavy command gets one reminder a session; wrapped, light and quoted ones get none', () => {
+  const bash = (command, session) => context(hook('heavy-reminder.cjs', { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, session_id: session }));
+  const s1 = sid('heavy');
+  const first = bash('cd app && npm run build', s1);
+  assert.match(first, /heavy\.cjs/);
+  assert.match(first, /npm run build/);
+  assert.equal(bash('pnpm test', s1), '', 'reminded twice in one session');
+  const s2 = sid('heavy');
+  for (const light of ['node ~/.claude/scripts/heavy.cjs -- npm run build', 'npm --version', 'git status', 'npm run dev',
+    'echo npm run build', 'grep pytest notes.txt', 'npx prettier --write .']) {
+    assert.equal(bash(light, s2), '', `reminded on: ${light}`);
+  }
+  for (const heavy of ['bash -c "npm ci"']) assert.match(bash(heavy, s2), /npm ci/);
+});
+
+test('heavy-reminder: each common heavy shape is recognised, each light one is not', () => {
+  const { findHeavy } = require(path.join(HOOKS, 'heavy-reminder.cjs'));
+  for (const c of ['npm run build', 'npm run test:unit', 'npm test', 'pnpm build', 'npm ci', 'npm install', 'npm i', 'yarn',
+    'yarn install', 'bun install', 'npx vitest run', 'pnpm exec jest', 'pytest -q', 'python3 -m pytest tests', 'next build',
+    'npx playwright test', 'FOO=1 npm test']) assert.ok(findHeavy(c), `missed: ${c}`);
+  for (const c of ['npm run lint', 'npm run dev', 'yarn dev', 'pnpm add lodash', 'npm --version', 'git status', 'ls -la'])
+    assert.equal(findHeavy(c), null, `took a light command for heavy: ${c}`);
+});

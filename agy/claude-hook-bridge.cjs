@@ -27,6 +27,7 @@
  *     5. `tier-c-guard` chain check (a production write after another step in the same call), workers included
  *     7. `tier-c-guard` (blocks `airflow dags pause|unpause|backfill`, `trigger --conf` and a docker write over ssh when the latest user prompt is a question)
  *     8. `watch-guard` (blocks manual polling loops)
+ *     5c. `heavy-reminder` (one reminder per conversation to run heavy commands through heavy.cjs; workers too)
  *     9. `main-checkout-guard` (git writes into a main checkout: blocked once; `git -c core.hooksPath=...`: always)
  *    10. `dispatch-split-guard` (validates flags when running `orca orchestration worker-start`)
  *    11. `rules-budget` (enforces 24,000-byte cap on ~/.gemini/config/AGENTS.md; session-note caps come back as a reminder)
@@ -587,6 +588,23 @@ function handlePreToolUse(payload) {
         `never makes (its manifest); ask the coordinator.${readInstead}`,
     }));
     return;
+  }
+
+  // 5c. Heavy reminder (`heavy-reminder.cjs`): a build, a full test suite or a dependency install run
+  // without ~/.claude/scripts/heavy.cjs gets one reminder per conversation before agy's next step,
+  // workers included, since they run most builds.
+  if (claudeTool === 'Bash' && command) {
+    const res = runClaudeHook('heavy-reminder.cjs', {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command },
+      cwd,
+      session_id: payload.conversationId,
+    });
+    try {
+      const ctx = res.stdout && JSON.parse(res.stdout).hookSpecificOutput?.additionalContext;
+      if (ctx) queueEphemeral(payload, ctx);
+    } catch (_) { /* no reminder */ }
   }
 
   if (worker) return;
